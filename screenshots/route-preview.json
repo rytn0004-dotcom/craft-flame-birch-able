@@ -1,0 +1,36 @@
+{
+  "url": "http://127.0.0.1:8080/",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "狐仙塔防",
+      "hasCanvas": true,
+      "bodyTextLen": 423,
+      "bodyTextHash": "673cd4959cba14111e136a4013dc73162c28e3048c1e2df9936834fb9cd21de9",
+      "bodyTextPrefix": "UNDERWATER WARD 狐仙塔防 越後面的狐仙越強 · 強敵掉更多金幣 生命 20 金幣 180 波次 0/12 狐仙結",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/route-preview.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "狐仙塔防",
+      "hasCanvas": true,
+      "bodyTextLen": 404,
+      "bodyTextHash": "535ddbdf8bc84ba2901fd470d5f774a0451b7cf84caa0ee6e993ab4fb9c30ef0",
+      "bodyTextPrefix": "UNDERWATER WARD 狐仙塔防 生命 20 金幣 180 波次 0/12 狐仙結界 點地圖工房可先封路。戰鬥中放路障會",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/route-preview-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/route-preview.json"
+}

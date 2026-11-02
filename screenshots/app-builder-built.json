@@ -1,0 +1,38 @@
+{
+  "url": "http://127.0.0.1:8081/",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "狐仙塔防",
+      "hasCanvas": true,
+      "bodyTextLen": 386,
+      "bodyTextHash": "9623adc9978ff42b169f1ba05c26815c9cf75fbe951f6ec5370ccb218100830d",
+      "bodyTextPrefix": "UNDERWATER WARD 狐仙塔防 越後面的狐仙越強 · 強敵掉更多金幣 生命 20 金幣 180 波次 0/12 狐仙結",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-built.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "狐仙塔防",
+      "hasCanvas": true,
+      "bodyTextLen": 367,
+      "bodyTextHash": "a87a06c7de73b4fb17c1666987ade7e355ae602b7322315774e435df373fe5cf",
+      "bodyTextPrefix": "UNDERWATER WARD 狐仙塔防 生命 20 金幣 180 波次 0/12 狐仙結界 沿水道而來的妖潮會越來越強。放置狐",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-built-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/app-builder-built.json",
+  "divergesFromBaseline": false,
+  "baselineReasons": []
+}
