@@ -341,6 +341,15 @@ export function FoxTD() {
   useEffect(() => {
     bestiaryRef.current = bestiary;
   }, [bestiary]);
+  useEffect(() => {
+    brushRef.current = brush;
+  }, [brush]);
+
+  function gateHere(c: number, r: number) {
+    return (
+      entrancesRef.current.some((g) => g.c === c && g.r === r) || exitsRef.current.some((g) => g.c === c && g.r === r)
+    );
+  }
 
   const sim = useRef({
     towers: [] as Tower[],
@@ -361,6 +370,8 @@ export function FoxTD() {
     pointer: { x: 0, y: 0, down: false },
     blocked: new Set<string>(),
     heights: heightsRef.current,
+    cam: { x: 0, y: Math.max(0, defaultEntrances()[1].r * CELL - VIEWH / 2) },
+    drag: { on: false, sx: 0, sy: 0, cx: 0, cy: 0, moved: false },
   });
 
   useEffect(() => {
@@ -423,11 +434,11 @@ export function FoxTD() {
     };
 
     const applyStatus = (e: Enemy, special: Special, dmg: number) => {
-      if (special === "slow" || special === "ultimate" || special === "root") {
+      if (!e.noslow && (special === "slow" || special === "ultimate" || special === "root")) {
         e.slow = special === "root" ? 0.22 : special === "ultimate" ? 0.5 : 0.55;
         e.slowT = special === "root" ? 2.2 : 2.4;
       }
-      if (special === "root") e.rootT = Math.max(e.rootT, 0.55);
+      if (special === "root" && !e.noslow) e.rootT = Math.max(e.rootT, 0.55);
       if (special === "burn" || special === "ultimate") {
         e.burn = special === "ultimate" ? 16 : 9;
         e.burnT = 3;
@@ -442,7 +453,13 @@ export function FoxTD() {
     };
 
     const hitEnemy = (e: Enemy, dmg: number, special: Special, color: string, px: number, py: number) => {
-      const amount = dmg * (e.vulnT > 0 ? e.vuln : 1);
+      let amount = dmg * (e.vulnT > 0 ? e.vuln : 1);
+      if (e.armor) amount *= 0.65;
+      if (e.shield > 0) {
+        const used = Math.min(e.shield, amount);
+        e.shield -= used;
+        amount -= used;
+      }
       e.hp -= amount;
       float(px, py - 16, String(Math.round(amount)), "#fff");
       applyStatus(e, special, dmg);
@@ -453,7 +470,7 @@ export function FoxTD() {
         sim.current.rings.push({ x: px, y: py, r: 8, max: special === "ultimate" ? 96 : 74, color, life: 0.28 });
         for (const o of sim.current.enemies) {
           if (o === e) continue;
-          const p = posAt(o.dist);
+          const p = posAt(o.dist, o.route);
           if (Math.hypot(p.x - px, p.y - py) < (special === "ultimate" ? 92 : 70)) {
             o.hp -= amount * 0.65;
             applyStatus(o, special, dmg * 0.65);
@@ -461,16 +478,16 @@ export function FoxTD() {
         }
       }
       if (special === "chain") {
-        const p0 = posAt(e.dist);
+        const p0 = posAt(e.dist, e.route);
         const near = sim.current.enemies
           .filter((o) => o !== e)
-          .map((o) => ({ o, d: Math.hypot(posAt(o.dist).x - p0.x, posAt(o.dist).y - p0.y) }))
+          .map((o) => ({ o, d: Math.hypot(posAt(o.dist, o.route).x - p0.x, posAt(o.dist, o.route).y - p0.y) }))
           .filter((x) => x.d < 110)
           .sort((a, b) => a.d - b.d)
           .slice(0, 3);
         for (const n of near) {
           n.o.hp -= dmg * 0.55;
-          const np = posAt(n.o.dist);
+          const np = posAt(n.o.dist, n.o.route);
           burst(np.x, np.y, "#8ef0ff", 4, 1.2);
         }
       }
@@ -478,7 +495,7 @@ export function FoxTD() {
 
     const fire = (tw: Tower, target: Enemy) => {
       const def = TOWERS[tw.def];
-      const p = posAt(target.dist);
+      const p = posAt(target.dist, target.route);
       if (def.special === "pierce") {
         const ang = Math.atan2(p.y - tw.y, p.x - tw.x);
         sim.current.shots.push({
@@ -528,7 +545,8 @@ export function FoxTD() {
       if (s.queue.length) {
         while (s.queue.length && s.clock >= s.queue[0].at) {
           const job = s.queue.shift()!;
-          const et = ENEMY_TYPES[job.type];
+          const book = bestiaryRef.current;
+          const et = book[job.type] ?? book[0];
           const scale = 1 + (s.wave - 1) * 0.16;
           s.enemies.push({
             type: job.type,
@@ -549,8 +567,13 @@ export function FoxTD() {
             phase: Math.random() * 4,
             hurt: 0,
             face: 1,
-            melee: et.melee,
+            melee: et.traits.includes("melee"),
             atk: 0.4,
+            route: job.route ?? 0,
+            armor: et.traits.includes("armor"),
+            regen: et.traits.includes("regen") ? et.hp * 0.04 : 0,
+            noslow: et.traits.includes("noslow"),
+            shield: et.traits.includes("shield") ? et.hp * scale * 0.28 : 0,
           });
         }
       } else if (s.enemies.length === 0 && s.wave > 0) {
@@ -574,14 +597,15 @@ export function FoxTD() {
           e.burnT -= dt;
           e.hp -= e.burn * dt;
           if (Math.random() < 0.35) {
-            const p = posAt(e.dist);
+            const p = posAt(e.dist, e.route);
             burst(p.x, p.y, "#ff6a2a", 1, 0.8);
           }
         }
         if (e.hurt > 0) e.hurt -= dt;
+        if (e.regen > 0 && e.hp > 0 && e.hp < e.maxHp) e.hp = Math.min(e.maxHp, e.hp + e.regen * dt);
         let biting = false;
         if (e.melee && e.rootT <= 0) {
-          const p = posAt(e.dist);
+          const p = posAt(e.dist, e.route);
           let near: Tower | null = null;
           let nd = 48;
           for (const tw of s.towers) {
@@ -613,7 +637,7 @@ export function FoxTD() {
           const spd = e.speed * (e.slowT > 0 ? e.slow : 1);
           e.dist += spd * dt;
         }
-        if (e.dist >= live.len) {
+        if (e.dist >= routeLen(e.route)) {
           livesRef.current -= 1;
           setLives(livesRef.current);
           s.enemies.splice(i, 1);
@@ -626,7 +650,7 @@ export function FoxTD() {
         if (e.hp <= 0) {
           goldRef.current += e.gold;
           setGold(goldRef.current);
-          const p = posAt(e.dist);
+          const p = posAt(e.dist, e.route);
           float(p.x, p.y, `+${e.gold}`, "#ffd27a");
           burst(p.x, p.y, e.color, 12, 2.4);
           s.enemies.splice(i, 1);
@@ -638,7 +662,7 @@ export function FoxTD() {
         let best: Enemy | null = null;
         let bestDist = -1;
         for (const e of s.enemies) {
-          const p = posAt(e.dist);
+          const p = posAt(e.dist, e.route);
           const d = Math.hypot(p.x - tw.x, p.y - tw.y);
           if (d <= tw.range && e.dist > bestDist) {
             bestDist = e.dist;
@@ -649,7 +673,7 @@ export function FoxTD() {
           tw.cd = tw.cooldown;
           fire(tw, best);
         } else if (best) {
-          const p = posAt(best.dist);
+          const p = posAt(best.dist, best.route);
           tw.aim = Math.atan2(p.y - tw.y, p.x - tw.x);
         }
         if (tw.recoil > 0) tw.recoil -= dt;
@@ -660,7 +684,7 @@ export function FoxTD() {
         const sh = s.shots[i];
         sh.life -= dt;
         if (sh.special !== "pierce" && sh.target && s.enemies.includes(sh.target)) {
-          const p = posAt(sh.target.dist);
+          const p = posAt(sh.target.dist, sh.target.route);
           sh.tx = p.x;
           sh.ty = p.y;
         }
@@ -675,7 +699,7 @@ export function FoxTD() {
         if (sh.special === "pierce") {
           for (const e of s.enemies) {
             if (sh.pierced.has(e)) continue;
-            const p = posAt(e.dist);
+            const p = posAt(e.dist, e.route);
             if (Math.hypot(p.x - sh.x, p.y - sh.y) < e.r + 10) {
               sh.pierced.add(e);
               hitEnemy(e, sh.damage, sh.special, sh.color, p.x, p.y);
@@ -689,7 +713,7 @@ export function FoxTD() {
             let near: Enemy | null = null;
             let nd = 36;
             for (const e of s.enemies) {
-              const p = posAt(e.dist);
+              const p = posAt(e.dist, e.route);
               const dd = Math.hypot(p.x - sh.x, p.y - sh.y);
               if (dd < nd) {
                 nd = dd;
@@ -699,7 +723,7 @@ export function FoxTD() {
             if (near) victims.push(near);
           }
           for (const e of victims) {
-            const p = posAt(e.dist);
+            const p = posAt(e.dist, e.route);
             hitEnemy(e, sh.damage, sh.special, sh.color, p.x, p.y);
           }
           if (!victims.length && (sh.special === "aoe" || sh.special === "ultimate")) {
@@ -712,7 +736,7 @@ export function FoxTD() {
       function hitEnemyArea(sh: Shot) {
         sim.current.rings.push({ x: sh.x, y: sh.y, r: 6, max: 70, color: sh.color, life: 0.25 });
         for (const e of sim.current.enemies) {
-          const p = posAt(e.dist);
+          const p = posAt(e.dist, e.route);
           if (Math.hypot(p.x - sh.x, p.y - sh.y) < 70) hitEnemy(e, sh.damage, sh.special, sh.color, p.x, p.y);
         }
       }
@@ -754,28 +778,42 @@ export function FoxTD() {
       s.clock = 0;
       s.between = 0;
       const custom = wavesRef.current;
-      s.queue =
-        custom && custom.length
-          ? queueFromGroups(custom[Math.min(custom.length - 1, s.wave - 1)] ?? [])
-          : spawnPlan(s.wave);
+      const book = bestiaryRef.current;
+      if (custom && custom.length) {
+        const wave = custom[Math.min(custom.length - 1, s.wave - 1)];
+        s.queue = queueFromGroups(wave?.spawns ?? [], wave?.gates ?? [], routes.length, book.length);
+      } else {
+        s.queue = spawnPlan(s.wave);
+      }
       setWave(s.wave);
     };
     (canvas as HTMLCanvasElement & { __begin?: () => void }).__begin = beginWave;
 
     const draw = () => {
       const s = sim.current;
-      ctx.clearRect(0, 0, W, H);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, VIEWW, VIEWH);
       const bg = s.scene.bg;
       if (bg && bg.complete && bg.naturalWidth) {
-        ctx.drawImage(bg, 0, 0, W, H);
+        ctx.drawImage(bg, 0, 0, VIEWW, VIEWH);
       } else {
         ctx.fillStyle = "#0c2742";
-        ctx.fillRect(0, 0, W, H);
+        ctx.fillRect(0, 0, VIEWW, VIEWH);
       }
       ctx.fillStyle = "rgba(4, 14, 28, 0.28)";
-      ctx.fillRect(0, 0, W, H);
-
+      ctx.fillRect(0, 0, VIEWW, VIEWH);
       const t = performance.now() / 1000;
+      ctx.strokeStyle = "rgba(255,255,255,0.08)";
+      ctx.lineWidth = 18;
+      for (let i = 0; i < 4; i++) {
+        const x = 80 + i * 230 + Math.sin(t * 0.4 + i) * 12;
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x + 30, VIEWH);
+        ctx.stroke();
+      }
+      ctx.save();
+      ctx.translate(-s.cam.x, -s.cam.y);
       const decor: { key: string; x: number; y: number; w: number; h: number }[] = [
         { key: "coral", x: 40, y: 430, w: 120, h: 120 },
         { key: "pillar", x: 250, y: 40, w: 90, h: 150 },
@@ -794,51 +832,45 @@ export function FoxTD() {
 
       ctx.strokeStyle = "rgba(180,230,255,0.08)";
       ctx.lineWidth = 1;
-      if (pickRef.current !== null) {
-        for (let x = 0; x <= W; x += GRID) {
-          ctx.beginPath();
-          ctx.moveTo(x, 0);
-          ctx.lineTo(x, H);
-          ctx.stroke();
+      const x0 = Math.max(0, Math.floor(s.cam.x / CELL) - 1);
+      const y0 = Math.max(0, Math.floor(s.cam.y / CELL) - 1);
+      const x1 = Math.min(COLS - 1, Math.ceil((s.cam.x + VIEWW) / CELL) + 1);
+      const y1 = Math.min(ROWS - 1, Math.ceil((s.cam.y + VIEWH) / CELL) + 1);
+      if (pickRef.current !== null || workshopRef.current) {
+        ctx.beginPath();
+        for (let x = x0; x <= x1; x++) {
+          ctx.moveTo(x * CELL, y0 * CELL);
+          ctx.lineTo(x * CELL, (y1 + 1) * CELL);
         }
-        for (let y = 0; y <= H; y += GRID) {
-          ctx.beginPath();
-          ctx.moveTo(0, y);
-          ctx.lineTo(W, y);
-          ctx.stroke();
+        for (let y = y0; y <= y1; y++) {
+          ctx.moveTo(x0 * CELL, y * CELL);
+          ctx.lineTo((x1 + 1) * CELL, y * CELL);
         }
+        ctx.stroke();
       }
 
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
-      ctx.strokeStyle = "rgba(255,236,190,0.28)";
-      ctx.lineWidth = 36;
-      ctx.beginPath();
-      if (live.pts.length) {
+      routes.forEach((live, idx) => {
+        ctx.beginPath();
+        if (!live.pts.length) return;
         ctx.moveTo(live.pts[0].x, live.pts[0].y);
         for (let i = 1; i < live.pts.length; i++) ctx.lineTo(live.pts[i].x, live.pts[i].y);
-      }
-      ctx.stroke();
-      ctx.strokeStyle = "rgba(120,210,255,0.22)";
-      ctx.lineWidth = 16;
-      ctx.stroke();
+        ctx.strokeStyle = idx % 2 === 0 ? "rgba(255,236,190,0.28)" : "rgba(180,220,255,0.28)";
+        ctx.lineWidth = 28;
+        ctx.stroke();
+        ctx.strokeStyle = "rgba(120,210,255,0.22)";
+        ctx.lineWidth = 12;
+        ctx.stroke();
+      });
 
       ctx.fillStyle = "rgba(210,245,255,0.35)";
-      for (let i = 0; i < 22; i++) {
-        const bx = (i * 137 + t * 22) % W;
-        const by = (H - ((i * 90 + t * 36) % (H + 40)));
+      for (let i = 0; i < 18; i++) {
+        const bx = s.cam.x + ((i * 137 + t * 22) % VIEWW);
+        const by = s.cam.y + ((i * 90 + t * 36) % VIEWH);
         ctx.beginPath();
         ctx.arc(bx, by, 2 + (i % 4), 0, Math.PI * 2);
         ctx.fill();
-      }
-      ctx.strokeStyle = "rgba(255,255,255,0.08)";
-      ctx.lineWidth = 18;
-      for (let i = 0; i < 4; i++) {
-        const x = 80 + i * 230 + Math.sin(t * 0.4 + i) * 12;
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x + 30, H);
-        ctx.stroke();
       }
 
       if (pickRef.current !== null && !stakeRef.current && phaseRef.current === "play") {
@@ -865,11 +897,10 @@ export function FoxTD() {
       const pads = ["", "rgba(86, 176, 196, 0.38)", "rgba(120, 214, 230, 0.5)", "rgba(255, 214, 140, 0.55)"];
       const lips = ["", "rgba(40, 90, 110, 0.55)", "rgba(50, 120, 140, 0.6)", "rgba(150, 100, 40, 0.55)"];
       ctx.textAlign = "center";
-      for (let r = 0; r < ROWS; r++) {
-        for (let c = 0; c < COLS; c++) {
+      for (let r = y0; r <= y1; r++) {
+        for (let c = x0; c <= x1; c++) {
           const h = cellHeight(s.heights, c, r);
-          const show = h > 0 || workshopRef.current;
-          if (!show) continue;
+          if (h <= 0) continue;
           const x = c * CELL;
           const y = r * CELL;
           const lift = h * 5;
@@ -880,31 +911,36 @@ export function FoxTD() {
             ctx.fillRect(x + 4, y + 4 - lift, CELL - 8, CELL - 16);
             ctx.strokeStyle = h === 3 ? "rgba(255,230,170,0.8)" : "rgba(190,240,255,0.45)";
             ctx.strokeRect(x + 4, y + 4 - lift, CELL - 8, CELL - 16);
-          } else if (workshopRef.current) {
-            ctx.strokeStyle = "rgba(180,220,240,0.12)";
-            ctx.strokeRect(x + 4, y + 4, CELL - 8, CELL - 8);
           }
-          if (workshopRef.current || h > 0) {
-            ctx.fillStyle = h === 0 ? "rgba(210,235,255,0.35)" : h === 3 ? "#fff4d2" : "#e9fbff";
-            ctx.font = "bold 11px sans-serif";
-            ctx.fillText(String(h), x + CELL / 2, y + 16 - lift);
-          }
+          ctx.fillStyle = h === 3 ? "#fff4d2" : "#e9fbff";
+          ctx.font = "bold 11px sans-serif";
+          ctx.fillText(String(h), x + CELL / 2, y + 16 - lift);
         }
       }
       ctx.textAlign = "left";
 
       for (const key of s.blocked) {
         const [c, r] = key.split(",").map(Number);
+        if (c < x0 || c > x1 || r < y0 || r > y1) continue;
         ctx.fillStyle = "rgba(18, 14, 28, 0.72)";
         ctx.fillRect(c * CELL + 4, r * CELL + 4, CELL - 8, CELL - 8);
         ctx.strokeStyle = "rgba(255, 196, 150, 0.55)";
         ctx.strokeRect(c * CELL + 4, r * CELL + 4, CELL - 8, CELL - 8);
       }
       ctx.font = "bold 12px sans-serif";
-      ctx.fillStyle = "#b7ecff";
-      ctx.fillText("入口", SPAWN.c * CELL + 4, SPAWN.r * CELL + 24);
-      ctx.fillStyle = "#ffc0d4";
-      ctx.fillText("終點", GOAL.c * CELL + 2, GOAL.r * CELL + 24);
+      entrancesRef.current.forEach((g, i) => {
+        ctx.fillStyle = "rgba(80, 180, 220, 0.85)";
+        ctx.fillRect(g.c * CELL + 2, g.r * CELL + 2, CELL - 4, CELL - 4);
+        ctx.fillStyle = "#e8fbff";
+        ctx.fillText(String(i + 1), g.c * CELL + CELL / 2, g.r * CELL + 20);
+      });
+      exitsRef.current.forEach((g, i) => {
+        ctx.fillStyle = "rgba(220, 90, 130, 0.85)";
+        ctx.fillRect(g.c * CELL + 2, g.r * CELL + 2, CELL - 4, CELL - 4);
+        ctx.fillStyle = "#ffe4ee";
+        ctx.fillText(String(i + 1), g.c * CELL + CELL / 2, g.r * CELL + 20);
+      });
+      ctx.textAlign = "left";
 
       if (selRef.current !== null && s.towers[selRef.current]) {
         const tw = s.towers[selRef.current];
@@ -1016,8 +1052,8 @@ export function FoxTD() {
 
       const ready = (img?: HTMLImageElement) => !!img && img.complete && img.naturalWidth > 0;
       for (const e of s.enemies) {
-        const p = posAt(e.dist);
-        const ahead = posAt(Math.min(live.len, e.dist + 12));
+        const p = posAt(e.dist, e.route);
+        const ahead = posAt(Math.min(routeLen(e.route), e.dist + 12), e.route);
         e.face = ahead.x >= p.x ? 1 : -1;
         const setName = e.type === 5 ? "king" : e.type <= 1 ? "imp" : e.type <= 3 ? "brute" : "boss";
         const frames = s.sheets[setName] || [];
@@ -1145,7 +1181,7 @@ export function FoxTD() {
     const commitBlocks = (next: Set<string>) => {
       const cells = findPath(next);
       if (!cells) return false;
-      const marks = sim.current.enemies.map((e) => posAt(e.dist));
+      const marks = sim.current.enemies.map((e) => posAt(e.dist, e.route));
       loadRoute(pointsOf(cells));
       sim.current.enemies.forEach((e, i) => {
         e.dist = Math.min(live.len - 0.01, projectDist(marks[i].x, marks[i].y));
