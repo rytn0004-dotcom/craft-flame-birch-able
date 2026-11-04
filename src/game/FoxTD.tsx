@@ -1,21 +1,40 @@
 import { useEffect, useRef, useState } from "react";
-import { CELL, COLS, findPath, GOAL, pointsOf, ROWS, SPAWN, cellKey } from "./grid";
-import { ENEMY_TYPES, TOWERS, type Special, type TowerDef } from "./types";
+import { CELL, COLS, cellHeight, cellKey, defaultEntrances, defaultExits, emptyHeights, pathsForGates, pointsOf, presetMaps, rangeBonus, ROWS, sameCell, VIEW_H, VIEW_W, WORLD_H, WORLD_W, type Cell, type MapLayout } from "./grid";
+import { ENEMY_TYPES, stockBestiary, TOWERS, TRAIT_INFO, type EnemyDef, type Special, type TowerDef, type Trait } from "./types";
 
-const W = COLS * CELL;
-const H = ROWS * CELL;
+const VIEWW = VIEW_W;
+const VIEWH = VIEW_H;
 const GRID = CELL;
-const MAX_WAVE = 12;
+const MAX_WAVE = 20;
 const STAKE_COST = 40;
+const MAP_KEY = "foxtd-maps-v1";
+const LAST_KEY = "foxtd-last-layout";
+
+function readSavedMaps(): MapLayout[] {
+  try {
+    const raw = localStorage.getItem(MAP_KEY);
+    if (!raw) return [];
+    const data = JSON.parse(raw) as MapLayout[];
+    if (!Array.isArray(data)) return [];
+    return data.filter((m) => m && typeof m.name === "string" && Array.isArray(m.heights)).slice(0, 8);
+  } catch {
+    return [];
+  }
+}
+
+function writeSavedMaps(maps: MapLayout[]) {
+  localStorage.setItem(MAP_KEY, JSON.stringify(maps.slice(0, 8)));
+}
+
+function rememberLayout(layout: MapLayout) {
+  localStorage.setItem(LAST_KEY, JSON.stringify(layout));
+}
 
 type Seg = { ax: number; ay: number; bx: number; by: number; len: number; start: number };
-const live = {
-  pts: [] as { x: number; y: number }[],
-  segs: [] as Seg[],
-  len: 1,
-};
+type RouteGeom = { pts: { x: number; y: number }[]; segs: Seg[]; len: number };
+const routes: RouteGeom[] = [];
 
-function loadRoute(pts: { x: number; y: number }[]) {
+function geomOf(pts: { x: number; y: number }[]): RouteGeom {
   const segs: Seg[] = [];
   let total = 0;
   for (let i = 0; i < pts.length - 1; i++) {
@@ -25,12 +44,17 @@ function loadRoute(pts: { x: number; y: number }[]) {
     segs.push({ ax: a.x, ay: a.y, bx: b.x, by: b.y, len, start: total });
     total += len;
   }
-  live.pts = pts;
-  live.segs = segs;
-  live.len = Math.max(1, total);
+  return { pts, segs, len: Math.max(1, total) };
 }
 
-function posAt(dist: number) {
+function loadRoutes(paths: Cell[][]) {
+  routes.length = 0;
+  for (const cells of paths) routes.push(geomOf(pointsOf(cells)));
+  if (!routes.length) routes.push(geomOf([{ x: CELL / 2, y: CELL / 2 }]));
+}
+
+function posAt(dist: number, route = 0) {
+  const live = routes[route] ?? routes[0];
   const d = Math.max(0, Math.min(live.len, dist));
   for (const s of live.segs) {
     if (d <= s.start + s.len) {
@@ -42,11 +66,17 @@ function posAt(dist: number) {
   return { x: last.x, y: last.y };
 }
 
-function projectDist(x: number, y: number) {
+function routeLen(route = 0) {
+  return (routes[route] ?? routes[0])?.len ?? 1;
+}
+
+function projectDist(x: number, y: number, route = 0) {
+  const live = routes[route] ?? routes[0];
   let best = 0;
   let bd = 1e9;
-  for (let d = 0; d <= live.len; d += 10) {
-    const p = posAt(d);
+  const step = Math.max(16, Math.floor(live.len / 400));
+  for (let d = 0; d <= live.len; d += step) {
+    const p = posAt(d, route);
     const dd = Math.hypot(p.x - x, p.y - y);
     if (dd < bd) {
       bd = dd;
@@ -56,7 +86,7 @@ function projectDist(x: number, y: number) {
   return best;
 }
 
-loadRoute(pointsOf(findPath(new Set())!));
+loadRoutes(pathsForGates(new Set(), defaultEntrances(), defaultExits()) ?? [[defaultEntrances()[0]]]);
 
 type Enemy = {
   type: number;
@@ -79,6 +109,11 @@ type Enemy = {
   face: number;
   melee: boolean;
   atk: number;
+  route: number;
+  armor: boolean;
+  regen: number;
+  noslow: boolean;
+  shield: number;
 };
 
 type Tower = {
@@ -120,35 +155,108 @@ type Ring = { x: number; y: number; r: number; max: number; color: string; life:
 type Pop = { x: number; y: number; age: number; scale: number };
 
 const SPRITE_SETS = {
-  imp: [0, 1, 2, 3].map((i) => `/anim/imp/${i}.png`),
-  brute: [0, 1, 2, 3].map((i) => `/anim/brute/${i}.png`),
-  boss: [0, 1, 2, 3].map((i) => `/anim/boss/${i}.png`),
-  bolt: [0, 1, 2, 3].map((i) => `/anim/bolt/${i}.png`),
-  hit: [0, 1, 2, 3].map((i) => `/anim/hit/${i}.png`),
+  imp: [0, 1, 2, 3].map((i) => `/anim/imp/${i}.png?v=4`),
+  brute: [0, 1, 2, 3].map((i) => `/anim/brute/${i}.png?v=4`),
+  boss: [0, 1, 2, 3].map((i) => `/anim/boss/${i}.png?v=4`),
+  king: [0, 1].map((i) => `/anim/king/${i}.png?v=4`),
+  bolt: [0, 1, 2, 3].map((i) => `/anim/bolt/${i}.png?v=4`),
+  hit: [0, 1, 2, 3].map((i) => `/anim/hit/${i}.png?v=4`),
 };
+
+const TOWER_ANIMS: string[][] = TOWERS.map((_, i) =>
+  i < 5 ? [0, 1, 2, 3, 4, 5, 6, 7].map((n) => `/anim/towers/t${String(i + 1).padStart(2, "0")}/${n}.jpg`) : [],
+);
+
+function pingIndex(count: number, step: number) {
+  if (count <= 1) return 0;
+  const span = count * 2 - 2;
+  const k = ((step % span) + span) % span;
+  return k < count ? k : span - k;
+}
+
+function AlivePortrait({ frames }: { frames: string[] }) {
+  const [step, setStep] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => setStep((n) => n + 1), 130);
+    return () => window.clearInterval(id);
+  }, []);
+  return <img src={frames[pingIndex(frames.length, step)] ?? frames[0]} alt="" />;
+}
 
 type Phase = "ready" | "play" | "win" | "lose";
 
 function spawnPlan(wave: number) {
-  const list: { type: number; at: number }[] = [];
+  const list: { type: number; at: number; route: number }[] = [];
   const count = 6 + wave * 2;
   const base = Math.min(ENEMY_TYPES.length - 2, Math.floor((wave - 1) / 2));
   let t = 0.4;
+  let n = 0;
+  const lanes = Math.max(1, routes.length);
   for (let i = 0; i < count; i++) {
     let type = base;
     if (Math.random() < 0.22 && type > 0) type -= 1;
     if (Math.random() < 0.18 + wave * 0.02) type = Math.min(ENEMY_TYPES.length - 2, type + 1);
-    list.push({ type, at: t });
+    list.push({ type, at: t, route: n % lanes });
+    n += 1;
     t += Math.max(0.28, 0.72 - wave * 0.03);
   }
   if (wave % 5 === 0) {
-    list.push({ type: 6, at: t + 0.4 });
-    list.push({ type: 6, at: t + 1.0 });
+    list.push({ type: Math.min(ENEMY_TYPES.length - 1, 6), at: t + 0.4, route: n % lanes });
+    n += 1;
+    list.push({ type: Math.min(ENEMY_TYPES.length - 1, 8), at: t + 1.0, route: n % lanes });
   }
   if (wave % 4 === 0) {
-    list.push({ type: Math.min(5, 2 + Math.floor(wave / 4)), at: t + 0.6 });
+    list.push({ type: Math.min(5, 2 + Math.floor(wave / 4)), at: t + 0.6, route: n % lanes });
   }
   return list;
+}
+
+type WaveGroup = { type: number; count: number };
+type WaveDef = { spawns: WaveGroup[]; gates: number[] };
+const RUN_KEY = "foxtd-run-v1";
+
+function defaultWaves(): WaveDef[] {
+  const n = stockBestiary().length;
+  return Array.from({ length: MAX_WAVE }, (_, i) => {
+    const wave = i + 1;
+    const base = Math.min(n - 1, Math.floor((wave - 1) / 2));
+    const spawns: WaveGroup[] = [{ type: Math.min(base, 4), count: 6 + wave }];
+    if (wave > 2) spawns.push({ type: Math.max(0, base - 1), count: 3 });
+    if (wave % 4 === 0) spawns.push({ type: 6, count: 2 });
+    if (wave % 5 === 0) spawns.push({ type: 5, count: 1 });
+    if (wave > 8) spawns.push({ type: 7, count: 2 });
+    if (wave > 12) spawns.push({ type: 8, count: 3 });
+    if (wave >= 18) spawns.push({ type: 9, count: 1 });
+    return { spawns, gates: [] };
+  });
+}
+
+function queueFromGroups(groups: WaveGroup[], gates: number[], routeCount: number, typeCount: number) {
+  const list: { type: number; at: number; route: number }[] = [];
+  const usable = (gates.length ? gates : Array.from({ length: Math.max(1, routeCount) }, (_, i) => i)).filter(
+    (i) => i >= 0 && i < Math.max(1, routeCount),
+  );
+  const picks = usable.length ? usable : [0];
+  let spawned = 0;
+  let t = 0.35;
+  for (const g of groups) {
+    const n = Math.max(0, Math.min(40, Math.round(g.count)));
+    const type = Math.max(0, Math.min(typeCount - 1, g.type));
+    for (let i = 0; i < n; i++) {
+      list.push({ type, at: t, route: picks[spawned % picks.length] });
+      spawned += 1;
+      t += 0.38;
+    }
+  }
+  return list;
+}
+
+function blit(ctx: CanvasRenderingContext2D, img: HTMLImageElement, dx: number, dy: number, dw: number, dh: number) {
+  const sw = img.naturalWidth;
+  const sh = img.naturalHeight;
+  if (!sw || !sh) return;
+  const m = Math.max(1, Math.floor(Math.min(sw, sh) * 0.03));
+  ctx.drawImage(img, m, m, sw - m * 2, sh - m * 2, dx, dy, dw, dh);
 }
 
 export function FoxTD() {
@@ -166,6 +274,8 @@ export function FoxTD() {
   const [staking, setStaking] = useState(false);
   const [workshop, setWorkshop] = useState(false);
   const [paused, setPaused] = useState(false);
+  const [waves, setWaves] = useState<WaveDef[] | null>(null);
+  const [editWave, setEditWave] = useState(0);
   const goldRef = useRef(180);
   const livesRef = useRef(20);
   const phaseRef = useRef<Phase>("ready");
@@ -176,7 +286,21 @@ export function FoxTD() {
   const stakeRef = useRef(false);
   const workshopRef = useRef(false);
   const pausedRef = useRef(false);
+  const wavesRef = useRef<WaveDef[] | null>(null);
   const mapRef = useRef(new Set<string>());
+  const heightsRef = useRef<number[]>(emptyHeights());
+  const entrancesRef = useRef<Cell[]>(defaultEntrances());
+  const exitsRef = useRef<Cell[]>(defaultExits());
+  const bestiaryRef = useRef<EnemyDef[]>(stockBestiary());
+  const toolRef = useRef<"block" | "height" | "entry" | "exit">("block");
+  const brushRef = useRef(1);
+  const [savedMaps, setSavedMaps] = useState<MapLayout[]>(() => readSavedMaps());
+  const [mapName, setMapName] = useState("我的地圖");
+  const [activeMap, setActiveMap] = useState("潮坪");
+  const [tool, setTool] = useState<"block" | "height" | "entry" | "exit">("block");
+  const [brush, setBrush] = useState(1);
+  const [bestiary, setBestiary] = useState<EnemyDef[]>(() => stockBestiary());
+  const [editMob, setEditMob] = useState(0);
 
   useEffect(() => {
     goldRef.current = gold;
@@ -208,6 +332,15 @@ export function FoxTD() {
   useEffect(() => {
     pausedRef.current = paused;
   }, [paused]);
+  useEffect(() => {
+    wavesRef.current = waves;
+  }, [waves]);
+  useEffect(() => {
+    toolRef.current = tool;
+  }, [tool]);
+  useEffect(() => {
+    bestiaryRef.current = bestiary;
+  }, [bestiary]);
 
   const sim = useRef({
     towers: [] as Tower[],
@@ -217,15 +350,17 @@ export function FoxTD() {
     floats: [] as Floater[],
     rings: [] as Ring[],
     pops: [] as Pop[],
-    queue: [] as { type: number; at: number }[],
+    queue: [] as { type: number; at: number; route: number }[],
     clock: 0,
     between: 0,
     wave: 0,
     images: [] as HTMLImageElement[],
+    towerFrames: [] as HTMLImageElement[][],
     sheets: {} as Record<string, HTMLImageElement[]>,
     scene: {} as Record<string, HTMLImageElement>,
     pointer: { x: 0, y: 0, down: false },
     blocked: new Set<string>(),
+    heights: heightsRef.current,
   });
 
   useEffect(() => {
@@ -235,6 +370,13 @@ export function FoxTD() {
       return img;
     });
     sim.current.images = imgs;
+    sim.current.towerFrames = TOWER_ANIMS.map((urls) =>
+      urls.map((src) => {
+        const img = new Image();
+        img.src = src;
+        return img;
+      }),
+    );
     const sheets: Record<string, HTMLImageElement[]> = {};
     for (const [key, urls] of Object.entries(SPRITE_SETS)) {
       sheets[key] = urls.map((src) => {
@@ -247,8 +389,8 @@ export function FoxTD() {
     const scene: Record<string, HTMLImageElement> = {};
     for (const [key, src] of Object.entries({
       bg: "/scene/bg.jpg",
-      coral: "/scene/coral.png",
-      pillar: "/scene/pillar.png",
+      coral: "/scene/coral.png?v=4",
+      pillar: "/scene/pillar.png?v=4",
     })) {
       const img = new Image();
       img.src = src;
@@ -413,7 +555,8 @@ export function FoxTD() {
         }
       } else if (s.enemies.length === 0 && s.wave > 0) {
         s.between += dt;
-        if (s.wave >= MAX_WAVE && !endlessRef.current) {
+        const cap = wavesRef.current?.length || MAX_WAVE;
+        if (s.wave >= cap && !endlessRef.current) {
           phaseRef.current = "win";
           setPhase("win");
         } else if (s.between > (endlessRef.current ? 4 : 7)) {
@@ -604,12 +747,17 @@ export function FoxTD() {
 
     const beginWave = () => {
       const s = sim.current;
-      if (!endlessRef.current && s.wave >= MAX_WAVE) return;
+      const cap = wavesRef.current?.length || MAX_WAVE;
+      if (!endlessRef.current && s.wave >= cap) return;
       if (s.queue.length || s.enemies.length) return;
       s.wave += 1;
       s.clock = 0;
       s.between = 0;
-      s.queue = spawnPlan(s.wave);
+      const custom = wavesRef.current;
+      s.queue =
+        custom && custom.length
+          ? queueFromGroups(custom[Math.min(custom.length - 1, s.wave - 1)] ?? [])
+          : spawnPlan(s.wave);
       setWave(s.wave);
     };
     (canvas as HTMLCanvasElement & { __begin?: () => void }).__begin = beginWave;
@@ -640,7 +788,7 @@ export function FoxTD() {
         if (!img || !img.complete || !img.naturalWidth) continue;
         const bob = Math.sin(t * 1.3 + d.x) * 3;
         ctx.globalAlpha = 0.9;
-        ctx.drawImage(img, d.x, d.y + bob, d.w, d.h);
+        blit(ctx, img, d.x, d.y + bob, d.w, d.h);
         ctx.globalAlpha = 1;
       }
 
@@ -699,14 +847,51 @@ export function FoxTD() {
         const gy = Math.floor(s.pointer.y / GRID);
         const px = gx * GRID + GRID / 2;
         const py = gy * GRID + GRID / 2;
+        const bonus = rangeBonus(cellHeight(s.heights, gx, gy));
         const ok = canPlace(gx, gy);
         ctx.beginPath();
-        ctx.arc(px, py, def.range, 0, Math.PI * 2);
+        ctx.arc(px, py, def.range + bonus, 0, Math.PI * 2);
         ctx.fillStyle = ok ? "rgba(120,200,255,0.1)" : "rgba(255,80,80,0.12)";
         ctx.fill();
         ctx.strokeStyle = ok ? "rgba(140,210,255,0.55)" : "rgba(255,90,90,0.6)";
         ctx.stroke();
+        if (bonus > 0 && ok) {
+          ctx.fillStyle = "#ffe08a";
+          ctx.font = "bold 12px sans-serif";
+          ctx.fillText(`高地 +${bonus}`, px - 28, py - 34);
+        }
       }
+
+      const pads = ["", "rgba(86, 176, 196, 0.38)", "rgba(120, 214, 230, 0.5)", "rgba(255, 214, 140, 0.55)"];
+      const lips = ["", "rgba(40, 90, 110, 0.55)", "rgba(50, 120, 140, 0.6)", "rgba(150, 100, 40, 0.55)"];
+      ctx.textAlign = "center";
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+          const h = cellHeight(s.heights, c, r);
+          const show = h > 0 || workshopRef.current;
+          if (!show) continue;
+          const x = c * CELL;
+          const y = r * CELL;
+          const lift = h * 5;
+          if (h > 0) {
+            ctx.fillStyle = lips[h];
+            ctx.fillRect(x + 4, y + 10 - lift, CELL - 8, CELL - 12);
+            ctx.fillStyle = pads[h];
+            ctx.fillRect(x + 4, y + 4 - lift, CELL - 8, CELL - 16);
+            ctx.strokeStyle = h === 3 ? "rgba(255,230,170,0.8)" : "rgba(190,240,255,0.45)";
+            ctx.strokeRect(x + 4, y + 4 - lift, CELL - 8, CELL - 16);
+          } else if (workshopRef.current) {
+            ctx.strokeStyle = "rgba(180,220,240,0.12)";
+            ctx.strokeRect(x + 4, y + 4, CELL - 8, CELL - 8);
+          }
+          if (workshopRef.current || h > 0) {
+            ctx.fillStyle = h === 0 ? "rgba(210,235,255,0.35)" : h === 3 ? "#fff4d2" : "#e9fbff";
+            ctx.font = "bold 11px sans-serif";
+            ctx.fillText(String(h), x + CELL / 2, y + 16 - lift);
+          }
+        }
+      }
+      ctx.textAlign = "left";
 
       for (const key of s.blocked) {
         const [c, r] = key.split(",").map(Number);
@@ -723,8 +908,9 @@ export function FoxTD() {
 
       if (selRef.current !== null && s.towers[selRef.current]) {
         const tw = s.towers[selRef.current];
+        const py = tw.y - cellHeight(s.heights, tw.gx, tw.gy) * 5;
         ctx.beginPath();
-        ctx.arc(tw.x, tw.y, tw.range, 0, Math.PI * 2);
+        ctx.arc(tw.x, py, tw.range, 0, Math.PI * 2);
         ctx.fillStyle = "rgba(255,170,210,0.08)";
         ctx.fill();
         ctx.strokeStyle = "rgba(255,170,210,0.45)";
@@ -732,11 +918,12 @@ export function FoxTD() {
       }
 
       for (let i = 0; i < s.towers.length; i++) {
-        const tw = s.towers[i];
+        const src = s.towers[i];
+        const tw = { ...src, y: src.y - cellHeight(s.heights, src.gx, src.gy) * 5 };
         if (tw.stake) {
           const img = s.scene.pillar;
           const bob = Math.sin(t * 2 + i) * 2;
-          if (img && img.complete && img.naturalWidth) ctx.drawImage(img, tw.x - 16, tw.y - 28 + bob, 32, 48);
+          if (img && img.complete && img.naturalWidth) blit(ctx, img, tw.x - 16, tw.y - 28 + bob, 32, 48);
           else {
             ctx.fillStyle = "#d7c4a8";
             ctx.fillRect(tw.x - 8, tw.y - 16, 16, 32);
@@ -744,14 +931,18 @@ export function FoxTD() {
           continue;
         }
         const def = TOWERS[tw.def];
-        const bob = Math.sin(t * 2.4 + i) * 3;
+        const frames = s.towerFrames[tw.def] || [];
+        const hasAnim = frames.length > 1;
+        const bob = Math.sin(t * (hasAnim ? 2.2 : 2.8) + i) * (hasAnim ? 2.5 : 5);
         const kick = tw.recoil > 0 ? tw.recoil / 0.22 : 0;
         const sh = tw.shake > 0 ? (Math.random() - 0.5) * 8 : 0;
         const ox = Math.cos(tw.aim || 0) * kick * 10 + sh;
         const oy = Math.sin(tw.aim || 0) * kick * 10;
+        const breathe = hasAnim ? 1 : 1 + Math.sin(t * 2.4 + i) * 0.05;
         ctx.save();
         ctx.translate(tw.x + ox, tw.y + bob + oy);
-        ctx.scale(1 + kick * 0.12, 1 - kick * 0.08);
+        ctx.rotate(Math.sin(t * 1.5 + i * 0.7) * (hasAnim ? 0.03 : 0.07));
+        ctx.scale((1 + kick * 0.12) * breathe, (1 - kick * 0.08) * (2 - breathe));
         ctx.beginPath();
         ctx.ellipse(0, 22, 18, 6, 0, 0, Math.PI * 2);
         ctx.fillStyle = "rgba(0,0,0,0.35)";
@@ -763,7 +954,12 @@ export function FoxTD() {
         ctx.strokeStyle = def.color;
         ctx.lineWidth = 2.5;
         ctx.stroke();
-        const img = s.images[tw.def];
+        let img = s.images[tw.def];
+        if (hasAnim) {
+          const idx = pingIndex(frames.length, Math.floor(t * (tw.recoil > 0 ? 14 : 6) + i));
+          const fr = frames[idx];
+          if (fr && fr.complete && fr.naturalWidth) img = fr;
+        }
         if (img && img.complete && img.naturalWidth) {
           ctx.save();
           ctx.beginPath();
@@ -783,6 +979,28 @@ export function FoxTD() {
         ctx.arc(30, 0, 4, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
+        if (!hasAnim) {
+          const motes = def.special === "ultimate" ? 6 : 4;
+          for (let k = 0; k < motes; k++) {
+            let sx: number;
+            let sy: number;
+            if (def.special === "burn" || def.special === "ultimate" || def.special === "aoe") {
+              const life = (t * 0.55 + k / motes) % 1;
+              sx = Math.sin(k * 2.2 + t * 1.4) * 16;
+              sy = 18 - life * 48;
+            } else {
+              const a = t * (def.special === "rapid" ? 2.4 : 1.3) + (k * Math.PI * 2) / motes;
+              sx = Math.cos(a) * 30;
+              sy = Math.sin(a) * 14;
+            }
+            ctx.globalAlpha = 0.35 + 0.45 * Math.abs(Math.sin(t * 3 + k));
+            ctx.fillStyle = def.color;
+            ctx.beginPath();
+            ctx.arc(tw.x + sx, tw.y + bob + sy, 2.2, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          ctx.globalAlpha = 1;
+        }
         if (tw.level > 1) {
           ctx.fillStyle = "#ffd27a";
           ctx.font = "bold 11px sans-serif";
@@ -801,16 +1019,22 @@ export function FoxTD() {
         const p = posAt(e.dist);
         const ahead = posAt(Math.min(live.len, e.dist + 12));
         e.face = ahead.x >= p.x ? 1 : -1;
-        const setName = e.type <= 1 ? "imp" : e.type <= 3 ? "brute" : "boss";
+        const setName = e.type === 5 ? "king" : e.type <= 1 ? "imp" : e.type <= 3 ? "brute" : "boss";
         const frames = s.sheets[setName] || [];
-        const frame = frames[Math.floor(t * 7 + e.dist / 20 + e.phase) % 4];
-        const size = e.r * 3.3;
+        const n = Math.max(1, frames.length);
+        const frame =
+          e.type === 5
+            ? frames[Math.floor(e.dist / 18) % n]
+            : frames[Math.floor(t * 7 + e.dist / 20 + e.phase) % n];
+        const size = e.type === 5 ? e.r * 5.1 : e.r * 3.3;
+        const stepBob = e.type === 5 ? Math.sin((e.dist / 18) * Math.PI) * 3 : 0;
         const squash = e.hurt > 0 ? 0.68 : 1;
         const knock = e.hurt > 0 ? -e.face * 14 * (e.hurt / 0.22) : 0;
         ctx.save();
-        ctx.translate(p.x + knock, p.y + (e.hurt > 0 ? 6 : 0));
+        ctx.translate(p.x + knock, p.y + (e.hurt > 0 ? 6 : 0) + stepBob);
         ctx.scale(e.face * (e.melee && e.atk < 0.2 ? 1.12 : 1) * squash, e.rootT > 0 ? 0.9 : 1 / squash);
-        if (ready(frame)) ctx.drawImage(frame, -size / 2, -size * 0.72, size, size);
+        const drawY = e.type === 5 ? -size + 8 : -size * 0.72;
+        if (ready(frame)) blit(ctx, frame, -size / 2, drawY, size, size);
         else {
           ctx.fillStyle = e.color;
           ctx.beginPath();
@@ -820,7 +1044,7 @@ export function FoxTD() {
         if (e.hurt > 0 && ready(frame)) {
           ctx.globalCompositeOperation = "lighter";
           ctx.globalAlpha = Math.min(0.9, e.hurt * 4);
-          ctx.drawImage(frame, -size / 2, -size * 0.72, size, size);
+          blit(ctx, frame, -size / 2, drawY, size, size);
         }
         ctx.restore();
         if (e.slowT > 0) {
@@ -856,7 +1080,7 @@ export function FoxTD() {
         ctx.save();
         ctx.translate(sh.x, sh.y);
         ctx.rotate(ang);
-        if (ready(bframe)) ctx.drawImage(bframe, -16, -16, 32, 32);
+        if (ready(bframe)) blit(ctx, bframe, -16, -16, 32, 32);
         else {
           ctx.fillStyle = sh.color;
           ctx.beginPath();
@@ -872,7 +1096,7 @@ export function FoxTD() {
         const fr = hits[idx];
         if (!ready(fr)) continue;
         const sz = 64 * pop.scale;
-        ctx.drawImage(fr, pop.x - sz / 2, pop.y - sz / 2, sz, sz);
+        blit(ctx, fr, pop.x - sz / 2, pop.y - sz / 2, sz, sz);
       }
 
       for (const r of s.rings) {
@@ -930,6 +1154,30 @@ export function FoxTD() {
       return true;
     };
     (canvas as HTMLCanvasElement & { __commit?: (n: Set<string>) => boolean }).__commit = commitBlocks;
+    (canvas as HTMLCanvasElement & { __applyMap?: (b: string[], h: number[]) => boolean }).__applyMap = (blocked, heights) => {
+      const next = new Set(blocked);
+      if (!commitBlocks(next)) return false;
+      const h = heightsRef.current;
+      for (let i = 0; i < COLS * ROWS; i++) h[i] = Math.max(0, Math.min(3, Math.round(heights[i] ?? 0)));
+      sim.current.heights = h;
+      mapRef.current = next;
+      return true;
+    };
+    try {
+      const raw = localStorage.getItem(LAST_KEY);
+      if (raw) {
+        const saved = JSON.parse(raw) as MapLayout;
+        if (saved && Array.isArray(saved.heights)) {
+          (canvas as HTMLCanvasElement & { __applyMap?: (b: string[], h: number[]) => boolean }).__applyMap?.(
+            saved.blocked ?? [],
+            saved.heights,
+          );
+          setActiveMap(saved.name || "已保存地圖");
+        }
+      }
+    } catch {
+      /* ignore broken save */
+    }
 
     const local = (ev: PointerEvent) => {
       const rect = canvas.getBoundingClientRect();
@@ -950,6 +1198,14 @@ export function FoxTD() {
         const gx = Math.floor(p.x / GRID);
         const gy = Math.floor(p.y / GRID);
         if (gx < 0 || gy < 0 || gx >= COLS || gy >= ROWS) return;
+        if (toolRef.current === "height") {
+          const i = gy * COLS + gx;
+          const h = brushRef.current;
+          heightsRef.current[i] = h;
+          sim.current.heights[i] = h;
+          setHover(h === 0 ? "平地，射程不加" : `高度 ${h} · 放塔射程 +${h * 30}`);
+          return;
+        }
         if ((gx === SPAWN.c && gy === SPAWN.r) || (gx === GOAL.c && gy === GOAL.r)) {
           setHover("出入口不能封");
           return;
@@ -969,7 +1225,8 @@ export function FoxTD() {
       const s = sim.current;
       for (let i = 0; i < s.towers.length; i++) {
         const tw = s.towers[i];
-        if (Math.hypot(tw.x - p.x, tw.y - p.y) < 26) {
+        const py = tw.y - cellHeight(s.heights, tw.gx, tw.gy) * 5;
+        if (Math.hypot(tw.x - p.x, py - p.y) < 28) {
           selRef.current = i;
           setSel(i);
           pickRef.current = null;
@@ -1035,13 +1292,14 @@ export function FoxTD() {
       }
       goldRef.current -= def.cost;
       setGold(goldRef.current);
+      const bonus = rangeBonus(cellHeight(s.heights, gx, gy));
       s.towers.push({
         def: id,
         x: gx * GRID + GRID / 2,
         y: gy * GRID + GRID / 2,
         damage: def.damage,
         cooldown: def.cooldown,
-        range: def.range,
+        range: def.range + bonus,
         cd: 0,
         level: 1,
         aim: 0,
@@ -1053,7 +1311,7 @@ export function FoxTD() {
         gx,
         gy,
       });
-      setHover(`已放置 ${def.name}`);
+      setHover(bonus > 0 ? `已放置 ${def.name} · 高地射程 +${bonus}` : `已放置 ${def.name}`);
     };
 
     canvas.addEventListener("pointermove", onMove);
@@ -1101,6 +1359,168 @@ export function FoxTD() {
     c.__begin?.();
   }
 
+  function openWorkshop() {
+    setWaves((w) => w ?? defaultWaves());
+    setEditWave(0);
+    setWorkshop(true);
+  }
+
+  function setWaveCount(type: number, count: number) {
+    setWaves((prev) => {
+      const base = (prev ?? defaultWaves()).map((wave) => wave.map((g) => ({ ...g })));
+      while (base.length <= editWave) base.push([]);
+      const wave = base[editWave];
+      const i = wave.findIndex((g) => g.type === type);
+      const n = Math.max(0, Math.min(40, Math.round(count) || 0));
+      if (n === 0) {
+        if (i >= 0) wave.splice(i, 1);
+      } else if (i >= 0) wave[i].count = n;
+      else wave.push({ type, count: n });
+      return base;
+    });
+  }
+
+  function addWave() {
+    setWaves((prev) => {
+      const base = (prev ?? defaultWaves()).map((wave) => wave.map((g) => ({ ...g })));
+      base.push([{ type: 0, count: 6 }]);
+      return base;
+    });
+    setEditWave((waves ?? defaultWaves()).length);
+  }
+
+  function saveGame() {
+    const data = {
+      gold: goldRef.current,
+      lives: livesRef.current,
+      wave: sim.current.wave,
+      endless,
+      phase: phaseRef.current === "play" ? "play" : "ready",
+      map: [...mapRef.current],
+      heights: heightsRef.current.slice(),
+      towers: sim.current.towers.map((t) => ({
+        def: t.def,
+        gx: t.gx,
+        gy: t.gy,
+        damage: t.damage,
+        cooldown: t.cooldown,
+        range: t.range,
+        level: t.level,
+        hp: t.hp,
+        maxHp: t.maxHp,
+        stake: t.stake,
+      })),
+      waves,
+    };
+    localStorage.setItem(RUN_KEY, JSON.stringify(data));
+    setHover("進度已存檔");
+  }
+
+  function loadGame() {
+    const raw = localStorage.getItem(RUN_KEY);
+    if (!raw) {
+      setHover("沒有進度存檔");
+      return;
+    }
+    let data: {
+      gold?: number;
+      lives?: number;
+      wave?: number;
+      endless?: boolean;
+      phase?: Phase;
+      map?: string[];
+      heights?: number[];
+      towers?: {
+        def: number;
+        gx: number;
+        gy: number;
+        damage: number;
+        cooldown: number;
+        range: number;
+        level: number;
+        hp: number;
+        maxHp: number;
+        stake: boolean;
+      }[];
+      waves?: WaveGroup[][] | null;
+    };
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      setHover("存檔讀不出來");
+      return;
+    }
+    const canvas = canvasRef.current as HTMLCanvasElement & {
+      __applyMap?: (b: string[], h: number[]) => boolean;
+      __commit?: (n: Set<string>) => boolean;
+      __begin?: () => void;
+    };
+    const heights = data.heights?.length ? data.heights : emptyHeights();
+    if (!canvas?.__applyMap?.(data.map ?? [], heights)) {
+      setHover("存檔裡的路封死了，沒有讀取");
+      return;
+    }
+    const s = sim.current;
+    s.towers = [];
+    s.enemies = [];
+    s.shots = [];
+    s.queue = [];
+    s.parts = [];
+    s.floats = [];
+    s.rings = [];
+    s.pops = [];
+    for (const t of data.towers ?? []) {
+      if (t.stake) {
+        const next = new Set(s.blocked);
+        next.add(cellKey(t.gx, t.gy));
+        if (!canvas.__commit?.(next)) continue;
+      }
+      s.towers.push({
+        def: t.def,
+        x: t.gx * CELL + CELL / 2,
+        y: t.gy * CELL + CELL / 2,
+        damage: t.damage,
+        cooldown: t.cooldown,
+        range: t.range,
+        cd: 0,
+        level: t.level || 1,
+        aim: 0,
+        recoil: 0,
+        hp: t.hp,
+        maxHp: t.maxHp,
+        shake: 0,
+        stake: !!t.stake,
+        gx: t.gx,
+        gy: t.gy,
+      });
+    }
+    const nextWaves = data.waves ?? null;
+    wavesRef.current = nextWaves;
+    setWaves(nextWaves);
+    const nextPhase: Phase = data.phase === "play" ? "play" : "ready";
+    const savedWave = data.wave || 0;
+    s.wave = nextPhase === "play" && savedWave > 0 ? savedWave - 1 : savedWave;
+    s.between = 0;
+    goldRef.current = data.gold ?? 180;
+    livesRef.current = data.lives ?? 20;
+    setGold(goldRef.current);
+    setLives(livesRef.current);
+    setEndless(!!data.endless);
+    endlessRef.current = !!data.endless;
+    pausedRef.current = false;
+    setPaused(false);
+    setWorkshop(false);
+    phaseRef.current = nextPhase;
+    setPhase(nextPhase);
+    setWave(s.wave);
+    if (nextPhase === "play" && savedWave > 0) {
+      canvas.__begin?.();
+      setHover("已讀檔，這一波重新開始");
+    } else {
+      setHover("已讀取地圖、出怪與進度");
+    }
+  }
+
   function backToMenu() {
     pausedRef.current = false;
     setPaused(false);
@@ -1113,7 +1533,7 @@ export function FoxTD() {
 
   function callWave() {
     const c = canvasRef.current as HTMLCanvasElement & { __begin?: () => void };
-    if (sim.current.enemies.length === 0 && sim.current.queue.length === 0 && sim.current.wave > 0 && (endless || sim.current.wave < MAX_WAVE)) {
+    if (sim.current.enemies.length === 0 && sim.current.queue.length === 0 && sim.current.wave > 0 && (endless || sim.current.wave < (waves?.length || MAX_WAVE))) {
       goldRef.current += 25;
       setGold(goldRef.current);
       setHover("提前出波 +25 金");
@@ -1137,6 +1557,37 @@ export function FoxTD() {
     tw.level += 1;
     setHover(kind === "dmg" ? "傷害提升" : "射速提升");
     setSel(sel);
+  }
+
+  function loadLayout(layout: MapLayout) {
+    const canvas = canvasRef.current as HTMLCanvasElement & {
+      __applyMap?: (b: string[], h: number[]) => boolean;
+    };
+    const ok = canvas?.__applyMap?.(layout.blocked, layout.heights);
+    if (!ok) {
+      setHover("這張地圖會封死路線");
+      return;
+    }
+    setActiveMap(layout.name);
+    if (!layout.id.startsWith("preset-")) setMapName(layout.name);
+    rememberLayout({ ...layout, heights: heightsRef.current.slice(), blocked: [...mapRef.current] });
+    setHover(`已載入 ${layout.name}`);
+  }
+
+  function saveMap() {
+    const name = mapName.trim().slice(0, 16) || "未命名地圖";
+    const entry: MapLayout = {
+      id: `user-${Date.now()}`,
+      name,
+      blocked: [...mapRef.current],
+      heights: heightsRef.current.map((n) => Math.max(0, Math.min(3, Math.round(n)))),
+    };
+    const next = [entry, ...savedMaps.filter((m) => m.name !== name)].slice(0, 8);
+    writeSavedMaps(next);
+    setSavedMaps(next);
+    setActiveMap(name);
+    rememberLayout(entry);
+    setHover(`已保存「${name}」，下次打開還在`);
   }
 
   function sell() {
@@ -1185,7 +1636,7 @@ export function FoxTD() {
             <div className="chip">金幣 {gold}</div>
             <div className="chip">
               波次 {wave}
-              {endless ? " · 無盡" : `/${MAX_WAVE}`}
+              {endless ? " · 無盡" : `/${waves?.length || MAX_WAVE}`}
               {speed === 10 ? " · 10倍" : ""}
             </div>
           </div>
@@ -1202,6 +1653,9 @@ export function FoxTD() {
               >
                 繼續
               </button>
+              <button className="btn ghost mt-3" onClick={saveGame}>
+                存檔
+              </button>
               <button className="btn ghost mt-3" onClick={backToMenu}>
                 返回主畫面
               </button>
@@ -1212,7 +1666,7 @@ export function FoxTD() {
               <h2>{phase === "win" ? "潮退，聖地仍在" : phase === "lose" ? "結界破碎" : "狐仙結界"}</h2>
               <p className="mb-4 max-w-md text-sm text-[#c5dff2]">
                 {phase === "ready"
-                  ? "點地圖工房可先封路。戰鬥中放路障會依最短路改道，封死整張圖會被拒絕。每 5 波出現會拆塔的潮刃。可開無盡，或把速度拉到 10 倍。"
+                  ? "點地圖工房可先封路，或把地形抬到 1–3。除了平地，每高一階，塔的射程 +30，做好的地圖可以保存。戰鬥中放路障會依最短路改道。每 5 波出現會拆塔的潮刃。"
                   : phase === "win"
                     ? "十二波妖潮已被擋下。"
                     : "生命歸零。重新布置結界再試一次。"}
@@ -1225,7 +1679,7 @@ export function FoxTD() {
                   <button className="btn ghost" onClick={() => setEndless((v) => !v)}>
                     {endless ? "無盡：開" : "無盡：關"}
                   </button>
-                  <button className="btn ghost" onClick={() => setWorkshop(true)}>
+                  <button className="btn ghost" onClick={openWorkshop}>
                     地圖工房
                   </button>
                 </div>
@@ -1233,8 +1687,44 @@ export function FoxTD() {
             </div>
           )}
           {workshop && phase !== "play" && (
-            <div className="hud-float" style={{ top: "auto", bottom: 12, left: 12, right: 12, pointerEvents: "auto" }}>
-              <div className="chip">點格子封路或拆除 · 出入口不能封 · 不能封死</div>
+            <div className="map-editor">
+              <p className="w-full text-xs leading-5 text-[#d5eeff]">
+                地圖「{activeMap}」。封路不能封死。地形 0 是平地；1、2、3 每高一階，放上去的塔射程 +30。
+              </p>
+              <button className={"btn ghost" + (tool === "block" ? " on" : "")} onClick={() => setTool("block")}>
+                封路
+              </button>
+              {[0, 1, 2, 3].map((h) => (
+                <button
+                  key={h}
+                  className={"btn ghost" + (tool === "height" && brush === h ? " on" : "")}
+                  onClick={() => {
+                    setTool("height");
+                    setBrush(h);
+                  }}
+                >
+                  {h === 0 ? "平地 0" : `高 ${h} +${h * 30}`}
+                </button>
+              ))}
+              {presetMaps().map((m) => (
+                <button key={m.id} className="btn ghost" onClick={() => loadLayout(m)}>
+                  {m.name}
+                </button>
+              ))}
+              {savedMaps.map((m) => (
+                <button key={m.id} className="btn ghost" onClick={() => loadLayout(m)}>
+                  {m.name}
+                </button>
+              ))}
+              <input
+                value={mapName}
+                maxLength={16}
+                aria-label="地圖名稱"
+                onChange={(e) => setMapName(e.target.value)}
+              />
+              <button className="btn" onClick={saveMap}>
+                保存地圖
+              </button>
               <button className="btn" onClick={() => setWorkshop(false)}>
                 完成工房
               </button>
@@ -1275,7 +1765,58 @@ export function FoxTD() {
               路障 {STAKE_COST}
             </button>
           </div>
+          <div className="mb-2 flex gap-2">
+            <button className="btn ghost flex-1" onClick={saveGame}>
+              存檔
+            </button>
+            <button className="btn ghost flex-1" onClick={loadGame}>
+              讀檔
+            </button>
+          </div>
           <p className="mb-2 min-h-5 text-xs text-[#ffd7a8]">{hover}</p>
+          {workshop && waves && (
+            <div className="mb-3 max-h-64 overflow-auto rounded-xl border border-[#9ad7ff55] bg-[#102033cc] p-2 text-xs leading-6">
+              <div className="mb-1 flex items-center justify-between gap-1">
+                <button className="btn ghost" onClick={() => setEditWave((n) => Math.max(0, n - 1))}>
+                  上一波
+                </button>
+                <b>
+                  第 {Math.min(editWave, waves.length - 1) + 1} / {waves.length} 波
+                </b>
+                <button className="btn ghost" onClick={() => setEditWave((n) => Math.min(waves.length - 1, n + 1))}>
+                  下一波
+                </button>
+              </div>
+              {ENEMY_TYPES.map((enemy, type) => (
+                <label key={enemy.name} className="flex items-center justify-between gap-2">
+                  <span style={{ color: enemy.color }}>{enemy.name}</span>
+                  <input
+                    className="w-16 rounded bg-[#08131f] px-1 text-right text-[#e7f6ff]"
+                    type="number"
+                    min={0}
+                    max={40}
+                    value={waves[Math.min(editWave, waves.length - 1)]?.find((g) => g.type === type)?.count ?? 0}
+                    onChange={(ev) => setWaveCount(type, Number(ev.target.value))}
+                  />
+                </label>
+              ))}
+              <div className="mt-2 flex gap-2">
+                <button className="btn ghost flex-1" onClick={addWave}>
+                  加一波
+                </button>
+                <button
+                  className="btn ghost flex-1"
+                  onClick={() => {
+                    setWaves(null);
+                    wavesRef.current = null;
+                    setHover("已改回自動出怪");
+                  }}
+                >
+                  自動出怪
+                </button>
+              </div>
+            </div>
+          )}
           {selected && selected.stake && (
             <div className="mb-3 rounded-xl border border-[#ffd2a855] bg-[#2a2016aa] p-2 text-xs leading-5">
               <b className="text-[#ffd2a8]">改道路障</b>
@@ -1291,6 +1832,9 @@ export function FoxTD() {
               <div>特性：{selectedDef.trait}</div>
               <div>
                 傷害 {Math.round(selected.damage)} · 射速 {(1 / selected.cooldown).toFixed(2)}/秒 · 射程 {Math.round(selected.range)}
+                {cellHeight(sim.current.heights, selected.gx, selected.gy) > 0
+                  ? `（高地 +${cellHeight(sim.current.heights, selected.gx, selected.gy) * 30}）`
+                  : ""}
               </div>
               <div className="mt-2 flex gap-2">
                 <button className="btn ghost flex-1" onClick={() => upgrade("dmg")}>
@@ -1318,7 +1862,11 @@ export function FoxTD() {
                 setHover(`${t.name}：${t.trait}`);
               }}
             >
-              <img src={t.img} alt="" />
+              {TOWER_ANIMS[t.id]?.length ? (
+                <AlivePortrait frames={TOWER_ANIMS[t.id]} />
+              ) : (
+                <img className="tower-idle" src={t.img} alt="" />
+              )}
               <span>
                 <b className="block text-sm" style={{ color: t.color }}>
                   {t.name}

@@ -40,12 +40,39 @@ export const TOWERS: TowerDef[] = [
   { id: 11, name: "究極狐仙", img: "/towers/t12.png", cost: 340, range: 175, damage: 42, cooldown: 0.85, special: "ultimate", trait: "高傷 + 燃燒 + 減速 + 範圍", color: "#ff6fa8" },
 ];
 
-export const ENEMY_TYPES = [
-  { name: "小妖", hp: 42, speed: 78, gold: 7, color: "#6dcaa0", r: 11, melee: false },
-  { name: "狼妖", hp: 95, speed: 68, gold: 16, color: "#c48a62", r: 13, melee: false },
-  { name: "石魔", hp: 190, speed: 50, gold: 28, color: "#7f93a8", r: 16, melee: false },
-  { name: "炎魔", hp: 280, speed: 60, gold: 42, color: "#e07048", r: 15, melee: false },
-  { name: "魔將", hp: 460, speed: 46, gold: 68, color: "#b06ad4", r: 18, melee: false },
-  { name: "妖王", hp: 820, speed: 40, gold: 120, color: "#ff5f9a", r: 21, melee: false },
-  { name: "潮刃", hp: 260, speed: 54, gold: 36, color: "#ffd2a8", r: 14, melee: true },
+export type Trait = "melee" | "armor" | "regen" | "noslow" | "shield";
+
+export type EnemyDef = {
+  name: string;
+  hp: number;
+  speed: number;
+  gold: number;
+  color: string;
+  r: number;
+  traits: Trait[];
+};
+
+export const TRAIT_INFO: { id: Trait; label: string }[] = [
+  { id: "melee", label: "近戰拆塔" },
+  { id: "armor", label: "厚甲" },
+  { id: "regen", label: "回血" },
+  { id: "noslow", label: "免疫減速" },
+  { id: "shield", label: "護盾" },
 ];
+
+export function stockBestiary(): EnemyDef[] {
+  return [
+    { name: "小妖", hp: 70, speed: 160, gold: 7, color: "#6dcaa0", r: 11, traits: [] },
+    { name: "狼妖", hp: 150, speed: 145, gold: 16, color: "#c48a62", r: 13, traits: [] },
+    { name: "石魔", hp: 320, speed: 110, gold: 28, color: "#7f93a8", r: 16, traits: ["armor"] },
+    { name: "炎魔", hp: 420, speed: 130, gold: 42, color: "#e07048", r: 15, traits: ["regen"] },
+    { name: "魔將", hp: 700, speed: 100, gold: 68, color: "#b06ad4", r: 18, traits: ["armor", "noslow"] },
+    { name: "妖王", hp: 1200, speed: 90, gold: 120, color: "#ff5f9a", r: 21, traits: ["shield"] },
+    { name: "潮刃", hp: 380, speed: 125, gold: 36, color: "#ffd2a8", r: 14, traits: ["melee"] },
+    { name: "影衛", hp: 520, speed: 105, gold: 48, color: "#9bb0c9", r: 15, traits: ["armor", "shield"] },
+    { name: "疾狐", hp: 180, speed: 230, gold: 22, color: "#d7b6ff", r: 12, traits: ["noslow"] },
+    { name: "妖后", hp: 1800, speed: 80, gold: 180, color: "#ffd27a", r: 22, traits: ["regen", "shield", "armor"] },
+  ];
+}
+
+export const ENEMY_TYPES = stockBestiary().map((e) => ({ ...e, melee: e.traits.includes("melee" as Trait) }));
