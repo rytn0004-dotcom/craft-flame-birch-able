@@ -108,6 +108,21 @@ function projectDist(x: number, y: number, route = 0) {
   return best;
 }
 
+
+const ZOOM_MIN = 0.25;
+const ZOOM_MAX = 2.5;
+
+function clampCam(cam: { x: number; y: number; zoom: number }) {
+  const z = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, cam.zoom || 1));
+  cam.zoom = z;
+  const vw = VIEWW / z;
+  const vh = VIEWH / z;
+  const maxX = Math.max(0, WORLD_W - vw);
+  const maxY = Math.max(0, WORLD_H - vh);
+  cam.x = Math.max(0, Math.min(maxX, cam.x));
+  cam.y = Math.max(0, Math.min(maxY, cam.y));
+}
+
 loadRoutes(pathsForGates(new Set(), defaultEntrances(), defaultExits()) ?? [[defaultEntrances()[0]]]);
 
 type Enemy = {
@@ -470,7 +485,11 @@ export function FoxTD() {
     pointer: { x: 0, y: 0, down: false },
     blocked: new Set<string>(),
     heights: heightsRef.current,
-    cam: { x: 0, y: Math.max(0, defaultEntrances()[1].r * CELL - VIEWH / 2) },
+    cam: {
+      x: 0,
+      y: Math.max(0, defaultEntrances()[1].r * CELL - VIEWH / 2),
+      zoom: 1,
+    },
     drag: { on: false, sx: 0, sy: 0, cx: 0, cy: 0, moved: false },
   });
 
@@ -1003,6 +1022,8 @@ export function FoxTD() {
         ctx.stroke();
       }
       ctx.save();
+      const z = s.cam.zoom || 1;
+      ctx.scale(z, z);
       ctx.translate(-s.cam.x, -s.cam.y);
       const decor: { key: string; x: number; y: number; w: number; h: number }[] = [
         { key: "coral", x: 40, y: 430, w: 120, h: 120 },
@@ -1022,10 +1043,11 @@ export function FoxTD() {
 
       ctx.strokeStyle = "rgba(180,230,255,0.08)";
       ctx.lineWidth = 1;
+      const vz = s.cam.zoom || 1;
       const x0 = Math.max(0, Math.floor(s.cam.x / CELL) - 1);
       const y0 = Math.max(0, Math.floor(s.cam.y / CELL) - 1);
-      const x1 = Math.min(COLS - 1, Math.ceil((s.cam.x + VIEWW) / CELL) + 1);
-      const y1 = Math.min(ROWS - 1, Math.ceil((s.cam.y + VIEWH) / CELL) + 1);
+      const x1 = Math.min(COLS - 1, Math.ceil((s.cam.x + VIEWW / vz) / CELL) + 1);
+      const y1 = Math.min(ROWS - 1, Math.ceil((s.cam.y + VIEWH / vz) / CELL) + 1);
       if (pickRef.current !== null || workshopRef.current) {
         ctx.beginPath();
         for (let x = x0; x <= x1; x++) {
@@ -1407,13 +1429,25 @@ export function FoxTD() {
       return true;
     };
     (canvas as HTMLCanvasElement & { __commit?: (n: Set<string>) => boolean }).__commit = commitBlocks;
-    (canvas as HTMLCanvasElement & { __applyMap?: (b: string[], h: number[]) => boolean }).__applyMap = (blocked, heights) => {
+    (canvas as HTMLCanvasElement & {
+      __applyMap?: (b: string[], h: number[], entrances?: Cell[], exits?: Cell[]) => boolean;
+    }).__applyMap = (blocked, heights, entrances, exits) => {
+      if (entrances && entrances.length) entrancesRef.current = entrances.map((g) => ({ ...g }));
+      if (exits && exits.length) exitsRef.current = exits.map((g) => ({ ...g }));
       const next = new Set(blocked);
       if (!commitBlocks(next)) return false;
       const h = heightsRef.current;
       for (let i = 0; i < COLS * ROWS; i++) h[i] = Math.max(0, Math.min(3, Math.round(heights[i] ?? 0)));
       sim.current.heights = h;
       mapRef.current = next;
+      // 鏡頭移到第一個入口附近
+      const gate = entrancesRef.current[0];
+      if (gate) {
+        const z = sim.current.cam.zoom || 1;
+        sim.current.cam.x = gate.c * CELL - VIEWW / (2 * z);
+        sim.current.cam.y = gate.r * CELL - VIEWH / (2 * z);
+        clampCam(sim.current.cam);
+      }
       return true;
     };
     try {
@@ -1432,23 +1466,80 @@ export function FoxTD() {
       /* ignore broken save */
     }
 
-    const local = (ev: PointerEvent) => {
+    const screenOf = (ev: PointerEvent) => {
       const rect = canvas.getBoundingClientRect();
-      const cam = sim.current.cam;
       return {
-        x: ((ev.clientX - rect.left) / rect.width) * VIEWW + cam.x,
-        y: ((ev.clientY - rect.top) / rect.height) * VIEWH + cam.y,
+        x: ((ev.clientX - rect.left) / rect.width) * VIEWW,
+        y: ((ev.clientY - rect.top) / rect.height) * VIEWH,
       };
+    };
+    const local = (ev: PointerEvent) => {
+      const s = screenOf(ev);
+      const cam = sim.current.cam;
+      const z = cam.zoom || 1;
+      return { x: cam.x + s.x / z, y: cam.y + s.y / z };
     };
 
     const onMove = (ev: PointerEvent) => {
-      sim.current.pointer = { ...local(ev), down: true };
+      const drag = sim.current.drag;
+      if (drag.on) {
+        const sc = screenOf(ev);
+        const z = sim.current.cam.zoom || 1;
+        sim.current.cam.x = drag.cx - (sc.x - drag.sx) / z;
+        sim.current.cam.y = drag.cy - (sc.y - drag.sy) / z;
+        clampCam(sim.current.cam);
+        drag.moved = Math.hypot(sc.x - drag.sx, sc.y - drag.sy) > 4;
+        return;
+      }
+      sim.current.pointer = { ...local(ev), down: sim.current.pointer.down };
+    };
+    const onUp = () => {
+      sim.current.drag.on = false;
+      sim.current.pointer.down = false;
     };
     const onDown = (ev: PointerEvent) => {
+      const sc = screenOf(ev);
       const p = local(ev);
       sim.current.pointer = { ...p, down: true };
+      // 中鍵／右鍵／Alt+左鍵：拖曳鏡頭
+      const pan = ev.button === 1 || ev.button === 2 || ev.altKey;
+      if (pan) {
+        ev.preventDefault();
+        sim.current.drag = {
+          on: true,
+          sx: sc.x,
+          sy: sc.y,
+          cx: sim.current.cam.x,
+          cy: sim.current.cam.y,
+          moved: false,
+        };
+        try {
+          canvas.setPointerCapture(ev.pointerId);
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
       if (phaseRef.current !== "play") {
         if (!workshopRef.current) return;
+        // 工房工具：入口／出口
+        if (toolRef.current === "entry" || toolRef.current === "exit") {
+          const gx = Math.floor(p.x / GRID);
+          const gy = Math.floor(p.y / GRID);
+          if (gx < 0 || gy < 0 || gx >= COLS || gy >= ROWS) return;
+          const list = toolRef.current === "entry" ? entrancesRef.current : exitsRef.current;
+          const idx = list.findIndex((g) => g.c === gx && g.r === gy);
+          if (idx >= 0) list.splice(idx, 1);
+          else list.push({ c: gx, r: gy });
+          if (!entrancesRef.current.length) entrancesRef.current = defaultEntrances();
+          if (!exitsRef.current.length) exitsRef.current = defaultExits();
+          if (!commitBlocks(new Set(mapRef.current))) {
+            setHover("出入口配置會封死路線");
+            return;
+          }
+          setHover(toolRef.current === "entry" ? `入口 ${entrancesRef.current.length} 個` : `出口 ${exitsRef.current.length} 個`);
+          return;
+        }
         const gx = Math.floor(p.x / GRID);
         const gy = Math.floor(p.y / GRID);
         if (gx < 0 || gy < 0 || gx >= COLS || gy >= ROWS) return;
@@ -1480,7 +1571,7 @@ export function FoxTD() {
       for (let i = 0; i < s.towers.length; i++) {
         const tw = s.towers[i];
         const py = tw.y - cellHeight(s.heights, tw.gx, tw.gy) * 5;
-        if (Math.hypot(tw.x - p.x, py - p.y) < 28) {
+        if (Math.hypot(tw.x - p.x, py - p.y) < 28 / (s.cam.zoom || 1)) {
           selRef.current = i;
           setSel(i);
           pickRef.current = null;
@@ -1537,7 +1628,23 @@ export function FoxTD() {
         setHover("路障已放，妖潮改走最短路");
         return;
       }
-      if (id === null) return;
+      if (id === null) {
+        // 左鍵空白處也可拖鏡頭
+        sim.current.drag = {
+          on: true,
+          sx: sc.x,
+          sy: sc.y,
+          cx: sim.current.cam.x,
+          cy: sim.current.cam.y,
+          moved: false,
+        };
+        try {
+          canvas.setPointerCapture(ev.pointerId);
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
       const def = TOWERS[id];
       if (!canPlace(gx, gy)) {
         setHover("這格不能放塔");
@@ -1574,12 +1681,40 @@ export function FoxTD() {
       setHover(bonus > 0 ? `已放置 ${def.name} · 高地射程 +${bonus}` : `已放置 ${def.name}`);
     };
 
+    const onWheel = (ev: WheelEvent) => {
+      ev.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const sx = ((ev.clientX - rect.left) / rect.width) * VIEWW;
+      const sy = ((ev.clientY - rect.top) / rect.height) * VIEWH;
+      const cam = sim.current.cam;
+      const oldZ = cam.zoom || 1;
+      const factor = ev.deltaY > 0 ? 0.9 : 1.1;
+      const nextZ = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, oldZ * factor));
+      // 以游標為錨點縮放
+      const worldX = cam.x + sx / oldZ;
+      const worldY = cam.y + sy / oldZ;
+      cam.zoom = nextZ;
+      cam.x = worldX - sx / nextZ;
+      cam.y = worldY - sy / nextZ;
+      clampCam(cam);
+      setHover(`縮放 ${Math.round(nextZ * 100)}% · 滾輪縮放 · 拖曳平移`);
+    };
+    const onContext = (ev: Event) => ev.preventDefault();
+
     canvas.addEventListener("pointermove", onMove);
     canvas.addEventListener("pointerdown", onDown);
+    canvas.addEventListener("pointerup", onUp);
+    canvas.addEventListener("pointercancel", onUp);
+    canvas.addEventListener("wheel", onWheel, { passive: false });
+    canvas.addEventListener("contextmenu", onContext);
     return () => {
       cancelAnimationFrame(raf);
       canvas.removeEventListener("pointermove", onMove);
       canvas.removeEventListener("pointerdown", onDown);
+      canvas.removeEventListener("pointerup", onUp);
+      canvas.removeEventListener("pointercancel", onUp);
+      canvas.removeEventListener("wheel", onWheel);
+      canvas.removeEventListener("contextmenu", onContext);
     };
   }, []);
 
@@ -1825,17 +1960,28 @@ export function FoxTD() {
 
   function loadLayout(layout: MapLayout) {
     const canvas = canvasRef.current as HTMLCanvasElement & {
-      __applyMap?: (b: string[], h: number[]) => boolean;
+      __applyMap?: (b: string[], h: number[], entrances?: Cell[], exits?: Cell[]) => boolean;
     };
-    const ok = canvas?.__applyMap?.(layout.blocked, layout.heights);
+    const ok = canvas?.__applyMap?.(
+      layout.blocked ?? [],
+      layout.heights ?? emptyHeights(),
+      layout.entrances,
+      layout.exits,
+    );
     if (!ok) {
       setHover("這張地圖會封死路線");
       return;
     }
     setActiveMap(layout.name);
     if (!layout.id.startsWith("preset-")) setMapName(layout.name);
-    rememberLayout({ ...layout, heights: heightsRef.current.slice(), blocked: [...mapRef.current] });
-    setHover(`已載入 ${layout.name}`);
+    rememberLayout({
+      ...layout,
+      heights: heightsRef.current.slice(),
+      blocked: [...mapRef.current],
+      entrances: entrancesRef.current.map((g) => ({ ...g })),
+      exits: exitsRef.current.map((g) => ({ ...g })),
+    });
+    setHover(`已載入 ${layout.name} · 入口 ${entrancesRef.current.length} · 出口 ${exitsRef.current.length}`);
   }
 
   function saveMap() {
@@ -1845,6 +1991,8 @@ export function FoxTD() {
       name,
       blocked: [...mapRef.current],
       heights: heightsRef.current.map((n) => Math.max(0, Math.min(3, Math.round(n)))),
+      entrances: entrancesRef.current.map((g) => ({ ...g })),
+      exits: exitsRef.current.map((g) => ({ ...g })),
     };
     const next = [entry, ...savedMaps.filter((m) => m.name !== name)].slice(0, 8);
     writeSavedMaps(next);
@@ -1891,7 +2039,7 @@ export function FoxTD() {
           <p className="text-xs tracking-[0.28em] text-[#8ec8ee]">UNDERWATER WARD</p>
           <h1 className="font-['Cormorant_Garamond'] text-4xl leading-none text-[#ffe7f1]">狐仙塔防</h1>
         </div>
-        <p className="hidden text-sm text-[#9ec4de] sm:block">前期好起步 · 升級前期便宜後期遞增 · 賣出退 70% 投入</p>
+        <p className="hidden text-sm text-[#9ec4de] sm:block">滾輪縮放 · 拖曳／右鍵平移 · 200×200 大地圖</p>
       </header>
       <div className="td-layout">
         <div className="stage" ref={wrapRef}>
@@ -1958,6 +2106,31 @@ export function FoxTD() {
               </p>
               <button className={"btn ghost" + (tool === "block" ? " on" : "")} onClick={() => setTool("block")}>
                 封路
+              </button>
+              <button className={"btn ghost" + (tool === "entry" ? " on" : "")} onClick={() => setTool("entry")}>
+                入口
+              </button>
+              <button className={"btn ghost" + (tool === "exit" ? " on" : "")} onClick={() => setTool("exit")}>
+                出口
+              </button>
+              <button
+                className="btn ghost"
+                onClick={() => {
+                  const cam = sim.current.cam;
+                  cam.zoom = 1;
+                  const g = entrancesRef.current[0];
+                  if (g) {
+                    cam.x = g.c * CELL - VIEWW / 2;
+                    cam.y = g.r * CELL - VIEWH / 2;
+                  } else {
+                    cam.x = 0;
+                    cam.y = 0;
+                  }
+                  clampCam(cam);
+                  setHover("已重設視角 100%");
+                }}
+              >
+                重設視角
               </button>
               {[0, 1, 2, 3].map((h) => (
                 <button
