@@ -1,5 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { CELL, COLS, cellHeight, cellKey, defaultEntrances, defaultExits, emptyHeights, pathsForGates, pointsOf, presetMaps, rangeBonus, ROWS, sameCell, VIEW_H, VIEW_W, WORLD_H, WORLD_W, type Cell, type MapLayout } from "./grid";
+import { tickBrain, type Blackboard } from "./ai";
+import {
+  defaultSkillsFor,
+  makeSkillState,
+  resolveSkill,
+  tickSkillCooldowns,
+  triggerCooldown,
+  type SkillId,
+  type SkillRuntime,
+} from "./skills";
 import { ENEMY_TYPES, stockBestiary, TOWERS, TRAIT_INFO, type EnemyDef, type Special, type TowerDef, type Trait } from "./types";
 
 const VIEWW = VIEW_W;
@@ -114,6 +124,14 @@ type Enemy = {
   regen: number;
   noslow: boolean;
   shield: number;
+  boss: boolean;
+  atkCd: number;
+  aiSpeed: number;
+  rage: boolean;
+  aiAction: string;
+  skills: SkillRuntime[];
+  hasteT: number;
+  hasteMul: number;
 };
 
 type Tower = {
@@ -133,6 +151,8 @@ type Tower = {
   stake: boolean;
   gx: number;
   gy: number;
+  rateMul: number;
+  terrorT: number;
 };
 
 type Shot = {
@@ -209,6 +229,53 @@ function spawnPlan(wave: number) {
     list.push({ type: Math.min(5, 2 + Math.floor(wave / 4)), at: t + 0.6, route: n % lanes });
   }
   return list;
+}
+
+/** 無盡：有精英／Boss，數量與屬性保守，避免後期打不過 */
+function endlessPlan(wave: number) {
+  const list: { type: number; at: number; route: number }[] = [];
+  const lanes = Math.max(1, routes.length);
+  const nTypes = Math.max(1, ENEMY_TYPES.length);
+  const fodder = Math.min(18, 7 + Math.floor(wave * 0.35));
+  const elites = Math.min(4, Math.floor((wave + 2) / 4));
+  const interval = Math.max(0.32, 0.62 - wave * 0.006);
+  let t = 0.35;
+  let n = 0;
+  const clampType = (i: number) => Math.max(0, Math.min(nTypes - 1, i));
+  const pickFodder = () => clampType(Math.floor(Math.random() * (Math.min(3, 1 + Math.floor(wave / 6)) + 1)));
+  const pickElite = () => {
+    const pool = [2, 3, 6, 7, 8].map(clampType);
+    return pool[Math.floor(Math.random() * pool.length)];
+  };
+  const pickBoss = () => {
+    if (wave >= 25 && Math.random() < 0.25) return clampType(9);
+    if (wave >= 15 && Math.random() < 0.45) return clampType(5);
+    return clampType(4);
+  };
+  for (let i = 0; i < fodder; i++) {
+    list.push({ type: pickFodder(), at: t, route: n % lanes });
+    n += 1;
+    t += interval * (0.85 + Math.random() * 0.4);
+  }
+  for (let i = 0; i < elites; i++) {
+    list.push({ type: pickElite(), at: t, route: Math.floor(Math.random() * lanes) });
+    t += interval * 1.35;
+  }
+  if (wave > 0 && wave % 5 === 0) {
+    list.push({ type: pickBoss(), at: t + 0.6, route: Math.floor(Math.random() * lanes) });
+    const guards = Math.min(4, 2 + Math.floor(wave / 15));
+    for (let g = 0; g < guards; g++) {
+      list.push({ type: pickFodder(), at: t + 0.9 + g * 0.35, route: g % lanes });
+    }
+  } else if (wave > 0 && wave % 3 === 0) {
+    list.push({ type: pickElite(), at: t + 0.4, route: n % lanes });
+  }
+  list.sort((a, b) => a.at - b.at);
+  return list;
+}
+
+function endlessScale(wave: number) {
+  return Math.min(2.4, 1 + Math.log2(1 + Math.max(0, wave - 1)) * 0.28);
 }
 
 type WaveGroup = { type: number; count: number };
@@ -547,14 +614,16 @@ export function FoxTD() {
           const job = s.queue.shift()!;
           const book = bestiaryRef.current;
           const et = book[job.type] ?? book[0];
-          const scale = 1 + (s.wave - 1) * 0.16;
+          const scale = endlessRef.current ? endlessScale(s.wave) : 1 + (s.wave - 1) * 0.16;
+          const speedMul = endlessRef.current ? 1 + Math.min(0.12, (s.wave - 1) * 0.004) : 1;
+          const goldMul = endlessRef.current ? 1 + Math.min(1.2, s.wave * 0.045) : 1 + s.wave * 0.14;
           s.enemies.push({
             type: job.type,
             dist: 0,
             hp: et.hp * scale,
             maxHp: et.hp * scale,
-            speed: et.speed * (0.96 + Math.random() * 0.08),
-            gold: Math.round(et.gold * (1 + s.wave * 0.14) * (1 + job.type * 0.12)),
+            speed: et.speed * (0.96 + Math.random() * 0.08) * speedMul,
+            gold: Math.round(et.gold * goldMul * (1 + job.type * 0.1)),
             slow: 1,
             slowT: 0,
             burn: 0,
@@ -574,6 +643,18 @@ export function FoxTD() {
             regen: et.traits.includes("regen") ? et.hp * 0.04 : 0,
             noslow: et.traits.includes("noslow"),
             shield: et.traits.includes("shield") ? et.hp * scale * 0.28 : 0,
+            boss: !!et.boss,
+            atkCd: 0,
+            aiSpeed: 1,
+            rage: false,
+            aiAction: "march",
+            skills: makeSkillState(
+              (et.skills as SkillId[] | undefined)?.length
+                ? (et.skills as SkillId[])
+                : defaultSkillsFor({ melee: et.traits.includes("melee"), boss: !!et.boss, traits: et.traits }),
+            ),
+            hasteT: 0,
+            hasteMul: 1,
           });
         }
       } else if (s.enemies.length === 0 && s.wave > 0) {
@@ -582,8 +663,9 @@ export function FoxTD() {
         if (s.wave >= cap && !endlessRef.current) {
           phaseRef.current = "win";
           setPhase("win");
-        } else if (s.between > (endlessRef.current ? 4 : 7)) {
-          beginWave();
+        } else {
+          const gap = endlessRef.current ? (s.wave % 5 === 0 ? 5.5 : 4.2) : 7;
+          if (s.between > gap) beginWave();
         }
       }
 
@@ -603,39 +685,105 @@ export function FoxTD() {
         }
         if (e.hurt > 0) e.hurt -= dt;
         if (e.regen > 0 && e.hp > 0 && e.hp < e.maxHp) e.hp = Math.min(e.maxHp, e.hp + e.regen * dt);
-        let biting = false;
-        if (e.melee && e.rootT <= 0) {
-          const p = posAt(e.dist, e.route);
-          let near: Tower | null = null;
-          let nd = 48;
-          for (const tw of s.towers) {
-            if (tw.stake) continue;
-            const d = Math.hypot(tw.x - p.x, tw.y - p.y);
-            if (d < nd) {
-              nd = d;
-              near = tw;
-            }
+        tickSkillCooldowns(e.skills, dt);
+        if (e.atkCd > 0) e.atkCd -= dt;
+        if (e.hasteT > 0) e.hasteT -= dt;
+        else e.hasteMul = 1;
+        const p = posAt(e.dist, e.route);
+        let targetTower: number | null = null;
+        let bestD = e.boss ? 56 : 48;
+        const towersNear: { index: number; dist: number }[] = [];
+        for (let ti = 0; ti < s.towers.length; ti++) {
+          const tw = s.towers[ti];
+          if (tw.stake) continue;
+          const d = Math.hypot(tw.x - p.x, tw.y - p.y);
+          towersNear.push({ index: ti, dist: d });
+          if (d < bestD) {
+            bestD = d;
+            targetTower = ti;
           }
-          if (near) {
-            biting = true;
-            e.face = near.x >= p.x ? 1 : -1;
-            e.atk -= dt;
-            if (e.atk <= 0) {
-              e.atk = 0.7;
-              near.hp -= 14;
-              near.shake = 0.18;
-              burst(near.x, near.y, "#ffb4c8", 6, 1.6);
-              if (near.hp <= 0) {
-                const idx = s.towers.indexOf(near);
-                if (idx >= 0) s.towers.splice(idx, 1);
-                float(near.x, near.y, "塔被拆毀", "#ff8aa0");
+        }
+        const castSkill = (id: SkillId) => {
+          const fx = resolveSkill(id, { boss: e.boss, maxHp: e.maxHp, towersInRange: towersNear });
+          triggerCooldown(e.skills, id);
+          for (const sh of fx.shouts) float(p.x, p.y - 20, sh.text, sh.color);
+          if (fx.heal) e.hp = Math.min(e.maxHp, e.hp + fx.heal);
+          if (fx.shield) e.shield += fx.shield;
+          if (fx.hasteT && fx.hasteMul) {
+            e.hasteT = Math.max(e.hasteT, fx.hasteT);
+            e.hasteMul = Math.max(e.hasteMul, fx.hasteMul);
+          }
+          if (fx.dash) e.dist += fx.dash;
+          if (fx.towerHits) {
+            for (const h of fx.towerHits) {
+              const tw = s.towers[h.index];
+              if (!tw || tw.stake) continue;
+              tw.hp -= h.damage * (e.rage ? 1.3 : 1);
+              tw.shake = 0.2;
+              burst(tw.x, tw.y, "#ffb4c8", 8, 1.8);
+            }
+            for (let ti = s.towers.length - 1; ti >= 0; ti--) {
+              if (!s.towers[ti].stake && s.towers[ti].hp <= 0) {
+                float(s.towers[ti].x, s.towers[ti].y, "塔被拆毀", "#ff8aa0");
+                s.towers.splice(ti, 1);
               }
             }
           }
-        }
-        if (!biting && e.rootT <= 0) {
-          const spd = e.speed * (e.slowT > 0 ? e.slow : 1);
-          e.dist += spd * dt;
+          if (fx.terror) {
+            for (const idx of fx.terror.indices) {
+              const tw = s.towers[idx];
+              if (!tw || tw.stake) continue;
+              tw.terrorT = Math.max(tw.terrorT || 0, fx.terror.duration);
+              tw.rateMul = fx.terror.rateMul;
+            }
+          }
+          if (fx.rings) {
+            for (const r of fx.rings) s.rings.push({ x: p.x, y: p.y, r: 8, max: r.r, life: 0.35, color: r.color });
+          }
+          burst(p.x, p.y, e.color, 6, 1.4);
+          return true;
+        };
+        e.aiSpeed = 1;
+        const bb: Blackboard = {
+          t: s.clock,
+          dt,
+          targetTower,
+          pathLeft: Math.max(0, routeLen(e.route) - e.dist),
+          hpRatio: e.maxHp > 0 ? e.hp / e.maxHp : 1,
+          shield: e.shield,
+          boss: e.boss,
+          melee: e.melee,
+          canMove: e.rootT <= 0,
+          lastAction: e.aiAction,
+          chosenSkill: null,
+          skills: e.skills,
+          anyTowerInSkillRange: towersNear.some((t) => t.dist < 120),
+        };
+        tickBrain(e, bb, {
+          attackCd: e.atkCd,
+          setAttackCooldown: (sec) => { e.atkCd = sec; },
+          setSpeedMul: (m) => { e.aiSpeed = m; },
+          setRage: (on) => { e.rage = on; },
+          shout: (text, color) => { float(p.x, p.y - 18, text, color || "#ffd27a"); },
+          castSkill,
+          attackTower: (towerIndex, damage) => {
+            const tw = s.towers[towerIndex];
+            if (!tw || tw.stake) return false;
+            e.face = tw.x >= p.x ? 1 : -1;
+            tw.hp -= damage * (e.rage ? 1.4 : 1);
+            tw.shake = 0.18;
+            burst(tw.x, tw.y, e.rage ? "#ff6fa8" : "#ffb4c8", e.boss ? 10 : 6, 1.8);
+            if (tw.hp <= 0) {
+              s.towers.splice(towerIndex, 1);
+              float(tw.x, tw.y, "塔被拆毀", "#ff8aa0");
+            }
+            return true;
+          },
+        });
+        e.aiAction = bb.lastAction;
+        if (e.rootT <= 0 && e.aiSpeed > 0.05) {
+          const slow = e.noslow ? 1 : e.slowT > 0 ? e.slow : 1;
+          e.dist += e.speed * slow * e.aiSpeed * e.hasteMul * (e.rage ? 1.12 : 1) * dt;
         }
         if (e.dist >= routeLen(e.route)) {
           livesRef.current -= 1;
@@ -658,6 +806,10 @@ export function FoxTD() {
       }
 
       for (const tw of s.towers) {
+        if (tw.terrorT > 0) {
+          tw.terrorT -= dt;
+          if (tw.terrorT <= 0) tw.rateMul = 1;
+        } else if (tw.rateMul === undefined) tw.rateMul = 1;
         tw.cd -= dt;
         let best: Enemy | null = null;
         let bestDist = -1;
@@ -670,7 +822,7 @@ export function FoxTD() {
           }
         }
         if (best && tw.cd <= 0) {
-          tw.cd = tw.cooldown;
+          tw.cd = tw.cooldown / (tw.rateMul > 0 ? tw.rateMul : 1);
           fire(tw, best);
         } else if (best) {
           const p = posAt(best.dist, best.route);
@@ -779,7 +931,9 @@ export function FoxTD() {
       s.between = 0;
       const custom = wavesRef.current;
       const book = bestiaryRef.current;
-      if (custom && custom.length) {
+      if (endlessRef.current) {
+        s.queue = endlessPlan(s.wave);
+      } else if (custom && custom.length) {
         const wave = custom[Math.min(custom.length - 1, s.wave - 1)];
         s.queue = queueFromGroups(wave?.spawns ?? [], wave?.gates ?? [], routes.length, book.length);
       } else {
@@ -1102,6 +1256,27 @@ export function FoxTD() {
           ctx.strokeStyle = "rgba(255,220,120,0.7)";
           ctx.stroke();
         }
+        if (e.boss) {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, e.r + 16, 0, Math.PI * 2);
+          ctx.strokeStyle = e.rage ? "rgba(255,80,120,0.95)" : "rgba(255,210,120,0.9)";
+          ctx.lineWidth = e.rage ? 4 : 3;
+          ctx.stroke();
+          ctx.lineWidth = 1;
+          ctx.fillStyle = e.rage ? "#ff6fa8" : "#ffd27a";
+          ctx.font = "bold 11px sans-serif";
+          ctx.textAlign = "center";
+          ctx.fillText(e.rage ? "RAGE" : "BOSS", p.x, p.y - e.r - 22);
+          ctx.textAlign = "left";
+        }
+        if (e.aiAction && e.aiAction.startsWith("skill:")) {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, e.r + 14, 0, Math.PI * 2);
+          ctx.strokeStyle = "rgba(180,220,255,0.85)";
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          ctx.lineWidth = 1;
+        }
         const bw = e.r * 2.4;
         ctx.fillStyle = "rgba(0,0,0,0.55)";
         ctx.fillRect(p.x - bw / 2, p.y - e.r - 16, bw, 4);
@@ -1312,6 +1487,8 @@ export function FoxTD() {
           stake: true,
           gx,
           gy,
+          rateMul: 1,
+          terrorT: 0,
         });
         setHover("路障已放，妖潮改走最短路");
         return;
@@ -1346,6 +1523,8 @@ export function FoxTD() {
         stake: false,
         gx,
         gy,
+        rateMul: 1,
+        terrorT: 0,
       });
       setHover(bonus > 0 ? `已放置 ${def.name} · 高地射程 +${bonus}` : `已放置 ${def.name}`);
     };
@@ -1528,6 +1707,8 @@ export function FoxTD() {
         stake: !!t.stake,
         gx: t.gx,
         gy: t.gy,
+        rateMul: 1,
+        terrorT: 0,
       });
     }
     const nextWaves = data.waves ?? null;

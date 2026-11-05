@@ -50,6 +50,8 @@ export type EnemyDef = {
   color: string;
   r: number;
   traits: Trait[];
+  boss?: boolean;
+  skills?: string[];
 };
 
 export const TRAIT_INFO: { id: Trait; label: string }[] = [
@@ -62,16 +64,16 @@ export const TRAIT_INFO: { id: Trait; label: string }[] = [
 
 export function stockBestiary(): EnemyDef[] {
   return [
-    { name: "小妖", hp: 70, speed: 160, gold: 7, color: "#6dcaa0", r: 11, traits: [] },
-    { name: "狼妖", hp: 150, speed: 145, gold: 16, color: "#c48a62", r: 13, traits: [] },
-    { name: "石魔", hp: 320, speed: 110, gold: 28, color: "#7f93a8", r: 16, traits: ["armor"] },
-    { name: "炎魔", hp: 420, speed: 130, gold: 42, color: "#e07048", r: 15, traits: ["regen"] },
-    { name: "魔將", hp: 700, speed: 100, gold: 68, color: "#b06ad4", r: 18, traits: ["armor", "noslow"] },
-    { name: "妖王", hp: 1200, speed: 90, gold: 120, color: "#ff5f9a", r: 21, traits: ["shield"] },
-    { name: "潮刃", hp: 380, speed: 125, gold: 36, color: "#ffd2a8", r: 14, traits: ["melee"] },
-    { name: "影衛", hp: 520, speed: 105, gold: 48, color: "#9bb0c9", r: 15, traits: ["armor", "shield"] },
-    { name: "疾狐", hp: 180, speed: 230, gold: 22, color: "#d7b6ff", r: 12, traits: ["noslow"] },
-    { name: "妖后", hp: 1800, speed: 80, gold: 180, color: "#ffd27a", r: 22, traits: ["regen", "shield", "armor"] },
+    { name: "小妖", hp: 70, speed: 160, gold: 7, color: "#6dcaa0", r: 11, traits: [], skills: ["howl"] },
+    { name: "狼妖", hp: 150, speed: 145, gold: 16, color: "#c48a62", r: 13, traits: [], skills: ["charge", "howl"] },
+    { name: "石魔", hp: 320, speed: 110, gold: 28, color: "#7f93a8", r: 16, traits: ["armor"], skills: ["slam", "howl"] },
+    { name: "炎魔", hp: 420, speed: 130, gold: 42, color: "#e07048", r: 15, traits: ["regen"], skills: ["mend", "howl"] },
+    { name: "魔將", hp: 900, speed: 100, gold: 80, color: "#b06ad4", r: 18, traits: ["armor", "noslow"], boss: true, skills: ["slam", "terror", "howl", "barrier"] },
+    { name: "妖王", hp: 1400, speed: 90, gold: 140, color: "#ff5f9a", r: 21, traits: ["shield"], boss: true, skills: ["nova", "barrier", "mend", "terror"] },
+    { name: "潮刃", hp: 380, speed: 125, gold: 36, color: "#ffd2a8", r: 14, traits: ["melee"], skills: ["slam", "charge"] },
+    { name: "影衛", hp: 520, speed: 105, gold: 48, color: "#9bb0c9", r: 15, traits: ["armor", "shield"], skills: ["barrier", "slam"] },
+    { name: "疾狐", hp: 180, speed: 230, gold: 22, color: "#d7b6ff", r: 12, traits: ["noslow"], skills: ["charge"] },
+    { name: "妖后", hp: 2200, speed: 80, gold: 220, color: "#ffd27a", r: 22, traits: ["regen", "shield", "armor"], boss: true, skills: ["nova", "mend", "barrier", "howl", "terror"] },
   ];
 }
 
