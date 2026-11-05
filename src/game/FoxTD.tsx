@@ -109,8 +109,8 @@ function projectDist(x: number, y: number, route = 0) {
 }
 
 
-const ZOOM_MIN = 0.25;
-const ZOOM_MAX = 2.5;
+const ZOOM_MIN = 0.1;
+const ZOOM_MAX = 3;
 
 function clampCam(cam: { x: number; y: number; zoom: number }) {
   const z = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, cam.zoom || 1));
@@ -1412,6 +1412,14 @@ export function FoxTD() {
     raf = requestAnimationFrame(loop);
 
     const commitBlocks = (next: Set<string>) => {
+      // 出入口不可成為碰撞格，避免路徑被關死
+      for (const g of entrancesRef.current) next.delete(cellKey(g.c, g.r));
+      for (const g of exitsRef.current) next.delete(cellKey(g.c, g.r));
+      // 清掉非法座標的碰撞 key
+      for (const key of [...next]) {
+        const [c, r] = key.split(",").map(Number);
+        if (!Number.isFinite(c) || !Number.isFinite(r) || c < 0 || r < 0 || c >= COLS || r >= ROWS) next.delete(key);
+      }
       const paths = pathsForGates(next, entrancesRef.current, exitsRef.current);
       if (!paths) return false;
       const marks = sim.current.enemies.map((e) => ({
@@ -1719,10 +1727,15 @@ export function FoxTD() {
   }, []);
 
   function canPlace(gx: number, gy: number) {
+    if (!Number.isInteger(gx) || !Number.isInteger(gy)) return false;
     if (gx < 0 || gy < 0 || gx >= COLS || gy >= ROWS) return false;
     if (gateHere(gx, gy)) return false;
-    if (sim.current.blocked.has(cellKey(gx, gy))) return false;
-    return !sim.current.towers.some((t) => t.gx === gx && t.gy === gy);
+    const key = cellKey(gx, gy);
+    // 路障／地圖牆 = 碰撞體
+    if (sim.current.blocked.has(key)) return false;
+    // 已有塔或路障佔格
+    if (sim.current.towers.some((t) => t.gx === gx && t.gy === gy)) return false;
+    return true;
   }
 
   function start() {
