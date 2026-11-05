@@ -16,7 +16,19 @@ const VIEWW = VIEW_W;
 const VIEWH = VIEW_H;
 const GRID = CELL;
 const MAX_WAVE = 20;
-const STAKE_COST = 40;
+const STAKE_COST = 35;
+const START_GOLD = 200;
+
+/** 升級費用：前期便宜、後期遞增，避免直線爆炸 */
+function upgradeCost(kind: "dmg" | "rate", level: number) {
+  const base = kind === "dmg" ? 30 : 26;
+  // level 1→2 ≈ 30/26, 5→6 ≈ 90/78, 10→11 ≈ 210/180
+  return Math.round(base * Math.pow(level, 1.32));
+}
+
+function sellRefund(spent: number) {
+  return Math.floor(spent * 0.7);
+}
 const MAP_KEY = "foxtd-maps-v1";
 const LAST_KEY = "foxtd-last-layout";
 
@@ -153,6 +165,8 @@ type Tower = {
   gy: number;
   rateMul: number;
   terrorT: number;
+  /** 累計投入金幣（建塔+升級），用於賣出退款 */
+  spent: number;
 };
 
 type Shot = {
@@ -329,7 +343,7 @@ function blit(ctx: CanvasRenderingContext2D, img: HTMLImageElement, dx: number, 
 export function FoxTD() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
-  const [gold, setGold] = useState(180);
+  const [gold, setGold] = useState(START_GOLD);
   const [lives, setLives] = useState(20);
   const [wave, setWave] = useState(0);
   const [phase, setPhase] = useState<Phase>("ready");
@@ -343,7 +357,7 @@ export function FoxTD() {
   const [paused, setPaused] = useState(false);
   const [waves, setWaves] = useState<WaveDef[] | null>(null);
   const [editWave, setEditWave] = useState(0);
-  const goldRef = useRef(180);
+  const goldRef = useRef(START_GOLD);
   const livesRef = useRef(20);
   const phaseRef = useRef<Phase>("ready");
   const pickRef = useRef<number | null>(null);
@@ -616,14 +630,17 @@ export function FoxTD() {
           const et = book[job.type] ?? book[0];
           const scale = endlessRef.current ? endlessScale(s.wave) : 1 + (s.wave - 1) * 0.16;
           const speedMul = endlessRef.current ? 1 + Math.min(0.12, (s.wave - 1) * 0.004) : 1;
-          const goldMul = endlessRef.current ? 1 + Math.min(1.2, s.wave * 0.045) : 1 + s.wave * 0.14;
+          // 關卡：緩增；無盡：更慢，避免金幣雪球壓過難度
+          const goldMul = endlessRef.current
+            ? 1 + Math.min(0.9, s.wave * 0.035)
+            : 1 + Math.min(1.6, (s.wave - 1) * 0.07);
           s.enemies.push({
             type: job.type,
             dist: 0,
             hp: et.hp * scale,
             maxHp: et.hp * scale,
             speed: et.speed * (0.96 + Math.random() * 0.08) * speedMul,
-            gold: Math.round(et.gold * goldMul * (1 + job.type * 0.1)),
+            gold: Math.max(1, Math.round(et.gold * goldMul * (1 + job.type * 0.08))),
             slow: 1,
             slowT: 0,
             burn: 0,
@@ -1489,6 +1506,7 @@ export function FoxTD() {
           gy,
           rateMul: 1,
           terrorT: 0,
+          spent: STAKE_COST,
         });
         setHover("路障已放，妖潮改走最短路");
         return;
@@ -1525,6 +1543,7 @@ export function FoxTD() {
         gy,
         rateMul: 1,
         terrorT: 0,
+        spent: def.cost,
       });
       setHover(bonus > 0 ? `已放置 ${def.name} · 高地射程 +${bonus}` : `已放置 ${def.name}`);
     };
@@ -1556,7 +1575,7 @@ export function FoxTD() {
     sim.current.queue = [];
     sim.current.wave = 0;
     sim.current.between = 0;
-    goldRef.current = 180;
+    goldRef.current = START_GOLD;
     livesRef.current = 20;
     setGold(180);
     setLives(20);
@@ -1709,6 +1728,7 @@ export function FoxTD() {
         gy: t.gy,
         rateMul: 1,
         terrorT: 0,
+        spent: t.stake ? STAKE_COST : (TOWERS[t.def]?.cost ?? 50) * Math.max(1, t.level || 1),
       });
     }
     const nextWaves = data.waves ?? null;
@@ -1718,7 +1738,7 @@ export function FoxTD() {
     const savedWave = data.wave || 0;
     s.wave = nextPhase === "play" && savedWave > 0 ? savedWave - 1 : savedWave;
     s.between = 0;
-    goldRef.current = data.gold ?? 180;
+    goldRef.current = data.gold ?? START_GOLD;
     livesRef.current = data.lives ?? 20;
     setGold(goldRef.current);
     setLives(livesRef.current);
@@ -1761,18 +1781,19 @@ export function FoxTD() {
   function upgrade(kind: "dmg" | "rate") {
     if (sel === null) return;
     const tw = sim.current.towers[sel];
-    if (!tw) return;
-    const cost = kind === "dmg" ? 40 * tw.level : 36 * tw.level;
+    if (!tw || tw.stake) return;
+    const cost = upgradeCost(kind, tw.level);
     if (goldRef.current < cost) {
-      setHover("金幣不夠升級");
+      setHover(`金幣不夠（需要 ${cost}）`);
       return;
     }
     goldRef.current -= cost;
     setGold(goldRef.current);
-    if (kind === "dmg") tw.damage *= 1.25;
-    else tw.cooldown = Math.max(0.16, tw.cooldown * 0.8);
+    tw.spent = (tw.spent || 0) + cost;
+    if (kind === "dmg") tw.damage *= 1.22;
+    else tw.cooldown = Math.max(0.18, tw.cooldown * 0.82);
     tw.level += 1;
-    setHover(kind === "dmg" ? "傷害提升" : "射速提升");
+    setHover(kind === "dmg" ? `傷害提升（−${cost}）` : `射速提升（−${cost}）`);
     setSel(sel);
   }
 
@@ -1816,15 +1837,16 @@ export function FoxTD() {
       next.delete(cellKey(tw.gx, tw.gy));
       const commit = (canvasRef.current as HTMLCanvasElement & { __commit?: (n: Set<string>) => boolean }).__commit;
       commit?.(next);
-      goldRef.current += Math.floor(STAKE_COST * 0.6);
+      const refund = sellRefund(tw.spent || STAKE_COST);
+      goldRef.current += refund;
       setGold(goldRef.current);
       sim.current.towers.splice(sel, 1);
       selRef.current = null;
       setSel(null);
-      setHover("路障已拆除，路線已重算");
+      setHover(`路障已拆除 +${refund}`);
       return;
     }
-    const refund = Math.floor(TOWERS[tw.def].cost * 0.6);
+    const refund = sellRefund(tw.spent || TOWERS[tw.def].cost);
     goldRef.current += refund;
     setGold(goldRef.current);
     sim.current.towers.splice(sel, 1);
@@ -1843,7 +1865,7 @@ export function FoxTD() {
           <p className="text-xs tracking-[0.28em] text-[#8ec8ee]">UNDERWATER WARD</p>
           <h1 className="font-['Cormorant_Garamond'] text-4xl leading-none text-[#ffe7f1]">狐仙塔防</h1>
         </div>
-        <p className="hidden text-sm text-[#9ec4de] sm:block">越後面的狐仙越強 · 強敵掉更多金幣</p>
+        <p className="hidden text-sm text-[#9ec4de] sm:block">前期好起步 · 升級前期便宜後期遞增 · 賣出退 70% 投入</p>
       </header>
       <div className="td-layout">
         <div className="stage" ref={wrapRef}>
@@ -2055,10 +2077,10 @@ export function FoxTD() {
               </div>
               <div className="mt-2 flex gap-2">
                 <button className="btn ghost flex-1" onClick={() => upgrade("dmg")}>
-                  傷害 {40 * selected.level}
+                  傷害 {upgradeCost("dmg", selected.level)}
                 </button>
                 <button className="btn ghost flex-1" onClick={() => upgrade("rate")}>
-                  射速 {36 * selected.level}
+                  射速 {upgradeCost("rate", selected.level)}
                 </button>
               </div>
               <button className="btn ghost mt-2 w-full" onClick={sell}>
