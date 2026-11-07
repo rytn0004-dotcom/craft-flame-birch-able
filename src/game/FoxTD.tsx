@@ -363,7 +363,7 @@ const SPRITE_SETS = {
 };
 
 const TOWER_ANIMS: string[][] = TOWERS.map((_, i) =>
-  [0, 1, 2, 3, 4, 5].map((n) => `/anim/towers/t${String(i + 1).padStart(2, "0")}/${n}.png?v=5`),
+  Array.from({ length: 12 }, (_, n) => `/anim/towers/t${String(i + 1).padStart(2, "0")}/${n}.png?v=6`),
 );
 
 function pingIndex(count: number, step: number) {
