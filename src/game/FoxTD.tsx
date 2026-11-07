@@ -722,6 +722,12 @@ export function FoxTD() {
       bg: "/scene/bg.jpg",
       coral: "/scene/coral.png?v=4",
       pillar: "/scene/pillar.png?v=4",
+      ground: "/scene/ground.png",
+      height1: "/scene/height1.png",
+      height2: "/scene/height2.png",
+      height3: "/scene/height3.png",
+      entrance: "/scene/entrance.png",
+      exit: "/scene/exit.png",
     })) {
       const img = new Image();
       img.src = src;
@@ -1619,17 +1625,27 @@ export function FoxTD() {
         ctx.stroke();
       }
 
-      // 可走潮坪：連片柔和填色（無砂點）
+      // 可走潮坪：貼圖平鋪 + 柔和底色
+      const groundImg = s.scene.ground;
+      const groundReady = !!(groundImg && groundImg.complete && groundImg.naturalWidth);
       for (let r = y0; r <= y1; r++) {
         for (let c = x0; c <= x1; c++) {
           if (!isCellOnBoard(boardRef.current, c, r)) continue;
           const key = cellKey(c, r);
           if (s.blocked.has(key)) continue;
           const x = c * CELL, y = r * CELL;
-          const h = ((c * 374761) ^ (r * 668265)) >>> 0;
-          const tint = (h % 8) / 8;
-          ctx.fillStyle = `rgba(${24 + tint * 14 | 0}, ${58 + tint * 18 | 0}, ${72 + tint * 20 | 0}, 0.55)`;
-          ctx.fillRect(x, y, CELL + 0.5, CELL + 0.5);
+          if (groundReady) {
+            ctx.globalAlpha = 0.78;
+            ctx.drawImage(groundImg, (c * 37) % 96, (r * 53) % 96, 32, 32, x, y, CELL + 0.5, CELL + 0.5);
+            ctx.globalAlpha = 1;
+            ctx.fillStyle = "rgba(20, 55, 70, 0.22)";
+            ctx.fillRect(x, y, CELL + 0.5, CELL + 0.5);
+          } else {
+            const h = ((c * 374761) ^ (r * 668265)) >>> 0;
+            const tint = (h % 8) / 8;
+            ctx.fillStyle = `rgba(${24 + tint * 14 | 0}, ${58 + tint * 18 | 0}, ${72 + tint * 20 | 0}, 0.55)`;
+            ctx.fillRect(x, y, CELL + 0.5, CELL + 0.5);
+          }
         }
       }
 
@@ -1695,28 +1711,42 @@ export function FoxTD() {
         }
       }
 
-      const pads = ["", "rgba(86, 176, 196, 0.38)", "rgba(120, 214, 230, 0.5)", "rgba(255, 214, 140, 0.55)"];
-      const lips = ["", "rgba(40, 90, 110, 0.55)", "rgba(50, 120, 140, 0.6)", "rgba(150, 100, 40, 0.55)"];
       ctx.textAlign = "center";
+      const heightImgs = [null, s.scene.height1, s.scene.height2, s.scene.height3];
       for (let r = y0; r <= y1; r++) {
         for (let c = x0; c <= x1; c++) {
           const h = cellHeight(s.heights, c, r);
           if (h <= 0) continue;
           const x = c * CELL;
           const y = r * CELL;
-          const lift = h * 5;
-          if (h > 0) {
-            ctx.fillStyle = lips[h];
-            ctx.fillRect(x + 4, y + 10 - lift, CELL - 8, CELL - 12);
-            ctx.fillStyle = pads[h];
-            ctx.fillRect(x + 4, y + 4 - lift, CELL - 8, CELL - 16);
-            ctx.strokeStyle = h === 3 ? "rgba(255,230,170,0.8)" : "rgba(190,240,255,0.45)";
-            ctx.strokeRect(x + 4, y + 4 - lift, CELL - 8, CELL - 16);
+          const lift = h * 6;
+          const himg = heightImgs[Math.min(3, h)];
+          if (himg && himg.complete && himg.naturalWidth) {
+            ctx.globalAlpha = 0.92;
+            ctx.drawImage(himg, x - 4, y - 10 - lift, CELL + 8, CELL + 12);
+            ctx.globalAlpha = 1;
+          } else {
+            // 後備：圓角礁岩台
+            const cols = [
+              null,
+              ["rgba(40,90,105,0.7)", "rgba(100,180,195,0.75)"],
+              ["rgba(50,110,125,0.75)", "rgba(130,205,220,0.8)"],
+              ["rgba(120,90,40,0.75)", "rgba(255,220,140,0.85)"],
+            ] as const;
+            const pair = cols[h]!;
+            ctx.fillStyle = pair[0];
+            ctx.beginPath();
+            ctx.ellipse(x + CELL / 2, y + CELL / 2 + 4 - lift * 0.3, CELL * 0.42, CELL * 0.28, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = pair[1];
+            ctx.beginPath();
+            ctx.ellipse(x + CELL / 2, y + CELL / 2 - 6 - lift * 0.5, CELL * 0.38, CELL * 0.26, 0, 0, Math.PI * 2);
+            ctx.fill();
           }
           if (workshopRef.current) {
             ctx.fillStyle = h === 3 ? "#fff4d2" : "#e9fbff";
             ctx.font = "bold 11px sans-serif";
-            ctx.fillText(String(h), x + CELL / 2, y + 16 - lift);
+            ctx.fillText(String(h), x + CELL / 2, y + 14 - lift);
           }
         }
       }
@@ -1879,18 +1909,59 @@ export function FoxTD() {
           }
         }
       }
-      ctx.font = "bold 12px sans-serif";
+      ctx.textAlign = "center";
+      ctx.font = "bold 11px sans-serif";
+      const pulse = 0.85 + Math.sin(t * 2.2) * 0.1;
       entrancesRef.current.forEach((g, i) => {
-        ctx.fillStyle = "rgba(80, 180, 220, 0.85)";
-        ctx.fillRect(g.c * CELL + 2, g.r * CELL + 2, CELL - 4, CELL - 4);
+        const x = g.c * CELL + CELL / 2;
+        const y = g.r * CELL + CELL / 2;
+        const ent = s.scene.entrance;
+        // 光暈
+        const grd = ctx.createRadialGradient(x, y, 4, x, y, CELL * 0.85);
+        grd.addColorStop(0, "rgba(120, 220, 255, 0.35)");
+        grd.addColorStop(1, "rgba(40, 120, 180, 0)");
+        ctx.fillStyle = grd;
+        ctx.beginPath();
+        ctx.arc(x, y, CELL * 0.9, 0, Math.PI * 2);
+        ctx.fill();
+        if (ent && ent.complete && ent.naturalWidth) {
+          ctx.globalAlpha = pulse;
+          ctx.drawImage(ent, x - CELL * 0.7, y - CELL * 0.7, CELL * 1.4, CELL * 1.4);
+          ctx.globalAlpha = 1;
+        } else {
+          ctx.strokeStyle = "rgba(140, 230, 255, 0.8)";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(x, y, CELL * 0.38, 0, Math.PI * 2);
+          ctx.stroke();
+        }
         ctx.fillStyle = "#e8fbff";
-        ctx.fillText(String(i + 1), g.c * CELL + CELL / 2, g.r * CELL + 20);
+        ctx.fillText(String(i + 1), x, y + 4);
       });
       exitsRef.current.forEach((g, i) => {
-        ctx.fillStyle = "rgba(220, 90, 130, 0.85)";
-        ctx.fillRect(g.c * CELL + 2, g.r * CELL + 2, CELL - 4, CELL - 4);
+        const x = g.c * CELL + CELL / 2;
+        const y = g.r * CELL + CELL / 2;
+        const ex = s.scene.exit;
+        const grd = ctx.createRadialGradient(x, y, 4, x, y, CELL * 0.85);
+        grd.addColorStop(0, "rgba(255, 140, 180, 0.35)");
+        grd.addColorStop(1, "rgba(180, 40, 90, 0)");
+        ctx.fillStyle = grd;
+        ctx.beginPath();
+        ctx.arc(x, y, CELL * 0.9, 0, Math.PI * 2);
+        ctx.fill();
+        if (ex && ex.complete && ex.naturalWidth) {
+          ctx.globalAlpha = pulse;
+          ctx.drawImage(ex, x - CELL * 0.7, y - CELL * 0.7, CELL * 1.4, CELL * 1.4);
+          ctx.globalAlpha = 1;
+        } else {
+          ctx.strokeStyle = "rgba(255, 160, 190, 0.85)";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(x, y, CELL * 0.38, 0, Math.PI * 2);
+          ctx.stroke();
+        }
         ctx.fillStyle = "#ffe4ee";
-        ctx.fillText(String(i + 1), g.c * CELL + CELL / 2, g.r * CELL + 20);
+        ctx.fillText(String(i + 1), x, y + 4);
       });
       ctx.textAlign = "left";
 
