@@ -27,18 +27,18 @@ export type TowerDef = {
 
 /** 基準數值（普通難度）；實際遊戲會再乘難度倍率 */
 export const TOWERS: TowerDef[] = [
-  { id: 0, name: "銀月狐仙", img: "/towers/t01.png", cost: 45, range: 150, damage: 32, cooldown: 0.85, special: "high", trait: "高傷害", color: "#b9dcff" },
-  { id: 1, name: "寒霜狐仙", img: "/towers/t02.png", cost: 55, range: 135, damage: 14, cooldown: 0.8, special: "slow", trait: "減速敵人 45%", color: "#7ecbff" },
-  { id: 2, name: "潮歌狐仙", img: "/towers/t03.png", cost: 70, range: 210, damage: 20, cooldown: 1.0, special: "range", trait: "超遠射程", color: "#9ad7ff" },
-  { id: 3, name: "赤焰狐仙", img: "/towers/t04.png", cost: 80, range: 140, damage: 16, cooldown: 0.95, special: "burn", trait: "燃燒 持續傷害", color: "#ff8a55" },
-  { id: 4, name: "疾羽狐仙", img: "/towers/t05.png", cost: 95, range: 125, damage: 11, cooldown: 0.26, special: "rapid", trait: "極高射速", color: "#d7b6ff" },
-  { id: 5, name: "花繚狐仙", img: "/towers/t06.png", cost: 120, range: 155, damage: 22, cooldown: 1.1, special: "aoe", trait: "範圍爆炸", color: "#ff9ec4" },
-  { id: 6, name: "縛影狐仙", img: "/towers/t07.png", cost: 140, range: 130, damage: 18, cooldown: 1.0, special: "root", trait: "阻擋：定身 + 強減速", color: "#c9a0ff" },
-  { id: 7, name: "聖輝狐仙", img: "/towers/t08.png", cost: 160, range: 150, damage: 24, cooldown: 0.9, special: "break", trait: "護盾破擊：易傷 +40%", color: "#ffe08a" },
-  { id: 8, name: "璃鏈狐仙", img: "/towers/t09.png", cost: 180, range: 145, damage: 20, cooldown: 0.85, special: "chain", trait: "連鎖閃電 3 名", color: "#8ef0ff" },
-  { id: 9, name: "霞貫狐仙", img: "/towers/t10.png", cost: 210, range: 175, damage: 28, cooldown: 1.05, special: "pierce", trait: "穿透直線傷害", color: "#ffb0c8" },
-  { id: 10, name: "背光狐仙", img: "/towers/t11.png", cost: 240, range: 160, damage: 42, cooldown: 1.15, special: "execute", trait: "高傷害，殘血處決", color: "#ffd2a8" },
-  { id: 11, name: "究極狐仙", img: "/towers/t12.png", cost: 300, range: 180, damage: 48, cooldown: 0.8, special: "ultimate", trait: "高傷 + 燃燒 + 減速 + 範圍", color: "#ff6fa8" },
+  { id: 0, name: "銀月狐仙", img: "/towers/t01.png?v=5", cost: 45, range: 150, damage: 32, cooldown: 0.85, special: "high", trait: "高傷害", color: "#b9dcff" },
+  { id: 1, name: "寒霜狐仙", img: "/towers/t02.png?v=5", cost: 55, range: 135, damage: 14, cooldown: 0.8, special: "slow", trait: "減速敵人 45%", color: "#7ecbff" },
+  { id: 2, name: "潮歌狐仙", img: "/towers/t03.png?v=5", cost: 70, range: 210, damage: 20, cooldown: 1.0, special: "range", trait: "超遠射程", color: "#9ad7ff" },
+  { id: 3, name: "赤焰狐仙", img: "/towers/t04.png?v=5", cost: 80, range: 140, damage: 16, cooldown: 0.95, special: "burn", trait: "燃燒 持續傷害", color: "#ff8a55" },
+  { id: 4, name: "疾羽狐仙", img: "/towers/t05.png?v=5", cost: 95, range: 125, damage: 11, cooldown: 0.26, special: "rapid", trait: "極高射速", color: "#d7b6ff" },
+  { id: 5, name: "花繚狐仙", img: "/towers/t06.png?v=5", cost: 120, range: 155, damage: 22, cooldown: 1.1, special: "aoe", trait: "範圍爆炸", color: "#ff9ec4" },
+  { id: 6, name: "縛影狐仙", img: "/towers/t07.png?v=5", cost: 140, range: 130, damage: 18, cooldown: 1.0, special: "root", trait: "阻擋：定身 + 強減速", color: "#c9a0ff" },
+  { id: 7, name: "聖輝狐仙", img: "/towers/t08.png?v=5", cost: 160, range: 150, damage: 24, cooldown: 0.9, special: "break", trait: "護盾破擊：易傷 +40%", color: "#ffe08a" },
+  { id: 8, name: "璃鏈狐仙", img: "/towers/t09.png?v=5", cost: 180, range: 145, damage: 20, cooldown: 0.85, special: "chain", trait: "連鎖閃電 3 名", color: "#8ef0ff" },
+  { id: 9, name: "霞貫狐仙", img: "/towers/t10.png?v=5", cost: 210, range: 175, damage: 28, cooldown: 1.05, special: "pierce", trait: "穿透直線傷害", color: "#ffb0c8" },
+  { id: 10, name: "背光狐仙", img: "/towers/t11.png?v=5", cost: 240, range: 160, damage: 42, cooldown: 1.15, special: "execute", trait: "高傷害，殘血處決", color: "#ffd2a8" },
+  { id: 11, name: "究極狐仙", img: "/towers/t12.png?v=5", cost: 300, range: 180, damage: 48, cooldown: 0.8, special: "ultimate", trait: "高傷 + 燃燒 + 減速 + 範圍", color: "#ff6fa8" },
 ];
 
 export type Trait = "melee" | "armor" | "regen" | "noslow" | "shield";

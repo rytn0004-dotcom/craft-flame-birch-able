@@ -363,7 +363,7 @@ const SPRITE_SETS = {
 };
 
 const TOWER_ANIMS: string[][] = TOWERS.map((_, i) =>
-  i < 5 ? [0, 1, 2, 3, 4, 5, 6, 7].map((n) => `/anim/towers/t${String(i + 1).padStart(2, "0")}/${n}.jpg`) : [],
+  [0, 1, 2, 3, 4, 5].map((n) => `/anim/towers/t${String(i + 1).padStart(2, "0")}/${n}.png?v=5`),
 );
 
 function pingIndex(count: number, step: number) {
@@ -379,7 +379,14 @@ function AlivePortrait({ frames }: { frames: string[] }) {
     const id = window.setInterval(() => setStep((n) => n + 1), 130);
     return () => window.clearInterval(id);
   }, []);
-  return <img src={frames[pingIndex(frames.length, step)] ?? frames[0]} alt="" />;
+  return (
+    <img
+      className="tower-idle"
+      src={frames[pingIndex(frames.length, step)] ?? frames[0]}
+      alt=""
+      draggable={false}
+    />
+  );
 }
 
 type Phase = "ready" | "play" | "win" | "lose";
@@ -516,12 +523,25 @@ function queueFromGroups(groups: WaveGroup[], gates: number[], routeCount: numbe
   return list;
 }
 
+/** 透明精靈直接繪製；不裁切硬邊，避免奇怪邊緣 */
 function blit(ctx: CanvasRenderingContext2D, img: HTMLImageElement, dx: number, dy: number, dw: number, dh: number) {
   const sw = img.naturalWidth;
   const sh = img.naturalHeight;
   if (!sw || !sh) return;
-  const m = Math.max(1, Math.floor(Math.min(sw, sh) * 0.03));
-  ctx.drawImage(img, m, m, sw - m * 2, sh - m * 2, dx, dy, dw, dh);
+  ctx.drawImage(img, 0, 0, sw, sh, dx, dy, dw, dh);
+}
+
+/** 塔繪製：輕微橢圓遮罩去掉殘餘方角背景 */
+function blitTower(ctx: CanvasRenderingContext2D, img: HTMLImageElement, dx: number, dy: number, dw: number, dh: number) {
+  const sw = img.naturalWidth;
+  const sh = img.naturalHeight;
+  if (!sw || !sh) return;
+  ctx.save();
+  ctx.beginPath();
+  ctx.ellipse(dx + dw / 2, dy + dh * 0.52, dw * 0.48, dh * 0.48, 0, 0, Math.PI * 2);
+  ctx.clip();
+  ctx.drawImage(img, 0, 0, sw, sh, dx, dy, dw, dh);
+  ctx.restore();
 }
 
 export function FoxTD() {
@@ -2000,19 +2020,13 @@ export function FoxTD() {
         const breathe = hasAnim ? 1 : 1 + Math.sin(t * 2.4 + i) * 0.05;
         ctx.save();
         ctx.translate(tw.x + ox, tw.y + bob + oy);
-        ctx.rotate(Math.sin(t * 1.5 + i * 0.7) * (hasAnim ? 0.03 : 0.07));
-        ctx.scale((1 + kick * 0.12) * breathe, (1 - kick * 0.08) * (2 - breathe));
+        ctx.rotate(Math.sin(t * 1.5 + i * 0.7) * (hasAnim ? 0.02 : 0.04));
+        ctx.scale((1 + kick * 0.1) * breathe, (1 - kick * 0.06) * (2 - breathe));
+        // 腳底淡影（無圓框）
         ctx.beginPath();
-        ctx.ellipse(0, 22, 18, 6, 0, 0, Math.PI * 2);
-        ctx.fillStyle = "rgba(0,0,0,0.35)";
+        ctx.ellipse(0, 26, 16, 5, 0, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(0,0,0,0.28)";
         ctx.fill();
-        ctx.beginPath();
-        ctx.arc(0, 0, 26, 0, Math.PI * 2);
-        ctx.fillStyle = "rgba(8,20,36,0.88)";
-        ctx.fill();
-        ctx.strokeStyle = def.color;
-        ctx.lineWidth = 2.5;
-        ctx.stroke();
         let img = s.images[tw.def];
         if (hasAnim) {
           const idx = pingIndex(frames.length, Math.floor(t * (tw.recoil > 0 ? 14 : 6) + i));
@@ -2020,23 +2034,30 @@ export function FoxTD() {
           if (fr && fr.complete && fr.naturalWidth) img = fr;
         }
         if (img && img.complete && img.naturalWidth) {
+          // 只顯示立繪，輕柔橢圓遮罩去掉殘餘方角
           ctx.save();
           ctx.beginPath();
-          ctx.arc(0, 0, 22, 0, Math.PI * 2);
+          ctx.ellipse(0, 2, 28, 30, 0, 0, Math.PI * 2);
           ctx.clip();
-          ctx.drawImage(img, -22, -22, 44, 44);
+          ctx.drawImage(img, -28, -32, 56, 56);
           ctx.restore();
+        } else {
+          ctx.fillStyle = def.color;
+          ctx.beginPath();
+          ctx.arc(0, 0, 14, 0, Math.PI * 2);
+          ctx.fill();
         }
         ctx.restore();
+        // 瞄準指示改為細短光點，不畫粗槍管框
         ctx.save();
         ctx.translate(tw.x + ox, tw.y + bob + oy);
         ctx.rotate(tw.aim || 0);
-        ctx.translate(-kick * 14, 0);
         ctx.fillStyle = def.color;
-        ctx.fillRect(12, -3, 18, 6);
+        ctx.globalAlpha = 0.75;
         ctx.beginPath();
-        ctx.arc(30, 0, 4, 0, Math.PI * 2);
+        ctx.arc(22 - kick * 10, 0, 3, 0, Math.PI * 2);
         ctx.fill();
+        ctx.globalAlpha = 1;
         ctx.restore();
         if (!hasAnim) {
           const motes = def.special === "ultimate" ? 6 : 4;
