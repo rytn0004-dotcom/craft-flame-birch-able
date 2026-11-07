@@ -47,6 +47,18 @@ function upgradeCost(kind: "dmg" | "rate", level: number) {
   return Math.round(base * Math.pow(level, 1.32));
 }
 
+type AutoUpgradeMode = "off" | "dmg" | "rate" | "smart";
+const AUTO_UPGRADE_MAX_LEVEL = 10;
+/** 自動升級至少保留的金幣，避免把建塔錢花光 */
+const AUTO_UPGRADE_RESERVE = 45;
+const AUTO_UPGRADE_LABEL: Record<AutoUpgradeMode, string> = {
+  off: "自動升級：關",
+  dmg: "自動：傷害",
+  rate: "自動：射速",
+  smart: "自動：智能",
+};
+
+
 function sellRefund(spent: number) {
   return Math.floor(spent * 0.7);
 }
@@ -479,6 +491,8 @@ export function FoxTD() {
   const [hover, setHover] = useState("");
   const [speed, setSpeed] = useState(1);
   const [endless, setEndless] = useState(false);
+  const [autoUpgrade, setAutoUpgrade] = useState<AutoUpgradeMode>("off");
+  const autoUpgradeRef = useRef<AutoUpgradeMode>("off");
   const [staking, setStaking] = useState(false);
   const [workshop, setWorkshop] = useState(false);
   const [paused, setPaused] = useState(false);
@@ -548,6 +562,9 @@ export function FoxTD() {
   useEffect(() => {
     stakeRef.current = staking;
   }, [staking]);
+  useEffect(() => {
+    autoUpgradeRef.current = autoUpgrade;
+  }, [autoUpgrade]);
   useEffect(() => {
     workshopRef.current = workshop;
   }, [workshop]);
@@ -991,6 +1008,34 @@ export function FoxTD() {
           float(p.x, p.y, `+${e.gold}`, "#ffd27a");
           burst(p.x, p.y, e.color, 12, 2.4);
           s.enemies.splice(i, 1);
+        }
+      }
+
+      // 自動升級：優先低等塔，保留底金
+      {
+        const mode = autoUpgradeRef.current;
+        if (mode !== "off" && phaseRef.current === "play") {
+          const list = s.towers
+            .map((t, i) => ({ t, i }))
+            .filter(({ t }) => !t.stake && t.level < AUTO_UPGRADE_MAX_LEVEL)
+            .sort((a, b) => a.t.level - b.t.level || a.i - b.i);
+          for (const { t: tw } of list) {
+            let kind: "dmg" | "rate" = mode === "rate" ? "rate" : "dmg";
+            if (mode === "smart") {
+              const cd = upgradeCost("dmg", tw.level);
+              const cr = upgradeCost("rate", tw.level);
+              kind = cr < cd ? "rate" : "dmg";
+            }
+            const cost = upgradeCost(kind, tw.level);
+            if (goldRef.current - cost < AUTO_UPGRADE_RESERVE) continue;
+            if (goldRef.current < cost) continue;
+            goldRef.current -= cost;
+            tw.spent = (tw.spent || 0) + cost;
+            if (kind === "dmg") tw.damage *= 1.22;
+            else tw.cooldown = Math.max(0.18, tw.cooldown * 0.82);
+            tw.level += 1;
+            setGold(goldRef.current);
+          }
         }
       }
 
@@ -2680,6 +2725,26 @@ export function FoxTD() {
               disabled={phase !== "play"}
             >
               路障 {STAKE_COST}
+            </button>
+          </div>
+          <div className="mb-2 flex gap-2">
+            <button
+              className={"btn ghost flex-1" + (autoUpgrade !== "off" ? " on" : "")}
+              onClick={() => {
+                const order: AutoUpgradeMode[] = ["off", "smart", "dmg", "rate"];
+                const next = order[(order.indexOf(autoUpgrade) + 1) % order.length];
+                setAutoUpgrade(next);
+                autoUpgradeRef.current = next;
+                setHover(
+                  next === "off"
+                    ? "已關閉自動升級"
+                    : `${AUTO_UPGRADE_LABEL[next]}（保留 ${AUTO_UPGRADE_RESERVE} 金，最高 Lv.${AUTO_UPGRADE_MAX_LEVEL}）`,
+                );
+              }}
+              disabled={phase !== "play"}
+              title="循環：關 → 智能 → 傷害 → 射速"
+            >
+              {AUTO_UPGRADE_LABEL[autoUpgrade]}
             </button>
           </div>
           <div className="mb-2 flex gap-2">
