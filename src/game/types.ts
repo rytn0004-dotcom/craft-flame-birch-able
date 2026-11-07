@@ -42,6 +42,8 @@ export const TOWERS: TowerDef[] = [
 
 export type Trait = "melee" | "armor" | "regen" | "noslow" | "shield";
 
+export type EnemySprite = "imp" | "brute" | "boss" | "king";
+
 export type EnemyDef = {
   name: string;
   hp: number;
@@ -52,6 +54,8 @@ export type EnemyDef = {
   traits: Trait[];
   boss?: boolean;
   skills?: string[];
+  sprite?: EnemySprite;
+  lore?: string;
 };
 
 export const TRAIT_INFO: { id: Trait; label: string }[] = [
@@ -62,18 +66,19 @@ export const TRAIT_INFO: { id: Trait; label: string }[] = [
   { id: "shield", label: "護盾" },
 ];
 
+/** 潮汐結界：配色對齊狐仙銀白／潮紅／海青／月光金 */
 export function stockBestiary(): EnemyDef[] {
   return [
-    { name: "小妖", hp: 70, speed: 160, gold: 9, color: "#6dcaa0", r: 11, traits: [], skills: ["howl"] },
-    { name: "狼妖", hp: 150, speed: 145, gold: 18, color: "#c48a62", r: 13, traits: [], skills: ["charge", "howl"] },
-    { name: "石魔", hp: 320, speed: 110, gold: 32, color: "#7f93a8", r: 16, traits: ["armor"], skills: ["slam", "howl"] },
-    { name: "炎魔", hp: 420, speed: 130, gold: 45, color: "#e07048", r: 15, traits: ["regen"], skills: ["mend", "howl"] },
-    { name: "魔將", hp: 900, speed: 100, gold: 95, color: "#b06ad4", r: 18, traits: ["armor", "noslow"], boss: true, skills: ["slam", "terror", "howl", "barrier"] },
-    { name: "妖王", hp: 1400, speed: 90, gold: 155, color: "#ff5f9a", r: 21, traits: ["shield"], boss: true, skills: ["nova", "barrier", "mend", "terror"] },
-    { name: "潮刃", hp: 380, speed: 125, gold: 40, color: "#ffd2a8", r: 14, traits: ["melee"], skills: ["slam", "charge"] },
-    { name: "影衛", hp: 520, speed: 105, gold: 52, color: "#9bb0c9", r: 15, traits: ["armor", "shield"], skills: ["barrier", "slam"] },
-    { name: "疾狐", hp: 180, speed: 230, gold: 26, color: "#d7b6ff", r: 12, traits: ["noslow"], skills: ["charge"] },
-    { name: "妖后", hp: 2200, speed: 80, gold: 240, color: "#ffd27a", r: 22, traits: ["regen", "shield", "armor"], boss: true, skills: ["nova", "mend", "barrier", "howl", "terror"] },
+    { name: "潮芽", hp: 70, speed: 160, gold: 9, color: "#7ec8c8", r: 11, traits: [], skills: ["howl"], sprite: "imp", lore: "珊瑚間冒出的幼靈。" },
+    { name: "浪崽", hp: 150, speed: 145, gold: 18, color: "#9ad7ff", r: 13, traits: [], skills: ["charge", "howl"], sprite: "imp", lore: "乘浪疾行的海獸幼體。" },
+    { name: "礁岩衛", hp: 320, speed: 110, gold: 32, color: "#8aa4b8", r: 16, traits: ["armor"], skills: ["slam", "howl"], sprite: "brute", lore: "沉沒神殿石像被潮聲喚醒。" },
+    { name: "炎潮", hp: 420, speed: 130, gold: 45, color: "#ff8a6a", r: 15, traits: ["regen"], skills: ["mend", "howl"], sprite: "brute", lore: "地熱與潮水交織的灼熱靈。" },
+    { name: "潮將軍", hp: 900, speed: 100, gold: 95, color: "#c9a0ff", r: 18, traits: ["armor", "noslow"], boss: true, skills: ["slam", "terror", "howl", "barrier"], sprite: "boss", lore: "率領潮陣的魔將，銀髮紅披。" },
+    { name: "深海王", hp: 1400, speed: 90, gold: 155, color: "#ff6fa8", r: 21, traits: ["shield"], boss: true, skills: ["nova", "barrier", "mend", "terror"], sprite: "king", lore: "舊日海域的君主。" },
+    { name: "潮刃", hp: 380, speed: 125, gold: 40, color: "#ffd2a8", r: 14, traits: ["melee"], skills: ["slam", "charge"], sprite: "brute", lore: "專拆塔的刃潮侍衛。" },
+    { name: "月影衛", hp: 520, speed: 105, gold: 52, color: "#b9dcff", r: 15, traits: ["armor", "shield"], skills: ["barrier", "slam"], sprite: "boss", lore: "月光甲衛，護盾如潮膜。" },
+    { name: "疾潮狐", hp: 180, speed: 230, gold: 26, color: "#d7b6ff", r: 12, traits: ["noslow"], skills: ["charge"], sprite: "imp", lore: "被污濁侵蝕的野狐靈。" },
+    { name: "潮后", hp: 2200, speed: 80, gold: 240, color: "#ffe08a", r: 22, traits: ["regen", "shield", "armor"], boss: true, skills: ["nova", "mend", "barrier", "howl", "terror"], sprite: "king", lore: "與狐仙同源而沉淪的潮后。" },
   ];
 }
 

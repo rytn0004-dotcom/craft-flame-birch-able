@@ -11,6 +11,19 @@ import {
   type SkillRuntime,
 } from "./skills";
 import { ENEMY_TYPES, stockBestiary, TOWERS, TRAIT_INFO, type EnemyDef, type Special, type TowerDef, type Trait } from "./types";
+import {
+  buildBlocked,
+  buildHeights,
+  collectGates,
+  EXPAND_EVERY,
+  isCellOnBoard,
+  OFFER_COUNT,
+  pickOfferTemplates,
+  seedBoard,
+  shouldOfferTiles,
+  frontierSlots,
+  type TileBoard,
+} from "./tiles";
 
 const VIEWW = VIEW_W;
 const VIEWH = VIEW_H;
@@ -416,6 +429,10 @@ export function FoxTD() {
   const [brush, setBrush] = useState(1);
   const [bestiary, setBestiary] = useState<EnemyDef[]>(() => stockBestiary());
   const [editMob, setEditMob] = useState(0);
+  const boardRef = useRef<TileBoard>(seedBoard());
+  const tileOfferRef = useRef<string[] | null>(null);
+  const [tileOffer, setTileOffer] = useState<string[] | null>(null);
+
 
   useEffect(() => {
     goldRef.current = gold;
@@ -713,14 +730,29 @@ export function FoxTD() {
           });
         }
       } else if (s.enemies.length === 0 && s.wave > 0) {
-        s.between += dt;
-        const cap = wavesRef.current?.length || MAX_WAVE;
-        if (s.wave >= cap && !endlessRef.current) {
-          phaseRef.current = "win";
-          setPhase("win");
+        if (tileOfferRef.current && tileOfferRef.current.length) {
+          s.between = 0;
         } else {
-          const gap = endlessRef.current ? (s.wave % 5 === 0 ? 5.5 : 4.2) : 7;
-          if (s.between > gap) beginWave();
+          s.between += dt;
+          const cap = wavesRef.current?.length || MAX_WAVE;
+          if (s.wave >= cap && !endlessRef.current) {
+            phaseRef.current = "win";
+            setPhase("win");
+          } else if (shouldOfferTiles(s.wave, boardRef.current) && !tileOfferRef.current) {
+            const opts = pickOfferTemplates(OFFER_COUNT);
+            if (opts.length && frontierSlots(boardRef.current).length) {
+              tileOfferRef.current = opts;
+              setTileOffer(opts);
+              setHover(`第 ${s.wave} 波結束 · 選擇地塊拼接（每 ${EXPAND_EVERY} 波）`);
+              s.between = 0;
+            } else {
+              const gap = endlessRef.current ? (s.wave % 5 === 0 ? 5.5 : 4.2) : 7;
+              if (s.between > gap) beginWave();
+            }
+          } else {
+            const gap = endlessRef.current ? (s.wave % 5 === 0 ? 5.5 : 4.2) : 7;
+            if (s.between > gap) beginWave();
+          }
         }
       }
 
@@ -1267,7 +1299,8 @@ export function FoxTD() {
         const p = posAt(e.dist, e.route);
         const ahead = posAt(Math.min(routeLen(e.route), e.dist + 12), e.route);
         e.face = ahead.x >= p.x ? 1 : -1;
-        const setName = e.type === 5 ? "king" : e.type <= 1 ? "imp" : e.type <= 3 ? "brute" : "boss";
+        const book = bestiaryRef.current[e.type] ?? bestiaryRef.current[0];
+        const setName = (book?.sprite as string) || (e.boss ? "boss" : e.type <= 1 ? "imp" : e.type <= 3 ? "brute" : "boss");
         const frames = s.sheets[setName] || [];
         const n = Math.max(1, frames.length);
         const frame =
@@ -1729,11 +1762,10 @@ export function FoxTD() {
   function canPlace(gx: number, gy: number) {
     if (!Number.isInteger(gx) || !Number.isInteger(gy)) return false;
     if (gx < 0 || gy < 0 || gx >= COLS || gy >= ROWS) return false;
+    if (!isCellOnBoard(boardRef.current, gx, gy)) return false;
     if (gateHere(gx, gy)) return false;
     const key = cellKey(gx, gy);
-    // 路障／地圖牆 = 碰撞體
     if (sim.current.blocked.has(key)) return false;
-    // 已有塔或路障佔格
     if (sim.current.towers.some((t) => t.gx === gx && t.gy === gy)) return false;
     return true;
   }
@@ -1758,6 +1790,24 @@ export function FoxTD() {
     selRef.current = null;
     phaseRef.current = "play";
     setPhase("play");
+    // apply seed board (HQ + path + spawn)
+    {
+      const board = seedBoard();
+      boardRef.current = board;
+      const blocked = buildBlocked(board);
+      const heights = buildHeights(board);
+      heightsRef.current = heights;
+      const gates = collectGates(board);
+      entrancesRef.current = gates.entrances;
+      exitsRef.current = gates.exits;
+      mapRef.current = blocked;
+      const paths = pathsForGates(blocked, gates.entrances, gates.exits);
+      if (paths) loadRoutes(paths);
+      sim.current.blocked = blocked;
+      sim.current.heights = heights;
+      setTileOffer(null);
+      tileOfferRef.current = null;
+    }
     setWorkshop(false);
     setPaused(false);
     pausedRef.current = false;
@@ -2066,7 +2116,32 @@ export function FoxTD() {
               {speed === 10 ? " · 10倍" : ""}
             </div>
           </div>
-          {phase === "play" && paused && (
+          {phase === "play" && tileOffer && tileOffer.length > 0 && (
+            <div className="overlay">
+              <h2>疆域擴張 · 地塊</h2>
+              <p className="mb-2 max-w-md text-sm text-[#c5dff2]">
+                第 {wave} 波結束。可選模板稍後完整放置；目前可略過以繼續下一波。
+              </p>
+              <div className="mb-2 flex flex-wrap justify-center gap-2">
+                {tileOffer.map((id) => (
+                  <span key={id} className="btn ghost">
+                    {id}
+                  </span>
+                ))}
+              </div>
+              <button
+                className="btn"
+                onClick={() => {
+                  setTileOffer(null);
+                  tileOfferRef.current = null;
+                  setHover("已略過拼接，下一波即將開始");
+                }}
+              >
+                略過，繼續戰鬥
+              </button>
+            </div>
+          )}
+          {phase === "play" && paused && !(tileOffer && tileOffer.length) && (
             <div className="overlay">
               <h2>已暫停</h2>
               <p className="mb-4 text-sm text-[#c5dff2]">時間停住了。可以繼續守城，或回到主畫面。</p>
