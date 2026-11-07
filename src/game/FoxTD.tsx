@@ -182,6 +182,76 @@ type Enemy = {
   hasteMul: number;
 };
 
+export type TargetMode = "auto" | "first" | "last" | "nearest" | "farthest" | "strongest" | "weakest";
+
+const TARGET_MODE_LABEL: Record<TargetMode, string> = {
+  auto: "特性預設",
+  first: "最前（近出口）",
+  last: "最後（剛入場）",
+  nearest: "最近",
+  farthest: "最遠",
+  strongest: "血量最高",
+  weakest: "血量最低",
+};
+
+/** 依塔特殊效果給預設鎖定策略 */
+function defaultTargetMode(special: Special): TargetMode {
+  switch (special) {
+    case "execute":
+      return "weakest";
+    case "slow":
+    case "root":
+      return "nearest";
+    case "aoe":
+    case "chain":
+    case "ultimate":
+    case "break":
+      return "strongest";
+    case "burn":
+    case "rapid":
+      return "nearest";
+    case "pierce":
+    case "high":
+    case "range":
+    default:
+      return "first";
+  }
+}
+
+function resolveTargetMode(mode: TargetMode | undefined, special: Special): TargetMode {
+  const m = mode ?? "auto";
+  return m === "auto" ? defaultTargetMode(special) : m;
+}
+
+function pickTowerTarget(
+  tw: { x: number; y: number; range: number; targetMode?: TargetMode; def: number },
+  enemies: Enemy[],
+  special: Special,
+): Enemy | null {
+  const mode = resolveTargetMode(tw.targetMode, special);
+  let best: Enemy | null = null;
+  let score = mode === "weakest" || mode === "last" || mode === "nearest" ? Infinity : -Infinity;
+  for (const e of enemies) {
+    const p = posAt(e.dist, e.route);
+    const d = Math.hypot(p.x - tw.x, p.y - tw.y);
+    if (d > tw.range) continue;
+    let sc = 0;
+    if (mode === "first") sc = e.dist;
+    else if (mode === "last") sc = e.dist;
+    else if (mode === "nearest") sc = d;
+    else if (mode === "farthest") sc = d;
+    else if (mode === "strongest") sc = e.hp;
+    else if (mode === "weakest") sc = e.hp;
+    const better =
+      mode === "last" || mode === "nearest" || mode === "weakest" ? sc < score : sc > score;
+    if (best === null || better) {
+      best = e;
+      score = sc;
+    }
+  }
+  return best;
+}
+
 type Tower = {
   def: number;
   x: number;
@@ -203,6 +273,8 @@ type Tower = {
   terrorT: number;
   /** 累計投入金幣（建塔+升級），用於賣出退款 */
   spent: number;
+  /** 鎖定優先；auto 則依塔特性 */
+  targetMode?: TargetMode;
 };
 
 type Shot = {
@@ -928,16 +1000,8 @@ export function FoxTD() {
           if (tw.terrorT <= 0) tw.rateMul = 1;
         } else if (tw.rateMul === undefined) tw.rateMul = 1;
         tw.cd -= dt;
-        let best: Enemy | null = null;
-        let bestDist = -1;
-        for (const e of s.enemies) {
-          const p = posAt(e.dist, e.route);
-          const d = Math.hypot(p.x - tw.x, p.y - tw.y);
-          if (d <= tw.range && e.dist > bestDist) {
-            bestDist = e.dist;
-            best = e;
-          }
-        }
+        const twDef = towerBookRef.current[tw.def] ?? TOWERS[tw.def];
+        const best = tw.stake ? null : pickTowerTarget(tw, s.enemies, twDef?.special ?? "high");
         if (best && tw.cd <= 0) {
           tw.cd = tw.cooldown / (tw.rateMul > 0 ? tw.rateMul : 1);
           fire(tw, best);
@@ -1920,6 +1984,7 @@ export function FoxTD() {
         rateMul: 1,
         terrorT: 0,
         spent: cost,
+        targetMode: "auto",
       });
       setHover(bonus > 0 ? `已放置 ${def.name} · 高地射程 +${bonus}` : `已放置 ${def.name}`);
     };
@@ -2123,6 +2188,7 @@ export function FoxTD() {
         hp: t.hp,
         maxHp: t.maxHp,
         stake: t.stake,
+        targetMode: t.targetMode ?? "auto",
       })),
       waves,
     };
@@ -2155,6 +2221,7 @@ export function FoxTD() {
         hp: number;
         maxHp: number;
         stake: boolean;
+        targetMode?: TargetMode;
       }[];
       waves?: WaveGroup[][] | null;
     };
@@ -2209,6 +2276,7 @@ export function FoxTD() {
         rateMul: 1,
         terrorT: 0,
         spent: t.stake ? STAKE_COST : (TOWERS[t.def]?.cost ?? 50) * Math.max(1, t.level || 1),
+        targetMode: t.targetMode ?? "auto",
       });
     }
     const nextWaves = normalizeWaves(data.waves);
@@ -2820,6 +2888,42 @@ export function FoxTD() {
                   ? `（高地 +${cellHeight(sim.current.heights, selected.gx, selected.gy) * 30}）`
                   : ""}
               </div>
+              <div className="mt-2 text-[11px] text-[#b7ddf5]">鎖定優先</div>
+              <div className="mt-1 flex flex-wrap gap-1">
+                {(["auto", "first", "last", "nearest", "farthest", "strongest", "weakest"] as TargetMode[]).map((m) => {
+                  const cur = selected.targetMode ?? "auto";
+                  const effective =
+                    m === "auto"
+                      ? TARGET_MODE_LABEL[defaultTargetMode(selectedDef.special)]
+                      : TARGET_MODE_LABEL[m];
+                  return (
+                    <button
+                      key={m}
+                      className={"btn ghost" + (cur === m ? " on" : "")}
+                      title={m === "auto" ? `實際：${TARGET_MODE_LABEL[defaultTargetMode(selectedDef.special)]}` : TARGET_MODE_LABEL[m]}
+                      onClick={() => {
+                        const tw = sim.current.towers[sel!];
+                        if (!tw || tw.stake) return;
+                        tw.targetMode = m;
+                        setSel(sel);
+                        setHover(
+                          `${selectedDef.name} 鎖定：${TARGET_MODE_LABEL[m]}${
+                            m === "auto" ? `（${TARGET_MODE_LABEL[defaultTargetMode(selectedDef.special)]}）` : ""
+                          }`,
+                        );
+                      }}
+                    >
+                      {m === "auto" ? "預設" : TARGET_MODE_LABEL[m].slice(0, 4)}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="mt-1 text-[10px] text-[#8eb6d4]">
+                目前有效：
+                {TARGET_MODE_LABEL[
+                  resolveTargetMode(selected.targetMode, selectedDef.special)
+                ]}
+              </p>
               <div className="mt-2 flex gap-2">
                 <button className="btn ghost flex-1" onClick={() => upgrade("dmg")}>
                   傷害 {upgradeCost("dmg", selected.level)}
