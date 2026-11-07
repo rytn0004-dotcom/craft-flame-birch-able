@@ -1545,29 +1545,43 @@ export function FoxTD() {
       const s = sim.current;
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.clearRect(0, 0, VIEWW, VIEWH);
-      const bg = s.scene.bg;
-      if (bg && bg.complete && bg.naturalWidth) {
-        ctx.drawImage(bg, 0, 0, VIEWW, VIEWH);
-      } else {
-        ctx.fillStyle = "#0c2742";
-        ctx.fillRect(0, 0, VIEWW, VIEWH);
-      }
-      ctx.fillStyle = "rgba(4, 14, 28, 0.28)";
-      ctx.fillRect(0, 0, VIEWW, VIEWH);
+      ctx.imageSmoothingEnabled = true;
+      // @ts-expect-error browser
+      ctx.imageSmoothingQuality = "high";
       const t = performance.now() / 1000;
-      ctx.strokeStyle = "rgba(255,255,255,0.08)";
-      ctx.lineWidth = 18;
-      for (let i = 0; i < 4; i++) {
-        const x = 80 + i * 230 + Math.sin(t * 0.4 + i) * 12;
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x + 30, VIEWH);
-        ctx.stroke();
-      }
+      const bg = s.scene.bg;
+      // 畫面底：深海漸層（無網點）
+      const g0 = ctx.createLinearGradient(0, 0, 0, VIEWH);
+      g0.addColorStop(0, "#0a1c30");
+      g0.addColorStop(0.45, "#0c2740");
+      g0.addColorStop(1, "#071420");
+      ctx.fillStyle = g0;
+      ctx.fillRect(0, 0, VIEWW, VIEWH);
       ctx.save();
       const z = s.cam.zoom || 1;
       ctx.scale(z, z);
       ctx.translate(-s.cam.x, -s.cam.y);
+      // 世界空間平鋪背景：隨鏡頭移動，柔和覆蓋避免破圖／網點感
+      if (bg && bg.complete && bg.naturalWidth) {
+        const bw = bg.naturalWidth;
+        const bh = bg.naturalHeight;
+        const tileW = Math.max(900, bw * 0.85);
+        const tileH = Math.max(600, bh * 0.85);
+        const xStart = Math.floor(s.cam.x / tileW) * tileW - tileW;
+        const yStart = Math.floor(s.cam.y / tileH) * tileH - tileH;
+        const xEnd = s.cam.x + VIEWW / z + tileW;
+        const yEnd = s.cam.y + VIEWH / z + tileH;
+        ctx.globalAlpha = 0.55;
+        for (let ty = yStart; ty < yEnd; ty += tileH) {
+          for (let tx = xStart; tx < xEnd; tx += tileW) {
+            ctx.drawImage(bg, tx, ty, tileW, tileH);
+          }
+        }
+        ctx.globalAlpha = 1;
+      }
+      // 水色罩：抹平貼圖雜訊
+      ctx.fillStyle = "rgba(6, 24, 40, 0.42)";
+      ctx.fillRect(s.cam.x - 40, s.cam.y - 40, VIEWW / z + 80, VIEWH / z + 80);
       const decor: { key: string; x: number; y: number; w: number; h: number }[] = [
         { key: "coral", x: 40, y: 430, w: 120, h: 120 },
         { key: "pillar", x: 250, y: 40, w: 90, h: 150 },
@@ -1584,14 +1598,15 @@ export function FoxTD() {
         ctx.globalAlpha = 1;
       }
 
-      ctx.strokeStyle = "rgba(180,230,255,0.08)";
-      ctx.lineWidth = 1;
       const vz = s.cam.zoom || 1;
       const x0 = Math.max(0, Math.floor(s.cam.x / CELL) - 1);
       const y0 = Math.max(0, Math.floor(s.cam.y / CELL) - 1);
       const x1 = Math.min(COLS - 1, Math.ceil((s.cam.x + VIEWW / vz) / CELL) + 1);
       const y1 = Math.min(ROWS - 1, Math.ceil((s.cam.y + VIEWH / vz) / CELL) + 1);
-      if (pickRef.current !== null || workshopRef.current) {
+      // 僅工房顯示格線（戰鬥中不顯示網點）
+      if (workshopRef.current) {
+        ctx.strokeStyle = "rgba(180,230,255,0.12)";
+        ctx.lineWidth = 1;
         ctx.beginPath();
         for (let x = x0; x <= x1; x++) {
           ctx.moveTo(x * CELL, y0 * CELL);
@@ -1604,7 +1619,7 @@ export function FoxTD() {
         ctx.stroke();
       }
 
-      // 可走地板：淺砂／潮坪，和域外深海對比
+      // 可走潮坪：連片柔和填色（無砂點）
       for (let r = y0; r <= y1; r++) {
         for (let c = x0; c <= x1; c++) {
           if (!isCellOnBoard(boardRef.current, c, r)) continue;
@@ -1612,14 +1627,9 @@ export function FoxTD() {
           if (s.blocked.has(key)) continue;
           const x = c * CELL, y = r * CELL;
           const h = ((c * 374761) ^ (r * 668265)) >>> 0;
-          const tint = (h % 12) / 12;
-          ctx.fillStyle = `rgba(${30 + tint * 20 | 0}, ${70 + tint * 25 | 0}, ${90 + tint * 30 | 0}, 0.42)`;
-          ctx.fillRect(x, y, CELL, CELL);
-          // 偶發淺色砂粒，不要整格線
-          if ((h % 7) === 0) {
-            ctx.fillStyle = "rgba(180, 220, 230, 0.12)";
-            ctx.fillRect(x + 6, y + 10, 4, 3);
-          }
+          const tint = (h % 8) / 8;
+          ctx.fillStyle = `rgba(${24 + tint * 14 | 0}, ${58 + tint * 18 | 0}, ${72 + tint * 20 | 0}, 0.55)`;
+          ctx.fillRect(x, y, CELL + 0.5, CELL + 0.5);
         }
       }
 
@@ -1646,20 +1656,21 @@ export function FoxTD() {
         if (!live.pts.length) return;
         ctx.moveTo(live.pts[0].x, live.pts[0].y);
         for (let i = 1; i < live.pts.length; i++) ctx.lineTo(live.pts[i].x, live.pts[i].y);
-        ctx.strokeStyle = idx % 2 === 0 ? "rgba(255,236,190,0.28)" : "rgba(180,220,255,0.28)";
-        ctx.lineWidth = 28;
+        ctx.strokeStyle = idx % 2 === 0 ? "rgba(255,230,180,0.18)" : "rgba(140,210,255,0.16)";
+        ctx.lineWidth = 30;
         ctx.stroke();
-        ctx.strokeStyle = "rgba(120,210,255,0.22)";
-        ctx.lineWidth = 12;
+        ctx.strokeStyle = "rgba(100,190,230,0.12)";
+        ctx.lineWidth = 14;
         ctx.stroke();
       });
 
-      ctx.fillStyle = "rgba(210,245,255,0.35)";
-      for (let i = 0; i < 18; i++) {
-        const bx = s.cam.x + ((i * 137 + t * 22) % VIEWW);
-        const by = s.cam.y + ((i * 90 + t * 36) % VIEWH);
+      // 少量氣泡（勿過密）
+      ctx.fillStyle = "rgba(180,230,255,0.2)";
+      for (let i = 0; i < 10; i++) {
+        const bx = s.cam.x + ((i * 173 + t * 18) % (VIEWW / z + 80));
+        const by = s.cam.y + ((i * 111 + t * 28) % (VIEWH / z + 80));
         ctx.beginPath();
-        ctx.arc(bx, by, 2 + (i % 4), 0, Math.PI * 2);
+        ctx.arc(bx, by, 1.5 + (i % 3), 0, Math.PI * 2);
         ctx.fill();
       }
 
@@ -1702,9 +1713,11 @@ export function FoxTD() {
             ctx.strokeStyle = h === 3 ? "rgba(255,230,170,0.8)" : "rgba(190,240,255,0.45)";
             ctx.strokeRect(x + 4, y + 4 - lift, CELL - 8, CELL - 16);
           }
-          ctx.fillStyle = h === 3 ? "#fff4d2" : "#e9fbff";
-          ctx.font = "bold 11px sans-serif";
-          ctx.fillText(String(h), x + CELL / 2, y + 16 - lift);
+          if (workshopRef.current) {
+            ctx.fillStyle = h === 3 ? "#fff4d2" : "#e9fbff";
+            ctx.font = "bold 11px sans-serif";
+            ctx.fillText(String(h), x + CELL / 2, y + 16 - lift);
+          }
         }
       }
       ctx.textAlign = "left";
@@ -1727,11 +1740,10 @@ export function FoxTD() {
           const rnd2 = terrainHash(c + 17, r + 31);
 
           if (!onBoard) {
-            // —— 未解鎖疆域：連片自然景觀 ——
-            // 底：深海漸層（略帶藍綠，蓋住背景點陣）
-            const depth = 0.55 + rnd * 0.25;
-            ctx.fillStyle = `rgba(${8 + rnd * 12 | 0}, ${28 + rnd * 30 | 0}, ${48 + rnd * 28 | 0}, ${depth})`;
-            ctx.fillRect(x, y, CELL, CELL);
+            // —— 未解鎖疆域：連片深海（高不透明，蓋住任何底圖網點）——
+            const depth = 0.82 + rnd * 0.12;
+            ctx.fillStyle = `rgba(${6 + rnd * 10 | 0}, ${22 + rnd * 18 | 0}, ${38 + rnd * 20 | 0}, ${depth})`;
+            ctx.fillRect(x - 0.25, y - 0.25, CELL + 0.5, CELL + 0.5);
 
             // 鄰近已解鎖區的「岸邊」用較淺水色，做出邊界過渡
             let nearOpen = false;
@@ -1775,9 +1787,9 @@ export function FoxTD() {
             } else if (kind === 2) {
               // 珊瑚叢（可貼圖）
               const coral = s.scene.coral;
-              if (coral && coral.complete && coral.naturalWidth) {
-                ctx.globalAlpha = 0.55 + rnd * 0.3;
-                const sc = 0.7 + rnd2 * 0.5;
+              if (coral && coral.complete && coral.naturalWidth > 8 && rnd < 0.55) {
+                ctx.globalAlpha = 0.35 + rnd * 0.2;
+                const sc = 0.85 + rnd2 * 0.25;
                 blit(ctx, coral, x + 2, y + 2, CELL * sc, CELL * sc);
                 ctx.globalAlpha = 1;
               } else {
@@ -2124,6 +2136,20 @@ export function FoxTD() {
         ctx.globalAlpha = 1;
       }
       ctx.textAlign = "left";
+      ctx.restore();
+      // 螢幕暗角：增加景深、柔化邊緣
+      const vig = ctx.createRadialGradient(
+        VIEWW * 0.5,
+        VIEWH * 0.5,
+        Math.min(VIEWW, VIEWH) * 0.35,
+        VIEWW * 0.5,
+        VIEWH * 0.5,
+        Math.max(VIEWW, VIEWH) * 0.72,
+      );
+      vig.addColorStop(0, "rgba(0,0,0,0)");
+      vig.addColorStop(1, "rgba(2, 10, 20, 0.45)");
+      ctx.fillStyle = vig;
+      ctx.fillRect(0, 0, VIEWW, VIEWH);
     };
 
     const loop = (now: number) => {
