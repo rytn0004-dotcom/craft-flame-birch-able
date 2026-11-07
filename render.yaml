@@ -1,0 +1,17 @@
+# Render Blueprint — Web Service for FoxTD / craft-flame-birch-able
+# https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: craft-flame-birch-able
+    runtime: node
+    plan: free
+    region: oregon
+    branch: main
+    buildCommand: npm install && npm run build
+    startCommand: node .output/server/index.mjs
+    healthCheckPath: /
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: NITRO_PRESET
+        value: node-server
