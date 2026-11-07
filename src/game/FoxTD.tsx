@@ -12,6 +12,14 @@ import {
 } from "./skills";
 import { ENEMY_TYPES, stockBestiary, TOWERS, TRAIT_INFO, type EnemyDef, type Special, type TowerDef, type Trait } from "./types";
 import {
+  allDifficulties,
+  getDifficulty,
+  loadActiveDifficultyId,
+  saveActiveDifficultyId,
+  upsertCustomDifficulty,
+  type DifficultyProfile,
+} from "./difficulty";
+import {
   buildBlocked,
   buildHeights,
   collectGates,
@@ -30,7 +38,7 @@ const VIEWH = VIEW_H;
 const GRID = CELL;
 const MAX_WAVE = 20;
 const STAKE_COST = 35;
-const START_GOLD = 200;
+const START_GOLD = 220; // fallback；實際以難度 startGold 為準
 
 /** 升級費用：前期便宜、後期遞增，避免直線爆炸 */
 function upgradeCost(kind: "dmg" | "rate", level: number) {
@@ -432,6 +440,13 @@ export function FoxTD() {
   const [brush, setBrush] = useState(1);
   const [bestiary, setBestiary] = useState<EnemyDef[]>(() => stockBestiary());
   const [editMob, setEditMob] = useState(0);
+  const [editTower, setEditTower] = useState(0);
+  const [difficultyId, setDifficultyId] = useState(() => loadActiveDifficultyId());
+  const [diffList, setDiffList] = useState<DifficultyProfile[]>(() => allDifficulties());
+  const difficultyRef = useRef<DifficultyProfile>(getDifficulty(loadActiveDifficultyId()));
+  const [towerBook, setTowerBook] = useState<TowerDef[]>(() => TOWERS.map((t) => ({ ...t })));
+  const towerBookRef = useRef<TowerDef[]>(TOWERS.map((t) => ({ ...t })));
+  const [diffName, setDiffName] = useState("自訂難度");
   const boardRef = useRef<TileBoard>(seedBoard());
   const tileOfferRef = useRef<string[] | null>(null);
   const [tileOffer, setTileOffer] = useState<string[] | null>(null);
@@ -476,6 +491,13 @@ export function FoxTD() {
   useEffect(() => {
     bestiaryRef.current = bestiary;
   }, [bestiary]);
+  useEffect(() => {
+    towerBookRef.current = towerBook;
+  }, [towerBook]);
+  useEffect(() => {
+    difficultyRef.current = getDifficulty(difficultyId);
+    saveActiveDifficultyId(difficultyId);
+  }, [difficultyId]);
   useEffect(() => {
     brushRef.current = brush;
   }, [brush]);
@@ -686,17 +708,22 @@ export function FoxTD() {
           const job = s.queue.shift()!;
           const book = bestiaryRef.current;
           const et = book[job.type] ?? book[0];
-          const scale = endlessRef.current ? endlessScale(s.wave) : 1 + (s.wave - 1) * 0.16;
-          const speedMul = endlessRef.current ? 1 + Math.min(0.12, (s.wave - 1) * 0.004) : 1;
-          // 關卡：緩增；無盡：更慢，避免金幣雪球壓過難度
-          const goldMul = endlessRef.current
-            ? 1 + Math.min(0.9, s.wave * 0.035)
-            : 1 + Math.min(1.6, (s.wave - 1) * 0.07);
+          const diff = difficultyRef.current;
+          const scale = endlessRef.current
+            ? endlessScale(s.wave)
+            : 1 + (s.wave - 1) * (diff.waveHpScale ?? 0.08);
+          const speedMul =
+            (endlessRef.current ? 1 + Math.min(0.12, (s.wave - 1) * 0.004) : 1) * (diff.enemySpeedMul ?? 1);
+          const goldMul =
+            (endlessRef.current
+              ? 1 + Math.min(0.9, s.wave * 0.035)
+              : 1 + Math.min(1.2, (s.wave - 1) * 0.06)) * (diff.enemyGoldMul ?? 1);
+          const hpMul = (diff.enemyHpMul ?? 1) * scale;
           s.enemies.push({
             type: job.type,
             dist: 0,
-            hp: et.hp * scale,
-            maxHp: et.hp * scale,
+            hp: et.hp * hpMul,
+            maxHp: et.hp * hpMul,
             speed: et.speed * (0.96 + Math.random() * 0.08) * speedMul,
             gold: Math.max(1, Math.round(et.gold * goldMul * (1 + job.type * 0.08))),
             slow: 1,
@@ -1858,25 +1885,28 @@ export function FoxTD() {
         }
         return;
       }
-      const def = TOWERS[id];
+      const base = towerBookRef.current[id] ?? TOWERS[id];
+      const diff = difficultyRef.current;
+      const cost = Math.max(1, Math.round(base.cost * (diff.towerCostMul ?? 1)));
+      const dmg = base.damage * (diff.towerDmgMul ?? 1);
       if (!canPlace(gx, gy)) {
         setHover("這格不能放塔");
         return;
       }
-      if (goldRef.current < def.cost) {
+      if (goldRef.current < cost) {
         setHover("金幣不夠");
         return;
       }
-      goldRef.current -= def.cost;
+      goldRef.current -= cost;
       setGold(goldRef.current);
       const bonus = rangeBonus(cellHeight(s.heights, gx, gy));
       s.towers.push({
         def: id,
         x: gx * GRID + GRID / 2,
         y: gy * GRID + GRID / 2,
-        damage: def.damage,
-        cooldown: def.cooldown,
-        range: def.range + bonus,
+        damage: dmg,
+        cooldown: base.cooldown,
+        range: base.range + bonus,
         cd: 0,
         level: 1,
         aim: 0,
@@ -1889,7 +1919,7 @@ export function FoxTD() {
         gy,
         rateMul: 1,
         terrorT: 0,
-        spent: def.cost,
+        spent: cost,
       });
       setHover(bonus > 0 ? `已放置 ${def.name} · 高地射程 +${bonus}` : `已放置 ${def.name}`);
     };
@@ -1953,9 +1983,10 @@ export function FoxTD() {
     sim.current.queue = [];
     sim.current.wave = 0;
     sim.current.between = 0;
-    goldRef.current = START_GOLD;
+    const startG = difficultyRef.current.startGold ?? START_GOLD;
+    goldRef.current = startG;
     livesRef.current = 20;
-    setGold(START_GOLD);
+    setGold(startG);
     setLives(20);
     setWave(0);
     setSel(null);
@@ -2441,6 +2472,27 @@ export function FoxTD() {
                     目前：<span className="text-[#ffe7f1]">{activeMap}</span>
                     {mapMode === "expand" ? " · 地塊拼接模式" : " · 完整地圖"}
                   </p>
+                  <p className="mb-1 mt-3 text-xs tracking-wide text-[#8ec8ee]">難度</p>
+                  <div className="mb-1 flex flex-wrap gap-2">
+                    {diffList.map((d) => (
+                      <button
+                        key={d.id}
+                        className={"btn" + (difficultyId === d.id ? "" : " ghost")}
+                        onClick={() => {
+                          setDifficultyId(d.id);
+                          difficultyRef.current = d;
+                          setHover(
+                            `${d.label} · 怪血×${d.enemyHpMul} · 塔傷×${d.towerDmgMul} · 金幣${d.startGold}`,
+                          );
+                        }}
+                      >
+                        {d.label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-xs text-[#9ec4de]">
+                    怪血 ×{getDifficulty(difficultyId).enemyHpMul} · 塔傷 ×{getDifficulty(difficultyId).towerDmgMul} · 開局 {getDifficulty(difficultyId).startGold} 金
+                  </p>
                 </div>
               )}
               <button className="btn" onClick={start}>
@@ -2612,6 +2664,141 @@ export function FoxTD() {
                   自動出怪
                 </button>
               </div>
+            </div>
+          )}
+          {workshop && (
+            <div className="mb-3 max-h-80 overflow-auto rounded-xl border border-[#ffd2a855] bg-[#1a1428cc] p-2 text-xs leading-6">
+              <b className="text-[#ffd2a8]">數值工房 · 怪物</b>
+              <div className="my-1 flex flex-wrap gap-1">
+                {bestiary.map((m, i) => (
+                  <button
+                    key={m.name + i}
+                    className={"btn ghost" + (editMob === i ? " on" : "")}
+                    style={{ color: m.color }}
+                    onClick={() => setEditMob(i)}
+                  >
+                    {m.name}
+                  </button>
+                ))}
+              </div>
+              {bestiary[editMob] && (
+                <div className="grid grid-cols-2 gap-1">
+                  {(
+                    [
+                      ["hp", "生命"],
+                      ["speed", "移速"],
+                      ["gold", "金幣"],
+                      ["r", "半徑"],
+                    ] as const
+                  ).map(([key, label]) => (
+                    <label key={key} className="flex items-center justify-between gap-1">
+                      <span>{label}</span>
+                      <input
+                        className="w-16 rounded bg-[#08131f] px-1 text-right text-[#e7f6ff]"
+                        type="number"
+                        value={bestiary[editMob][key] as number}
+                        onChange={(ev) => {
+                          const v = Number(ev.target.value);
+                          setBestiary((prev) => {
+                            const next = prev.map((m, i) => (i === editMob ? { ...m, [key]: v } : m));
+                            bestiaryRef.current = next;
+                            return next;
+                          });
+                        }}
+                      />
+                    </label>
+                  ))}
+                </div>
+              )}
+              <b className="mt-2 block text-[#9ad7ff]">數值工房 · 塔</b>
+              <div className="my-1 flex flex-wrap gap-1">
+                {towerBook.map((t, i) => (
+                  <button
+                    key={t.id}
+                    className={"btn ghost" + (editTower === i ? " on" : "")}
+                    style={{ color: t.color }}
+                    onClick={() => setEditTower(i)}
+                  >
+                    {t.name.replace("狐仙", "")}
+                  </button>
+                ))}
+              </div>
+              {towerBook[editTower] && (
+                <div className="grid grid-cols-2 gap-1">
+                  {(
+                    [
+                      ["cost", "造價"],
+                      ["damage", "傷害"],
+                      ["cooldown", "冷卻"],
+                      ["range", "射程"],
+                    ] as const
+                  ).map(([key, label]) => (
+                    <label key={key} className="flex items-center justify-between gap-1">
+                      <span>{label}</span>
+                      <input
+                        className="w-16 rounded bg-[#08131f] px-1 text-right text-[#e7f6ff]"
+                        type="number"
+                        step={key === "cooldown" ? 0.05 : 1}
+                        value={towerBook[editTower][key] as number}
+                        onChange={(ev) => {
+                          const v = Number(ev.target.value);
+                          setTowerBook((prev) => {
+                            const next = prev.map((t, i) => (i === editTower ? { ...t, [key]: v } : t));
+                            towerBookRef.current = next;
+                            return next;
+                          });
+                        }}
+                      />
+                    </label>
+                  ))}
+                </div>
+              )}
+              <b className="mt-2 block text-[#c9a0ff]">存成難度檔</b>
+              <div className="mt-1 flex flex-wrap gap-1">
+                <input
+                  className="w-24 rounded bg-[#08131f] px-1 text-[#e7f6ff]"
+                  value={diffName}
+                  maxLength={12}
+                  onChange={(e) => setDiffName(e.target.value)}
+                  aria-label="難度名稱"
+                />
+                <button
+                  className="btn ghost"
+                  onClick={() => {
+                    const base = getDifficulty(difficultyId);
+                    const id = `custom-${Date.now()}`;
+                    const profile: DifficultyProfile = {
+                      ...base,
+                      id,
+                      label: diffName.trim() || "自訂",
+                      builtin: false,
+                    };
+                    upsertCustomDifficulty(profile);
+                    setDiffList(allDifficulties());
+                    setDifficultyId(id);
+                    difficultyRef.current = profile;
+                    setHover(`已保存難度「${profile.label}」`);
+                  }}
+                >
+                  保存倍率
+                </button>
+                <button
+                  className="btn ghost"
+                  onClick={() => {
+                    setBestiary(stockBestiary());
+                    bestiaryRef.current = stockBestiary();
+                    const tb = TOWERS.map((t) => ({ ...t }));
+                    setTowerBook(tb);
+                    towerBookRef.current = tb;
+                    setHover("已還原怪物／塔基準數值");
+                  }}
+                >
+                  還原數值
+                </button>
+              </div>
+              <p className="mt-1 text-[10px] text-[#8eb6d4]">
+                怪物／塔數值立即生效；「保存倍率」把目前難度倍率存成可選檔。建議先用「普通」試平衡。
+              </p>
             </div>
           )}
           {selected && selected.stake && (
