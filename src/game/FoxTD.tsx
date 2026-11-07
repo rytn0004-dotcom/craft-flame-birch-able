@@ -362,9 +362,14 @@ const SPRITE_SETS = {
   hit: [0, 1, 2, 3].map((i) => `/anim/hit/${i}.png?v=4`),
 };
 
-const TOWER_ANIMS: string[][] = TOWERS.map((_, i) =>
-  Array.from({ length: 12 }, (_, n) => `/anim/towers/t${String(i + 1).padStart(2, "0")}/${n}.png?v=6`),
-);
+const TOWER_ANIMS: string[][] = TOWERS.map((_, i) => {
+  const id = String(i + 1).padStart(2, "0");
+  // t01–t05：原有 6 幀 jpg；t06–t12：補做 6 幀 png idle
+  if (i < 5) {
+    return [0, 1, 2, 3, 4, 5].map((n) => `/anim/towers/t${id}/${n}.jpg?v=7`);
+  }
+  return [0, 1, 2, 3, 4, 5].map((n) => `/anim/towers/t${id}/${n}.png?v=7`);
+});
 
 function pingIndex(count: number, step: number) {
   if (count <= 1) return 0;
