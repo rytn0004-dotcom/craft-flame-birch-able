@@ -1323,6 +1323,22 @@ export function FoxTD() {
         }
       }
 
+      {
+        const q = (s as { __skillQ?: { towerIndex: number; level: number; choices: TowerSkillDef[] }[] }).__skillQ;
+        if (q && q.length) {
+          (s as { __skillQ?: unknown }).__skillQ = [];
+          for (const offer of q) skillOfferQueueRef.current.push(offer);
+          if (!skillOfferRef.current && skillOfferQueueRef.current.length) {
+            const first = skillOfferQueueRef.current.shift()!;
+            queueMicrotask(() => {
+              setSkillOffer(first);
+              pausedRef.current = true;
+              setPaused(true);
+            });
+          }
+        }
+      }
+
       for (const tw of s.towers) {
         if (tw.terrorT > 0) {
           tw.terrorT -= dt;
