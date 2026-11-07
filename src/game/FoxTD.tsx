@@ -3252,6 +3252,23 @@ export function FoxTD() {
                   ? `（高地 +${cellHeight(sim.current.heights, selected.gx, selected.gy) * 30}）`
                   : ""}
               </div>
+              <div className="mt-1 text-[11px] leading-5 text-[#ffd2a8]">
+                <b>覺醒</b>
+                {selected.skills && selected.skills.length > 0 ? (
+                  <ul className="mt-0.5 list-none pl-0">
+                    {selected.skills.map((id) => {
+                      const sk = SKILL_BY_ID[id];
+                      return (
+                        <li key={id} style={{ color: sk?.color || "#ffd2a8" }}>
+                          {sk ? `${sk.name}：${sk.desc}` : id}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : (
+                  <span className="text-[#8eb6d4]"> — Lv.5 / 8 / 10 解鎖本塔專屬技能</span>
+                )}
+              </div>
               <div className="mt-2 text-[11px] text-[#b7ddf5]">鎖定優先</div>
               <div className="mt-1 flex flex-wrap gap-1">
                 {(["auto", "first", "last", "nearest", "farthest", "strongest", "weakest"] as TargetMode[]).map((m) => {
