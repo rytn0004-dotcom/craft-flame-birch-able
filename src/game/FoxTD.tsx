@@ -12,11 +12,14 @@ import {
 } from "./skills";
 import { ENEMY_TYPES, stockBestiary, TOWERS, TRAIT_INFO, type EnemyDef, type Special, type TowerDef, type Trait } from "./types";
 import {
-  hasSkill,
-  skillForTowerTier,
+  collectEffects,
+  isSkillLevel,
+  rollSkillChoices,
   skillLabelShort,
-  skillUnlockedByLevel,
   SKILL_BY_ID,
+  SKILL_CHOICE_COUNT,
+  sumDmgMul,
+  type SkillEffect,
   type TowerSkillDef,
 } from "./towerSkills";
 import {
@@ -56,7 +59,7 @@ function upgradeCost(kind: "dmg" | "rate", level: number) {
 }
 
 type AutoUpgradeMode = "off" | "dmg" | "rate" | "smart";
-const AUTO_UPGRADE_MAX_LEVEL = 10;
+const AUTO_UPGRADE_MAX_LEVEL = 20;
 /** 自動升級至少保留的金幣，避免把建塔錢花光 */
 const AUTO_UPGRADE_RESERVE = 45;
 const AUTO_UPGRADE_LABEL: Record<AutoUpgradeMode, string> = {
@@ -66,22 +69,19 @@ const AUTO_UPGRADE_LABEL: Record<AutoUpgradeMode, string> = {
   smart: "自動：智能",
 };
 
-function grantTowerSkillOnLevel(tw: { def: number; level: number; skills?: string[]; cooldown: number; damage: number; range: number }, setHover?: (s: string) => void) {
-  const sk = skillUnlockedByLevel(tw.def, tw.level);
-  if (!sk) return null;
-  if (tw.skills?.includes(sk.id)) return null;
-  tw.skills = [...(tw.skills || []), sk.id];
-  // 永久被動立即生效
-  if (sk.id === "t0_low") tw.damage *= 1.18;
-  if (sk.id === "t2_low") tw.range += 40;
-  if (sk.id === "t4_low") tw.cooldown = Math.max(0.12, tw.cooldown * 0.8);
-  if (sk.id === "t11_low") {
-    tw.damage *= 1.1;
+function applyPassiveSkillEffects(tw: {
+  skills?: string[];
+  damage: number;
+  cooldown: number;
+  range: number;
+}) {
+  const effects = collectEffects(tw.skills);
+  for (const e of effects) {
+    if (e.type === "dmgMul") tw.damage *= e.value;
+    if (e.type === "cooldownMul") tw.cooldown = Math.max(0.12, tw.cooldown * e.value);
+    if (e.type === "rangeAdd") tw.range += e.value;
   }
-  setHover?.(`${sk.name}：${sk.desc}`);
-  return sk;
 }
-
 
 
 function sellRefund(spent: number) {
@@ -531,6 +531,14 @@ export function FoxTD() {
   const [endless, setEndless] = useState(false);
   const [autoUpgrade, setAutoUpgrade] = useState<AutoUpgradeMode>("off");
   const autoUpgradeRef = useRef<AutoUpgradeMode>("off");
+  const [skillOffer, setSkillOffer] = useState<{
+    towerIndex: number;
+    level: number;
+    choices: TowerSkillDef[];
+  } | null>(null);
+  const skillOfferQueueRef = useRef<{ towerIndex: number; level: number; choices: TowerSkillDef[] }[]>([]);
+  const skillOfferRef = useRef<{ towerIndex: number; level: number; choices: TowerSkillDef[] } | null>(null);
+
   const [staking, setStaking] = useState(false);
   const [workshop, setWorkshop] = useState(false);
   const [paused, setPaused] = useState(false);
@@ -603,6 +611,9 @@ export function FoxTD() {
   useEffect(() => {
     autoUpgradeRef.current = autoUpgrade;
   }, [autoUpgrade]);
+  useEffect(() => {
+    skillOfferRef.current = skillOffer;
+  }, [skillOffer]);
   useEffect(() => {
     workshopRef.current = workshop;
   }, [workshop]);
@@ -751,44 +762,46 @@ export function FoxTD() {
       fromTower?: number,
       extra?: { pierceCount?: number },
     ) => {
-      let amount = dmg * (e.vulnT > 0 ? e.vuln : 1);
-      const sk = skills || [];
-      const has = (id: string) => sk.includes(id);
+      const effects = collectEffects(skills);
+      const hasEff = (t: SkillEffect["type"]) => effects.some((x) => x.type === t);
+      const get = <T extends SkillEffect["type"]>(t: T) => effects.filter((x) => x.type === t) as Extract<SkillEffect, { type: T }>[];
 
-      // —— 各塔專屬命中修正 ——
-      if (has("t0_mid") && Math.random() < 0.15) {
-        amount *= 2.2;
-        float(px, py - 30, "暴擊", "#ffe08a");
+      let amount = dmg * (e.vulnT > 0 ? e.vuln : 1);
+      amount *= sumDmgMul(effects);
+
+      // 暴擊
+      for (const c of get("crit")) {
+        if (Math.random() < c.chance) {
+          amount *= c.mul;
+          float(px, py - 30, "暴擊", "#ffe08a");
+          break;
+        }
       }
-      if (has("t2_mid") && fromTower != null) {
+      // 距離加傷
+      if (fromTower != null) {
         const tw = sim.current.towers[fromTower];
-        if (tw) {
+        for (const d of get("distDmgMul")) {
+          if (!tw) break;
           const dist = Math.hypot(px - tw.x, py - tw.y);
-          amount *= 1 + Math.min(0.45, (dist / Math.max(80, tw.range)) * 0.45);
+          amount *= 1 + Math.min(d.maxBonus, (dist / Math.max(60, tw.range)) * d.maxBonus);
         }
       }
-      if (has("t4_high") && fromTower != null) {
-        const tw = sim.current.towers[fromTower];
-        if (tw) {
-          // 簡易：用 skillShots 當連擊感
-          const stacks = Math.min(6, tw.skillShots || 0);
-          amount *= 1 + stacks * 0.1;
-        }
+      // 印記
+      let markBonus = 0;
+      for (const m of get("markStack")) {
+        markBonus = Math.max(markBonus, Math.min(m.max, e.tideMark || 0) * m.perStack);
       }
-      if (has("t6_mid") && e.rootT > 0) amount *= 1.25;
-      if (has("t7_low")) {
-        /* 易傷在 break 狀態上再乘，下方 apply 後處理 */
+      amount *= 1 + markBonus;
+      // 半血 / 護盾 / 定身
+      for (const l of get("lowHpDmgMul")) {
+        if (e.hp / e.maxHp <= l.hpRatio) amount *= l.mul;
       }
-      if (has("t7_mid") && e.shield > 0) amount *= 1.8;
-      if (has("t7_high") && e.vulnT > 0 && e.vuln > 1) {
-        amount += dmg * 0.35;
-        float(px, py - 34, "審判", "#ffc857");
+      for (const sh of get("shieldDmgMul")) {
+        if (e.shield > 0) amount *= sh.mul;
       }
-      if (has("t9_low")) {
-        /* 穿透不衰減在 shot 端處理 */
+      for (const r of get("rootExtraDmg")) {
+        if (e.rootT > 0) amount *= r.mul;
       }
-      if (has("t10_mid") && e.hp < e.maxHp * 0.5) amount *= 1.4;
-      if (has("t11_low")) amount *= 1.08;
 
       if (e.armor) amount *= 0.65;
       if (e.shield > 0) {
@@ -800,123 +813,148 @@ export function FoxTD() {
       float(px, py - 16, String(Math.round(amount)), "#fff");
       applyStatus(e, special, dmg);
 
-      // 寒霜強化
-      if (has("t1_low") && !e.noslow) {
-        e.slow = Math.min(e.slow, 0.4);
-        e.slowT = Math.max(e.slowT, 2.6);
+      // 減速 / 定身 / 燃燒 / 易傷 / 印記
+      for (const sl of get("slowOnHit")) {
+        if (!e.noslow) {
+          e.slow = Math.min(e.slow, sl.factor);
+          e.slowT = Math.max(e.slowT, sl.duration);
+        }
       }
-      if (has("t1_mid") && !e.noslow && Math.random() < 0.18) {
-        e.rootT = Math.max(e.rootT, 0.45);
-        float(px, py - 26, "凍結", "#a8e4ff");
+      for (const rc of get("rootChance")) {
+        if (!e.noslow && Math.random() < rc.chance) {
+          e.rootT = Math.max(e.rootT, rc.duration);
+          float(px, py - 26, "縛", "#a8e4ff");
+        }
       }
-      // 赤焰
-      if (has("t3_low") && (special === "burn" || e.burnT > 0)) {
-        e.burn = Math.max(e.burn, 14);
-        e.burnT = Math.max(e.burnT, 4.2);
+      for (const b of get("burnBoost")) {
+        e.burn = Math.max(e.burn, b.dps);
+        e.burnT = Math.max(e.burnT, b.duration);
       }
-      if (has("t3_mid") && e.burnT > 0) {
-        let spread: Enemy | null = null;
-        let best = 80;
+      for (const bs of get("burnSpread")) {
+        if (e.burnT <= 0) continue;
         for (const o of sim.current.enemies) {
           if (o === e) continue;
           const op = posAt(o.dist, o.route);
-          const d = Math.hypot(op.x - px, op.y - py);
-          if (d < best) {
-            best = d;
-            spread = o;
+          if (Math.hypot(op.x - px, op.y - py) < bs.radius) {
+            o.burn = Math.max(o.burn, e.burn * 0.75);
+            o.burnT = Math.max(o.burnT, 2.2);
           }
         }
-        if (spread) {
-          spread.burn = Math.max(spread.burn, e.burn * 0.7);
-          spread.burnT = Math.max(spread.burnT, 2.5);
-        }
       }
-      // 縛影
-      if (has("t6_low") && special === "root") e.rootT = Math.max(e.rootT, 0.55 * 1.4);
-      // 聖輝易傷加強
-      if (has("t7_low") && special === "break") {
-        e.vuln = Math.max(e.vuln, 1.55);
-        e.vulnT = Math.max(e.vulnT, 3.5);
+      for (const v of get("vulnOnHit")) {
+        e.vuln = Math.max(e.vuln, v.mul);
+        e.vulnT = Math.max(e.vulnT, v.duration);
       }
-      // 背光處決線
-      const execLine = has("t10_low") ? 0.24 : special === "execute" ? 0.18 : 0;
-      if (execLine > 0 && e.hp > 0 && e.hp < e.maxHp * execLine) {
+      for (const m of get("markStack")) {
+        e.tideMark = Math.min(m.max, (e.tideMark || 0) + 1);
+      }
+
+      // 處決
+      let exec = special === "execute" ? 0.18 : 0;
+      for (const ex of get("execLine")) exec = Math.max(exec, ex.ratio);
+      if (exec > 0 && e.hp > 0 && e.hp < e.maxHp * exec) {
         e.hp = 0;
         float(px, py - 28, "斬", "#ffd2a8");
-        if (has("t10_high") && fromTower != null) {
-          goldRef.current += 25;
-          setGold(goldRef.current);
-          const tw = sim.current.towers[fromTower];
-          if (tw) tw.rateMul = Math.max(tw.rateMul || 1, 1.45);
-          // 短暫加速：用 terror 反向？直接 rateMul 在 step 裡會被 terror 清 — 設 moonfallCd 當 timer
-          if (tw) tw.moonfallCd = -1.2; // 負值標記疾射剩餘
-        }
       }
 
       burst(px, py, color, 6, 1.6);
       e.hurt = 0.22;
-      const aoeR = has("t5_low") ? 1.25 : 1;
+
+      let aoeMul = 1;
+      for (const a of get("aoeRadiusMul")) aoeMul *= a.value;
+      let centerMul = 1;
+      for (const a of get("aoeCenterMul")) centerMul *= a.value;
+
       sim.current.pops.push({
         x: px,
         y: py,
         age: 0,
-        scale: special === "aoe" || special === "ultimate" ? 1.35 * aoeR : 0.85,
+        scale: special === "aoe" || special === "ultimate" ? 1.35 * aoeMul : 0.85,
       });
+
       if (special === "aoe" || special === "ultimate") {
-        const maxR = (special === "ultimate" ? 96 : 74) * aoeR;
+        const maxR = (special === "ultimate" ? 96 : 74) * aoeMul;
         sim.current.rings.push({ x: px, y: py, r: 8, max: maxR, color, life: 0.28 });
-        const centerBonus = has("t5_mid") ? 1.35 : 1;
         for (const o of sim.current.enemies) {
           if (o === e) continue;
           const op = posAt(o.dist, o.route);
           if (Math.hypot(op.x - px, op.y - py) < maxR * 0.95) {
-            o.hp -= amount * 0.65 * (has("t5_mid") ? 1.1 : 1);
+            o.hp -= amount * 0.65;
             applyStatus(o, special, dmg * 0.65);
           }
         }
-        e.hp -= amount * (centerBonus - 1) * 0.5;
+        if (centerMul > 1) e.hp -= amount * (centerMul - 1) * 0.6;
       }
-      // 花繚 / 赤焰擊殺爆
-      if (e.hp <= 0 && (has("t5_high") || has("t3_high"))) {
-        const boom = has("t5_high") ? 100 : 70;
-        const ratio = has("t5_high") ? 0.5 : 0.35;
-        sim.current.rings.push({ x: px, y: py, r: 10, max: boom, color: has("t5_high") ? "#ff5c9a" : "#ff4500", life: 0.32 });
+
+      // 濺射
+      for (const sp of get("splash")) {
         for (const o of sim.current.enemies) {
           if (o === e) continue;
           const op = posAt(o.dist, o.route);
-          if (Math.hypot(op.x - px, op.y - py) < boom * 0.9) o.hp -= e.maxHp * ratio * 0.25 + amount * 0.3;
+          if (Math.hypot(op.x - px, op.y - py) < sp.radius) o.hp -= amount * sp.pct;
+        }
+        sim.current.rings.push({ x: px, y: py, r: 4, max: sp.radius, color: "#9ad7ff", life: 0.15 });
+      }
+      // 回響
+      for (const ec of get("multihitEcho")) {
+        const near = sim.current.enemies
+          .filter((o) => o !== e)
+          .map((o) => ({ o, d: Math.hypot(posAt(o.dist, o.route).x - px, posAt(o.dist, o.route).y - py) }))
+          .filter((x) => x.d < ec.radius)
+          .sort((a, b) => a.d - b.d)[0];
+        if (near) {
+          near.o.hp -= amount * ec.pct;
+          burst(posAt(near.o.dist, near.o.route).x, posAt(near.o.dist, near.o.route).y, "#8ef0ff", 4, 1.2);
         }
       }
-      // 連鎖強化
+
+      // 連鎖（基礎 + 技能）
       if (special === "chain") {
-        const jump = has("t8_low") ? 140 : 110;
-        const nMax = has("t8_low") ? 4 : 3;
-        const chainPct = has("t8_mid") ? 0.75 : 0.55;
+        let extra = 0, jump = 110, pct = 0.55, ret = 0;
+        for (const c of get("chainBonus")) {
+          extra += c.extra;
+          jump = Math.max(jump, c.range);
+          pct = Math.max(pct, c.pct);
+        }
+        for (const c of get("chainReturn")) ret = Math.max(ret, c.pct);
         const p0 = posAt(e.dist, e.route);
         const near = sim.current.enemies
           .filter((o) => o !== e)
           .map((o) => ({ o, d: Math.hypot(posAt(o.dist, o.route).x - p0.x, posAt(o.dist, o.route).y - p0.y) }))
           .filter((x) => x.d < jump)
           .sort((a, b) => a.d - b.d)
-          .slice(0, nMax);
+          .slice(0, 3 + extra);
         for (const n of near) {
-          n.o.hp -= dmg * chainPct;
+          n.o.hp -= dmg * pct;
           const np = posAt(n.o.dist, n.o.route);
           burst(np.x, np.y, "#8ef0ff", 4, 1.2);
         }
-        if (has("t8_high") && near.length) {
-          e.hp -= dmg * 0.4;
-          burst(px, py, "#2bd3ff", 5, 1.4);
-        }
+        if (ret > 0 && near.length) e.hp -= dmg * ret;
       }
-      // 三重潮
-      if (has("t11_mid")) {
-        for (const o of sim.current.enemies) {
-          if (o === e) continue;
-          const op = posAt(o.dist, o.route);
-          if (Math.hypot(op.x - px, op.y - py) < 48) o.hp -= amount * 0.28;
+
+      // 擊殺效果
+      if (e.hp <= 0) {
+        for (const g of get("goldOnKill")) {
+          goldRef.current += g.amount;
+          setGold(goldRef.current);
         }
-        sim.current.rings.push({ x: px, y: py, r: 4, max: 48, color: "#ff4d94", life: 0.18 });
+        for (const h of get("hasteOnKill")) {
+          if (fromTower != null) {
+            const tw = sim.current.towers[fromTower];
+            if (tw) {
+              tw.rateMul = Math.max(tw.rateMul || 1, h.rateMul);
+              tw.moonfallCd = -(h.duration);
+            }
+          }
+        }
+        for (const k of get("killNova")) {
+          sim.current.rings.push({ x: px, y: py, r: 10, max: k.radius, color: "#ff8a55", life: 0.32 });
+          for (const o of sim.current.enemies) {
+            if (o === e) continue;
+            const op = posAt(o.dist, o.route);
+            if (Math.hypot(op.x - px, op.y - py) < k.radius) o.hp -= e.maxHp * k.pctOfMaxHp;
+          }
+        }
       }
     };
 
@@ -924,19 +962,9 @@ export function FoxTD() {
       const def = towerBookRef.current?.[tw.def] ?? TOWERS[tw.def];
       const p = posAt(target.dist, target.route);
       const skills = tw.skills || [];
-      const has = (id: string) => skills.includes(id);
+      const effects = collectEffects(skills);
       tw.skillShots = (tw.skillShots || 0) + 1;
-      let dmg = tw.damage;
-
-      // 銀月滿月斬
-      if (has("t0_high") && tw.skillShots % 6 === 0) {
-        sim.current.rings.push({ x: p.x, y: p.y, r: 8, max: 88, color: "#ffe08a", life: 0.3 });
-        for (const o of sim.current.enemies) {
-          const op = posAt(o.dist, o.route);
-          if (Math.hypot(op.x - p.x, op.y - p.y) < 85) o.hp -= dmg * 1.1;
-        }
-        float(p.x, p.y - 20, "滿月斬", "#ffe08a");
-      }
+      const dmg = tw.damage;
 
       const pushShot = (tx: number, ty: number, tgt: Enemy | null, special: Special, color: string, spd: number, life: number) => {
         sim.current.shots.push({
@@ -957,14 +985,27 @@ export function FoxTD() {
         });
       };
 
+      // 每 N 發 nova
+      for (const n of effects) {
+        if (n.type === "everyNShotsNova" && tw.skillShots % n.n === 0) {
+          sim.current.rings.push({ x: p.x, y: p.y, r: 8, max: n.radius, color: "#ff9ec4", life: 0.28 });
+          for (const o of sim.current.enemies) {
+            const op = posAt(o.dist, o.route);
+            if (Math.hypot(op.x - p.x, op.y - p.y) < n.radius) o.hp -= dmg * n.dmgMul;
+          }
+          float(p.x, p.y - 18, "裂潮", "#ff9ec4");
+        }
+      }
+
       if (def.special === "pierce") {
         const ang = Math.atan2(p.y - tw.y, p.x - tw.x);
         pushShot(tw.x + Math.cos(ang) * 900, tw.y + Math.sin(ang) * 900, null, def.special, def.color, 520, 1.1);
       } else {
         pushShot(p.x, p.y, target, def.special, def.color, 460, 1.6);
-        // 疾羽連珠
-        if (has("t4_mid") && Math.random() < 0.25) {
-          pushShot(p.x + 8, p.y + 8, target, def.special, def.color, 480, 1.5);
+        for (const d of effects) {
+          if (d.type === "doubleShot" && Math.random() < d.chance) {
+            pushShot(p.x + 6, p.y + 6, target, def.special, def.color, 480, 1.5);
+          }
         }
       }
       burst(tw.x, tw.y, def.color, 4, 1.4);
@@ -1203,77 +1244,38 @@ export function FoxTD() {
       }
 
 
-      // 塔高階光環／週期技
+      // 技能光環／週期 Nova
       for (let ti = 0; ti < s.towers.length; ti++) {
         const tw = s.towers[ti];
         if (tw.stake || !tw.skills?.length) continue;
-        const has = (id: string) => tw.skills!.includes(id);
-        // 極寒領域 / 結界感：寒霜高階
-        if (has("t1_high")) {
-          for (const e of s.enemies) {
-            const p = posAt(e.dist, e.route);
-            if (Math.hypot(p.x - tw.x, p.y - tw.y) <= tw.range) {
-              if (!e.noslow) {
-                e.slow = Math.min(e.slow, 0.5);
-                e.slowT = Math.max(e.slowT, 0.35);
+        const effects = collectEffects(tw.skills);
+        for (const ef of effects) {
+          if (ef.type === "auraSlow") {
+            for (const e of s.enemies) {
+              const p = posAt(e.dist, e.route);
+              if (Math.hypot(p.x - tw.x, p.y - tw.y) <= tw.range && !e.noslow) {
+                e.slow = Math.min(e.slow, ef.factor);
+                e.slowT = Math.max(e.slowT, 0.3);
               }
             }
           }
-        }
-        // 潮歌共鸣砲
-        if (has("t2_high")) {
-          tw.moonfallCd = (tw.moonfallCd || 0) + dt;
-          if (tw.moonfallCd >= 5) {
-            tw.moonfallCd = 0;
-            let far: Enemy | null = null;
-            let farD = -1;
-            for (const e of s.enemies) {
-              const p = posAt(e.dist, e.route);
-              const d = Math.hypot(p.x - tw.x, p.y - tw.y);
-              if (d <= tw.range + 40 && d > farD) {
-                farD = d;
-                far = e;
-              }
-            }
-            if (far) {
-              const p = posAt(far.dist, far.route);
-              far.hp -= tw.damage * 2.2;
-              burst(p.x, p.y, "#5ec4ff", 10, 2);
-              float(p.x, p.y - 20, "共鸣", "#5ec4ff");
-            }
-          }
-        }
-        // 狐仙神樂
-        if (has("t11_high")) {
-          tw.moonfallCd = (tw.moonfallCd || 0) + dt;
-          if (tw.moonfallCd >= 7) {
-            tw.moonfallCd = 0;
-            sim.current.rings.push({ x: tw.x, y: tw.y, r: 10, max: tw.range, color: "#ff2d7b", life: 0.4 });
-            for (const e of s.enemies) {
-              const p = posAt(e.dist, e.route);
-              if (Math.hypot(p.x - tw.x, p.y - tw.y) <= tw.range) {
-                e.hp -= tw.damage * 1.4;
-                e.burn = Math.max(e.burn, 12);
-                e.burnT = Math.max(e.burnT, 3);
-                if (!e.noslow) {
-                  e.slow = Math.min(e.slow, 0.55);
-                  e.slowT = Math.max(e.slowT, 2);
+          if (ef.type === "periodicNova") {
+            // 負 moonfallCd 保留給 haste timer
+            if (tw.moonfallCd != null && tw.moonfallCd < 0) continue;
+            tw.moonfallCd = (tw.moonfallCd || 0) + dt;
+            if ((tw.moonfallCd || 0) >= ef.period) {
+              tw.moonfallCd = 0;
+              const rad = tw.range * ef.radiusMul;
+              sim.current.rings.push({ x: tw.x, y: tw.y, r: 10, max: rad, color: "#ffe08a", life: 0.35 });
+              for (const e of s.enemies) {
+                const p = posAt(e.dist, e.route);
+                if (Math.hypot(p.x - tw.x, p.y - tw.y) <= rad) {
+                  e.hp -= tw.damage * ef.dmgMul;
+                  e.burn = Math.max(e.burn, 8);
+                  e.burnT = Math.max(e.burnT, 2);
                 }
               }
-            }
-            float(tw.x, tw.y - 40, "神樂", "#ff2d7b");
-          }
-        }
-        // 影牢：定身結束爆發 — 用 root 從有變無較難追，改為定身中持續疊傷小額
-        if (has("t6_high")) {
-          for (const e of s.enemies) {
-            if (e.rootT > 0 && e.rootT < 0.2) {
-              const p = posAt(e.dist, e.route);
-              if (Math.hypot(p.x - tw.x, p.y - tw.y) <= tw.range + 30) {
-                e.hp -= tw.damage * 1.5;
-                burst(p.x, p.y, "#8b5cff", 8, 1.8);
-                float(p.x, p.y - 18, "影牢", "#8b5cff");
-              }
+              float(tw.x, tw.y - 36, "領域", "#ffe08a");
             }
           }
         }
@@ -1302,8 +1304,21 @@ export function FoxTD() {
             if (kind === "dmg") tw.damage *= 1.22;
             else tw.cooldown = Math.max(0.18, tw.cooldown * 0.82);
             tw.level += 1;
-            grantTowerSkillOnLevel(tw);
             setGold(goldRef.current);
+            if (isSkillLevel(tw.level)) {
+              const idx = s.towers.indexOf(tw);
+              if (idx >= 0) {
+                // 延遲到下一幀用 queue（在 React 外）
+                const choices = rollSkillChoices(tw.skills, tw.level, SKILL_CHOICE_COUNT);
+                if (choices.length) {
+                  const offer = { towerIndex: idx, level: tw.level, choices };
+                  // 寫入 queue，step 外由 ref 標記
+                  (sim.current as { __skillQ?: typeof offer[] }).__skillQ = (
+                    (sim.current as { __skillQ?: typeof offer[] }).__skillQ || []
+                  ).concat([offer]);
+                }
+              }
+            }
           }
         }
       }
@@ -1352,7 +1367,11 @@ export function FoxTD() {
         if (Math.random() < 0.7) burst(sh.x, sh.y, sh.color, 1, 0.4);
 
         if (sh.special === "pierce") {
-          const wide = sh.skills?.includes("t9_mid") ? 18 : 10;
+          let wide = 10;
+          for (const ef of collectEffects(sh.skills)) {
+            if (ef.type === "pierceWiden") wide += ef.add;
+          }
+
           for (const e of s.enemies) {
             if (sh.pierced.has(e)) continue;
             const p = posAt(e.dist, e.route);
@@ -1360,14 +1379,16 @@ export function FoxTD() {
               sh.pierced.add(e);
               sh.pierceCount = (sh.pierceCount || 0) + 1;
               hitEnemy(e, sh.damage, sh.special, sh.color, p.x, p.y, sh.skills, sh.fromTower, { pierceCount: sh.pierceCount });
-              if (sh.skills?.includes("t9_high") && (sh.pierceCount || 0) >= 3) {
-                sim.current.rings.push({ x: p.x, y: p.y, r: 8, max: 90, color: "#ff6b9d", life: 0.28 });
-                for (const o of s.enemies) {
-                  const op = posAt(o.dist, o.route);
-                  if (Math.hypot(op.x - p.x, op.y - p.y) < 85) o.hp -= sh.damage * 0.7;
+              for (const ef of collectEffects(sh.skills)) {
+                if (ef.type === "pierceNovaAt" && (sh.pierceCount || 0) >= ef.count) {
+                  sim.current.rings.push({ x: p.x, y: p.y, r: 8, max: ef.radius, color: "#ff6b9d", life: 0.28 });
+                  for (const o of s.enemies) {
+                    const op = posAt(o.dist, o.route);
+                    if (Math.hypot(op.x - p.x, op.y - p.y) < ef.radius) o.hp -= sh.damage * ef.dmgMul;
+                  }
+                  float(p.x, p.y - 22, "斷潮", "#ff6b9d");
+                  sh.pierceCount = 0;
                 }
-                float(p.x, p.y - 22, "斷潮", "#ff6b9d");
-                sh.pierceCount = 0;
               }
             }
           }
@@ -2665,6 +2686,56 @@ export function FoxTD() {
     c.__begin?.();
   }
 
+
+  function queueSkillOffer(towerIndex: number, level: number) {
+    const tw = sim.current.towers[towerIndex];
+    if (!tw || tw.stake) return;
+    const choices = rollSkillChoices(tw.skills, level, SKILL_CHOICE_COUNT);
+    if (!choices.length) {
+      setHover("技能池已空，無新技能可選");
+      return;
+    }
+    const offer = { towerIndex, level, choices };
+    if (skillOfferRef.current) {
+      skillOfferQueueRef.current.push(offer);
+    } else {
+      setSkillOffer(offer);
+      pausedRef.current = true;
+      setPaused(true);
+    }
+  }
+
+  function pickSkillChoice(skillId: string) {
+    if (!skillOffer) return;
+    const { towerIndex } = skillOffer;
+    const tw = sim.current.towers[towerIndex];
+    if (!tw) {
+      setSkillOffer(null);
+      return;
+    }
+    if (!tw.skills) tw.skills = [];
+    if (!tw.skills.includes(skillId)) {
+      tw.skills.push(skillId);
+      // 被動：只對「新技能」套一次（避免重複乘）
+      const def = SKILL_BY_ID[skillId];
+      if (def) {
+        for (const e of def.effects) {
+          if (e.type === "dmgMul") tw.damage *= e.value;
+          if (e.type === "cooldownMul") tw.cooldown = Math.max(0.12, tw.cooldown * e.value);
+          if (e.type === "rangeAdd") tw.range += e.value;
+        }
+      }
+      setHover(`習得「${skillLabelShort(skillId)}」`);
+    }
+    const next = skillOfferQueueRef.current.shift() || null;
+    setSkillOffer(next);
+    if (!next) {
+      pausedRef.current = false;
+      setPaused(false);
+    }
+    setSel(towerIndex);
+  }
+
   function upgrade(kind: "dmg" | "rate") {
     if (sel === null) return;
     const tw = sim.current.towers[sel];
@@ -2680,13 +2751,11 @@ export function FoxTD() {
     if (kind === "dmg") tw.damage *= 1.22;
     else tw.cooldown = Math.max(0.18, tw.cooldown * 0.82);
     tw.level += 1;
-    const awakened = grantTowerSkillOnLevel(tw, setHover);
-    if (awakened) {
-      setHover(`Lv.${tw.level} 覺醒「${awakened.name}」：${awakened.desc}`);
-    } else {
-      setHover(kind === "dmg" ? `傷害提升（−${cost}）` : `射速提升（−${cost}）`);
-    }
+    setHover(kind === "dmg" ? `傷害提升（−${cost}）` : `射速提升（−${cost}）`);
     setSel(sel);
+    if (isSkillLevel(tw.level) && sel != null) {
+      queueSkillOffer(sel, tw.level);
+    }
   }
 
   function loadLayout(layout: MapLayout) {
@@ -2784,6 +2853,33 @@ export function FoxTD() {
               {speed === 10 ? " · 10倍" : ""}
             </div>
           </div>
+          {phase === "play" && skillOffer && (
+            <div className="overlay" style={{ maxHeight: "90vh", overflowY: "auto" }}>
+              <h2>塔覺醒 · 三選一</h2>
+              <p className="mb-2 max-w-md text-sm text-[#c5dff2]">
+                {sim.current.towers[skillOffer.towerIndex]
+                  ? (towerBook[sim.current.towers[skillOffer.towerIndex].def]?.name || "塔")
+                  : "塔"}{" "}
+                升至 Lv.{skillOffer.level} — 選擇一項技能（效果立即生效）
+              </p>
+              <div className="flex max-w-lg flex-col gap-2">
+                {skillOffer.choices.map((c) => (
+                  <button
+                    key={c.id}
+                    className="btn"
+                    style={{ borderColor: c.color, textAlign: "left" }}
+                    onClick={() => pickSkillChoice(c.id)}
+                  >
+                    <b style={{ color: c.color }}>{c.name}</b>
+                    <span className="mt-0.5 block text-xs font-normal text-[#c5dff2]">{c.desc}</span>
+                    <span className="text-[10px] text-[#8eb6d4]">
+                      {c.tier === "high" ? "高階" : c.tier === "mid" ? "中階" : "低階"}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           {phase === "play" && tileOffer && tileOffer.length > 0 && (
             <div className="overlay">
               <h2>疆域擴張 · 地塊</h2>
@@ -3266,7 +3362,7 @@ export function FoxTD() {
                     })}
                   </ul>
                 ) : (
-                  <span className="text-[#8eb6d4]"> — Lv.5 / 8 / 10 解鎖本塔專屬技能</span>
+                  <span className="text-[#8eb6d4]"> — 每 5 級三選一（從技能池抽取）</span>
                 )}
               </div>
               <div className="mt-2 text-[11px] text-[#b7ddf5]">鎖定優先</div>
