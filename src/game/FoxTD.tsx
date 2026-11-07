@@ -2834,32 +2834,37 @@ export function FoxTD() {
             </div>
           )}
           <p className="mb-2 text-xs text-[#8eb6d4]">守護者（依圖片順序，越後越強）</p>
-          {TOWERS.map((t) => (
-            <button
-              key={t.id}
-              className={"tower-card" + (pick === t.id ? " on" : "")}
-              onClick={() => {
-                setPick(t.id);
-                pickRef.current = t.id;
-                setSel(null);
-                selRef.current = null;
-                setHover(`${t.name}：${t.trait}`);
-              }}
-            >
-              {TOWER_ANIMS[t.id]?.length ? (
-                <AlivePortrait frames={TOWER_ANIMS[t.id]} />
-              ) : (
-                <img className="tower-idle" src={t.img} alt="" />
-              )}
-              <span>
-                <b className="block text-sm" style={{ color: t.color }}>
-                  {t.name}
-                </b>
-                <span className="text-[#ffd27a]">💰 {t.cost}</span>
-                <span className="mt-0.5 block text-[11px] text-[#b7ddf5]">{t.trait}</span>
-              </span>
-            </button>
-          ))}
+          {towerBook.map((t) => {
+            const showCost = Math.max(1, Math.round(t.cost * (getDifficulty(difficultyId).towerCostMul ?? 1)));
+            return (
+              <button
+                key={t.id}
+                className={"tower-card" + (pick === t.id ? " on" : "")}
+                onClick={() => {
+                  setPick(t.id);
+                  pickRef.current = t.id;
+                  setSel(null);
+                  selRef.current = null;
+                  setHover(
+                    `${t.name}：${t.trait} · 傷 ${Math.round(t.damage * (getDifficulty(difficultyId).towerDmgMul ?? 1))}`,
+                  );
+                }}
+              >
+                {TOWER_ANIMS[t.id]?.length ? (
+                  <AlivePortrait frames={TOWER_ANIMS[t.id]} />
+                ) : (
+                  <img className="tower-idle" src={t.img} alt="" />
+                )}
+                <span>
+                  <b className="block text-sm" style={{ color: t.color }}>
+                    {t.name}
+                  </b>
+                  <span className="text-[#ffd27a]">💰 {showCost}</span>
+                  <span className="mt-0.5 block text-[11px] text-[#b7ddf5]">{t.trait}</span>
+                </span>
+              </button>
+            );
+          })}
         </aside>
       </div>
     </div>
