@@ -1093,6 +1093,25 @@ export function FoxTD() {
         ctx.stroke();
       }
 
+      // 可走地板：淺砂／潮坪，和域外深海對比
+      for (let r = y0; r <= y1; r++) {
+        for (let c = x0; c <= x1; c++) {
+          if (!isCellOnBoard(boardRef.current, c, r)) continue;
+          const key = cellKey(c, r);
+          if (s.blocked.has(key)) continue;
+          const x = c * CELL, y = r * CELL;
+          const h = ((c * 374761) ^ (r * 668265)) >>> 0;
+          const tint = (h % 12) / 12;
+          ctx.fillStyle = `rgba(${30 + tint * 20 | 0}, ${70 + tint * 25 | 0}, ${90 + tint * 30 | 0}, 0.42)`;
+          ctx.fillRect(x, y, CELL, CELL);
+          // 偶發淺色砂粒，不要整格線
+          if ((h % 7) === 0) {
+            ctx.fillStyle = "rgba(180, 220, 230, 0.12)";
+            ctx.fillRect(x + 6, y + 10, 4, 3);
+          }
+        }
+      }
+
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
       routes.forEach((live, idx) => {
@@ -1163,13 +1182,163 @@ export function FoxTD() {
       }
       ctx.textAlign = "left";
 
-      for (const key of s.blocked) {
-        const [c, r] = key.split(",").map(Number);
-        if (c < x0 || c > x1 || r < y0 || r > y1) continue;
-        ctx.fillStyle = "rgba(18, 14, 28, 0.72)";
-        ctx.fillRect(c * CELL + 4, r * CELL + 4, CELL - 8, CELL - 8);
-        ctx.strokeStyle = "rgba(255, 196, 150, 0.55)";
-        ctx.strokeRect(c * CELL + 4, r * CELL + 4, CELL - 8, CELL - 8);
+      // 自然地形遮擋：域外 = 深海／礁岩／斷崖／藻林；域內路障 = 廢墟牆／珊瑚障
+      // 用 cell hash 決定樣式，避免整片點陣方塊出戲
+      const terrainHash = (c: number, r: number) => {
+        let h = (c * 73856093) ^ (r * 19349663);
+        h = (h ^ (h >>> 13)) * 1274126177;
+        return (h >>> 0) / 4294967296;
+      };
+      for (let r = y0; r <= y1; r++) {
+        for (let c = x0; c <= x1; c++) {
+          const key = cellKey(c, r);
+          if (!s.blocked.has(key)) continue;
+          const x = c * CELL;
+          const y = r * CELL;
+          const onBoard = isCellOnBoard(boardRef.current, c, r);
+          const rnd = terrainHash(c, r);
+          const rnd2 = terrainHash(c + 17, r + 31);
+
+          if (!onBoard) {
+            // —— 未解鎖疆域：連片自然景觀 ——
+            // 底：深海漸層（略帶藍綠，蓋住背景點陣）
+            const depth = 0.55 + rnd * 0.25;
+            ctx.fillStyle = `rgba(${8 + rnd * 12 | 0}, ${28 + rnd * 30 | 0}, ${48 + rnd * 28 | 0}, ${depth})`;
+            ctx.fillRect(x, y, CELL, CELL);
+
+            // 鄰近已解鎖區的「岸邊」用較淺水色，做出邊界過渡
+            let nearOpen = false;
+            for (const [dc, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+              if (isCellOnBoard(boardRef.current, c + dc, r + dr) && !s.blocked.has(cellKey(c + dc, r + dr))) {
+                nearOpen = true;
+                break;
+              }
+            }
+            if (nearOpen) {
+              ctx.fillStyle = "rgba(40, 90, 110, 0.35)";
+              ctx.fillRect(x, y, CELL, CELL);
+            }
+
+            // 依 hash 疊加一種地貌（礁岩 / 斷崖 / 珊瑚 / 藻林 / 廢柱）
+            const kind = Math.floor(rnd * 5);
+            if (kind === 0) {
+              // 礁岩堆
+              ctx.fillStyle = `rgba(${50 + rnd2 * 40 | 0}, ${70 + rnd2 * 30 | 0}, ${80 + rnd2 * 40 | 0}, 0.85)`;
+              ctx.beginPath();
+              ctx.ellipse(x + CELL * (0.3 + rnd * 0.4), y + CELL * (0.45 + rnd2 * 0.3), CELL * 0.28, CELL * 0.2, 0, 0, Math.PI * 2);
+              ctx.fill();
+              ctx.beginPath();
+              ctx.ellipse(x + CELL * 0.65, y + CELL * 0.55, CELL * 0.2, CELL * 0.15, 0, 0, Math.PI * 2);
+              ctx.fill();
+            } else if (kind === 1) {
+              // 斷崖／石壁
+              ctx.fillStyle = "rgba(35, 48, 62, 0.9)";
+              ctx.fillRect(x + 2, y + 4, CELL - 4, CELL - 6);
+              ctx.strokeStyle = "rgba(90, 120, 140, 0.45)";
+              ctx.lineWidth = 1;
+              ctx.beginPath();
+              ctx.moveTo(x + 6, y + 10);
+              ctx.lineTo(x + CELL - 6, y + 14);
+              ctx.moveTo(x + 8, y + 20);
+              ctx.lineTo(x + CELL - 8, y + 22);
+              ctx.stroke();
+              // 崖頂高光
+              ctx.fillStyle = "rgba(120, 160, 180, 0.25)";
+              ctx.fillRect(x + 2, y + 4, CELL - 4, 5);
+            } else if (kind === 2) {
+              // 珊瑚叢（可貼圖）
+              const coral = s.scene.coral;
+              if (coral && coral.complete && coral.naturalWidth) {
+                ctx.globalAlpha = 0.55 + rnd * 0.3;
+                const sc = 0.7 + rnd2 * 0.5;
+                blit(ctx, coral, x + 2, y + 2, CELL * sc, CELL * sc);
+                ctx.globalAlpha = 1;
+              } else {
+                ctx.fillStyle = `rgba(${180 + rnd * 40 | 0}, ${80 + rnd2 * 40 | 0}, ${110 + rnd * 30 | 0}, 0.55)`;
+                for (let k = 0; k < 3; k++) {
+                  const cx = x + 8 + k * 8 + rnd * 4;
+                  const cy = y + CELL - 6;
+                  ctx.beginPath();
+                  ctx.moveTo(cx, cy);
+                  ctx.quadraticCurveTo(cx + 4, cy - 16 - rnd2 * 10, cx + 2, cy - 22 - k * 3);
+                  ctx.strokeStyle = ctx.fillStyle;
+                  ctx.lineWidth = 3;
+                  ctx.stroke();
+                }
+              }
+            } else if (kind === 3) {
+              // 海藻／樹林感（向上飄的絲帶）
+              ctx.strokeStyle = `rgba(${40 + rnd * 30 | 0}, ${140 + rnd2 * 50 | 0}, ${100 + rnd * 40 | 0}, 0.7)`;
+              ctx.lineWidth = 2;
+              for (let k = 0; k < 3; k++) {
+                const bx = x + 8 + k * 9;
+                ctx.beginPath();
+                ctx.moveTo(bx, y + CELL - 2);
+                ctx.bezierCurveTo(bx + Math.sin(t + k) * 4, y + 18, bx - 3, y + 10, bx + Math.cos(t * 0.7 + k) * 3, y + 4);
+                ctx.stroke();
+              }
+            } else {
+              // 沉沒石柱殘段
+              const pillar = s.scene.pillar;
+              if (pillar && pillar.complete && pillar.naturalWidth && rnd > 0.4) {
+                ctx.globalAlpha = 0.45 + rnd2 * 0.25;
+                blit(ctx, pillar, x + 4, y - 4, CELL - 8, CELL + 4);
+                ctx.globalAlpha = 1;
+              } else {
+                ctx.fillStyle = "rgba(70, 85, 100, 0.75)";
+                ctx.fillRect(x + CELL * 0.35, y + 4, CELL * 0.3, CELL - 6);
+                ctx.fillStyle = "rgba(140, 160, 175, 0.35)";
+                ctx.fillRect(x + CELL * 0.32, y + 2, CELL * 0.36, 6);
+              }
+            }
+
+            // 輕微噪點，打破方格感（不要整排一樣）
+            if (rnd2 > 0.7) {
+              ctx.fillStyle = "rgba(160, 210, 230, 0.08)";
+              ctx.beginPath();
+              ctx.arc(x + rnd * CELL, y + rnd2 * CELL, 2, 0, Math.PI * 2);
+              ctx.fill();
+            }
+          } else {
+            // —— 域內可走區上的路障：可拆除的廢墟／珊瑚障 ——
+            ctx.fillStyle = "rgba(22, 28, 40, 0.55)";
+            ctx.fillRect(x + 3, y + 3, CELL - 6, CELL - 6);
+
+            if (rnd < 0.45) {
+              // 崩塌石牆
+              ctx.fillStyle = "rgba(55, 62, 78, 0.92)";
+              ctx.fillRect(x + 5, y + 6, CELL - 10, CELL - 10);
+              ctx.strokeStyle = "rgba(160, 190, 210, 0.35)";
+              ctx.strokeRect(x + 5, y + 6, CELL - 10, CELL - 10);
+              ctx.fillStyle = "rgba(255, 200, 160, 0.15)";
+              ctx.fillRect(x + 5, y + 6, CELL - 10, 4);
+            } else if (rnd < 0.75) {
+              // 活珊瑚障
+              const coral = s.scene.coral;
+              if (coral && coral.complete && coral.naturalWidth) {
+                ctx.globalAlpha = 0.85;
+                blit(ctx, coral, x + 2, y + 2, CELL - 4, CELL - 4);
+                ctx.globalAlpha = 1;
+              } else {
+                ctx.fillStyle = "rgba(200, 90, 120, 0.7)";
+                ctx.beginPath();
+                ctx.arc(x + CELL / 2, y + CELL / 2, CELL * 0.32, 0, Math.PI * 2);
+                ctx.fill();
+              }
+            } else {
+              // 短石柱
+              const pillar = s.scene.pillar;
+              if (pillar && pillar.complete && pillar.naturalWidth) {
+                ctx.globalAlpha = 0.9;
+                blit(ctx, pillar, x + 6, y + 2, CELL - 12, CELL - 4);
+                ctx.globalAlpha = 1;
+              } else {
+                ctx.fillStyle = "rgba(90, 100, 120, 0.9)";
+                ctx.fillRect(x + CELL * 0.3, y + 4, CELL * 0.4, CELL - 8);
+              }
+            }
+          }
+        }
       }
       ctx.font = "bold 12px sans-serif";
       entrancesRef.current.forEach((g, i) => {
