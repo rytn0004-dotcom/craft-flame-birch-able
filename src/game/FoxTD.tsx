@@ -425,6 +425,9 @@ export function FoxTD() {
   const [savedMaps, setSavedMaps] = useState<MapLayout[]>(() => readSavedMaps());
   const [mapName, setMapName] = useState("我的地圖");
   const [activeMap, setActiveMap] = useState("潮坪");
+  /** expand = 地塊拼接開局；layout = 完整預設／自訂地圖 */
+  const [mapMode, setMapMode] = useState<"expand" | "layout">("expand");
+  const [selectedLevelId, setSelectedLevelId] = useState<string>("mode-expand");
   const [tool, setTool] = useState<"block" | "height" | "entry" | "exit">("block");
   const [brush, setBrush] = useState(1);
   const [bestiary, setBestiary] = useState<EnemyDef[]>(() => stockBestiary());
@@ -1959,8 +1962,11 @@ export function FoxTD() {
     selRef.current = null;
     phaseRef.current = "play";
     setPhase("play");
-    // apply seed board (HQ + path + spawn)
-    {
+    setTileOffer(null);
+    tileOfferRef.current = null;
+
+    // 依主選單選擇：地塊擴張 或 完整關卡／自訂地圖
+    if (mapMode === "expand") {
       const board = seedBoard();
       boardRef.current = board;
       const blocked = buildBlocked(board);
@@ -1974,9 +1980,45 @@ export function FoxTD() {
       if (paths) loadRoutes(paths);
       sim.current.blocked = blocked;
       sim.current.heights = heights;
-      setTileOffer(null);
-      tileOfferRef.current = null;
+      setActiveMap("潮汐擴張");
+    } else {
+      // 完整地圖：使用目前 loadLayout 已寫入的 mapRef／入口出口；若尚未載入則找 selectedLevelId
+      const all = [...presetMaps(), ...savedMaps];
+      const layout = all.find((m) => m.id === selectedLevelId) ?? all[0];
+      if (layout) {
+        const canvas = canvasRef.current as HTMLCanvasElement & {
+          __applyMap?: (b: string[], h: number[], entrances?: Cell[], exits?: Cell[]) => boolean;
+        };
+        const ok = canvas?.__applyMap?.(
+          layout.blocked ?? [],
+          layout.heights ?? emptyHeights(),
+          layout.entrances,
+          layout.exits,
+        );
+        if (!ok) {
+          // 後備：仍用擴張模式，避免卡死
+          setHover("所選地圖路線不通，改以潮汐擴張開局");
+          const board = seedBoard();
+          boardRef.current = board;
+          const blocked = buildBlocked(board);
+          const heights = buildHeights(board);
+          heightsRef.current = heights;
+          const gates = collectGates(board);
+          entrancesRef.current = gates.entrances;
+          exitsRef.current = gates.exits;
+          mapRef.current = blocked;
+          const paths = pathsForGates(blocked, gates.entrances, gates.exits);
+          if (paths) loadRoutes(paths);
+          sim.current.blocked = blocked;
+          sim.current.heights = heights;
+        } else {
+          setActiveMap(layout.name);
+          // 完整關卡不啟用地塊擴張（board 標記為「已滿圖」避免誤觸發）
+          boardRef.current = { placed: [], playerBlocked: new Set() };
+        }
+      }
     }
+
     setWorkshop(false);
     setPaused(false);
     pausedRef.current = false;
@@ -1984,6 +2026,20 @@ export function FoxTD() {
     commit?.(new Set(mapRef.current));
     const c = canvasRef.current as HTMLCanvasElement & { __begin?: () => void };
     c.__begin?.();
+  }
+
+  function selectLevel(id: string, mode: "expand" | "layout") {
+    setSelectedLevelId(id);
+    setMapMode(mode);
+    if (mode === "expand") {
+      setActiveMap("潮汐擴張");
+      setHover("開局：中央聖地＋裂口，每 3 波可拼接新地塊");
+      return;
+    }
+    const layout = [...presetMaps(), ...savedMaps].find((m) => m.id === id);
+    if (!layout) return;
+    loadLayout(layout);
+    setHover(`已選關卡「${layout.name}」· 按開始守城`);
   }
 
   function openWorkshop() {
@@ -2332,20 +2388,66 @@ export function FoxTD() {
             </div>
           )}
           {phase !== "play" && !workshop && (
-            <div className="overlay">
+            <div className="overlay" style={{ maxHeight: "90vh", overflowY: "auto" }}>
               <h2>{phase === "win" ? "潮退，聖地仍在" : phase === "lose" ? "結界破碎" : "狐仙結界"}</h2>
-              <p className="mb-4 max-w-md text-sm text-[#c5dff2]">
+              <p className="mb-3 max-w-lg text-sm text-[#c5dff2]">
                 {phase === "ready"
-                  ? "點地圖工房可先封路，或把地形抬到 1–3。除了平地，每高一階，塔的射程 +30，做好的地圖可以保存。戰鬥中放路障會依最短路改道。每 5 波出現會拆塔的潮刃。"
+                  ? "先選關卡或自訂地圖，再開始守城。也可進工房編輯後保存，出現在下方清單。"
                   : phase === "win"
                     ? "十二波妖潮已被擋下。"
                     : "生命歸零。重新布置結界再試一次。"}
               </p>
+              {phase === "ready" && (
+                <div className="mb-4 w-full max-w-lg text-left">
+                  <p className="mb-1 text-xs tracking-wide text-[#8ec8ee]">選擇開局</p>
+                  <div className="mb-2 flex flex-wrap gap-2">
+                    <button
+                      className={"btn" + (selectedLevelId === "mode-expand" ? "" : " ghost")}
+                      onClick={() => selectLevel("mode-expand", "expand")}
+                      title="從小地圖開始，每 3 波拼接新地塊"
+                    >
+                      潮汐擴張（推薦）
+                    </button>
+                  </div>
+                  <p className="mb-1 mt-2 text-xs tracking-wide text-[#8ec8ee]">預設關卡</p>
+                  <div className="mb-2 flex flex-wrap gap-2">
+                    {presetMaps().map((m) => (
+                      <button
+                        key={m.id}
+                        className={"btn" + (selectedLevelId === m.id ? "" : " ghost")}
+                        onClick={() => selectLevel(m.id, "layout")}
+                      >
+                        {m.name.replace(/^關卡[·・]?/, "")}
+                      </button>
+                    ))}
+                  </div>
+                  {savedMaps.length > 0 && (
+                    <>
+                      <p className="mb-1 mt-2 text-xs tracking-wide text-[#8ec8ee]">自訂地圖</p>
+                      <div className="mb-2 flex flex-wrap gap-2">
+                        {savedMaps.map((m) => (
+                          <button
+                            key={m.id}
+                            className={"btn" + (selectedLevelId === m.id ? "" : " ghost")}
+                            onClick={() => selectLevel(m.id, "layout")}
+                          >
+                            {m.name}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                  <p className="mt-1 text-xs text-[#9ec4de]">
+                    目前：<span className="text-[#ffe7f1]">{activeMap}</span>
+                    {mapMode === "expand" ? " · 地塊拼接模式" : " · 完整地圖"}
+                  </p>
+                </div>
+              )}
               <button className="btn" onClick={start}>
                 {phase === "ready" ? (endless ? "開始無盡" : "開始守城") : "重新開始"}
               </button>
               {phase === "ready" && (
-                <div className="mt-3 flex gap-2">
+                <div className="mt-3 flex flex-wrap justify-center gap-2">
                   <button className="btn ghost" onClick={() => setEndless((v) => !v)}>
                     {endless ? "無盡：開" : "無盡：關"}
                   </button>
