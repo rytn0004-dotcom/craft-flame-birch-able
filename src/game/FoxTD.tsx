@@ -33,14 +33,21 @@ import {
 import {
   buildBlocked,
   buildHeights,
+  canPlaceTile,
   collectGates,
   EXPAND_EVERY,
+  frontierSlots,
   isCellOnBoard,
+  isExpandBoard,
   OFFER_COUNT,
   pickOfferTemplates,
+  placeTile,
   seedBoard,
   shouldOfferTiles,
-  frontierSlots,
+  TEMPLATE_BY_ID,
+  TILE,
+  validPlacements,
+  type Rot,
   type TileBoard,
 } from "./tiles";
 
@@ -582,6 +589,11 @@ export function FoxTD() {
   const boardRef = useRef<TileBoard>(seedBoard());
   const tileOfferRef = useRef<string[] | null>(null);
   const [tileOffer, setTileOffer] = useState<string[] | null>(null);
+  const [pickTemplate, setPickTemplate] = useState<string | null>(null);
+  const pickTemplateRef = useRef<string | null>(null);
+  const [pickRot, setPickRot] = useState<Rot>(0);
+  const pickRotRef = useRef<Rot>(0);
+  const mapModeRef = useRef<"expand" | "layout">("expand");
 
 
   useEffect(() => {
@@ -614,6 +626,15 @@ export function FoxTD() {
   useEffect(() => {
     skillOfferRef.current = skillOffer;
   }, [skillOffer]);
+  useEffect(() => {
+    pickTemplateRef.current = pickTemplate;
+  }, [pickTemplate]);
+  useEffect(() => {
+    pickRotRef.current = pickRot;
+  }, [pickRot]);
+  useEffect(() => {
+    mapModeRef.current = mapMode;
+  }, [mapMode]);
   useEffect(() => {
     workshopRef.current = workshop;
   }, [workshop]);
@@ -1089,11 +1110,15 @@ export function FoxTD() {
           if (s.wave >= cap && !endlessRef.current) {
             phaseRef.current = "win";
             setPhase("win");
-          } else if (shouldOfferTiles(s.wave, boardRef.current) && !tileOfferRef.current) {
+          } else if (isExpandBoard(boardRef.current) && shouldOfferTiles(s.wave, boardRef.current) && !tileOfferRef.current) {
             const opts = pickOfferTemplates(OFFER_COUNT);
             if (opts.length && frontierSlots(boardRef.current).length) {
               tileOfferRef.current = opts;
               setTileOffer(opts);
+              setPickTemplate(null);
+              pickTemplateRef.current = null;
+              pausedRef.current = true;
+              setPaused(true);
               setHover(`第 ${s.wave} 波結束 · 選擇地塊拼接（每 ${EXPAND_EVERY} 波）`);
               s.between = 0;
             } else {
@@ -1573,6 +1598,22 @@ export function FoxTD() {
             ctx.fillStyle = "rgba(180, 220, 230, 0.12)";
             ctx.fillRect(x + 6, y + 10, 4, 3);
           }
+        }
+      }
+
+
+      if (tileOfferRef.current && pickTemplateRef.current) {
+        const tid = pickTemplateRef.current;
+        const rot = pickRotRef.current;
+        for (const slot of validPlacements(boardRef.current, tid)) {
+          if (slot.rot !== rot) continue;
+          const ox = slot.tc * TILE * CELL;
+          const oy = slot.tr * TILE * CELL;
+          ctx.fillStyle = "rgba(120, 220, 180, 0.25)";
+          ctx.fillRect(ox, oy, TILE * CELL, TILE * CELL);
+          ctx.strokeStyle = "rgba(160, 255, 210, 0.85)";
+          ctx.lineWidth = 2;
+          ctx.strokeRect(ox + 2, oy + 2, TILE * CELL - 4, TILE * CELL - 4);
         }
       }
 
@@ -2242,6 +2283,12 @@ export function FoxTD() {
         return;
       }
       const s = sim.current;
+      if (tileOfferRef.current && tileOfferRef.current.length && pickTemplateRef.current) {
+        const gx = Math.floor(p.x / GRID);
+        const gy = Math.floor(p.y / GRID);
+        confirmPlaceTile(Math.floor(gx / TILE), Math.floor(gy / TILE));
+        return;
+      }
       for (let i = 0; i < s.towers.length; i++) {
         const tw = s.towers[i];
         const py = tw.y - cellHeight(s.heights, tw.gx, tw.gy) * 5;
@@ -2397,6 +2444,83 @@ export function FoxTD() {
       canvas.removeEventListener("contextmenu", onContext);
     };
   }, []);
+
+
+  function applyTileBoard(board: TileBoard) {
+    boardRef.current = board;
+    const blocked = buildBlocked(board);
+    const heights = buildHeights(board);
+    heightsRef.current = heights;
+    const gates = collectGates(board);
+    entrancesRef.current = gates.entrances;
+    exitsRef.current = gates.exits;
+    mapRef.current = blocked;
+    const paths = pathsForGates(blocked, gates.entrances, gates.exits);
+    if (paths) loadRoutes(paths);
+    sim.current.blocked = blocked;
+    sim.current.heights = heights;
+    const commit = (canvasRef.current as HTMLCanvasElement & { __commit?: (n: Set<string>) => boolean }).__commit;
+    commit?.(new Set(blocked));
+  }
+
+  function selectTileTemplate(id: string) {
+    setPickTemplate(id);
+    pickTemplateRef.current = id;
+    setPickRot(0);
+    pickRotRef.current = 0;
+    const n = validPlacements(boardRef.current, id).length;
+    setHover(n ? `已選「${TEMPLATE_BY_ID[id]?.name || id}」· 可放 ${n} 處 · 點地圖高亮格` : "此塊無法銜接，請換一塊或旋轉");
+  }
+
+  function rotatePickTile() {
+    if (!pickTemplateRef.current) return;
+    const next = ((pickRotRef.current + 1) % 4) as Rot;
+    pickRotRef.current = next;
+    setPickRot(next);
+    setHover(`旋轉 ${next * 90}°`);
+  }
+
+  function confirmPlaceTile(tc: number, tr: number) {
+    const id = pickTemplateRef.current;
+    if (!id) {
+      setHover("請先點選一塊模板");
+      return;
+    }
+    let rot = pickRotRef.current;
+    if (!canPlaceTile(boardRef.current, tc, tr, id, rot)) {
+      const hit = validPlacements(boardRef.current, id).find((p) => p.tc === tc && p.tr === tr);
+      if (!hit) {
+        setHover("此格無法銜接道路");
+        return;
+      }
+      rot = hit.rot;
+      pickRotRef.current = rot;
+      setPickRot(rot);
+    }
+    const next = placeTile(boardRef.current, tc, tr, id, rot);
+    if (!next) {
+      setHover("放置失敗");
+      return;
+    }
+    applyTileBoard(next);
+    setTileOffer(null);
+    tileOfferRef.current = null;
+    setPickTemplate(null);
+    pickTemplateRef.current = null;
+    pausedRef.current = false;
+    setPaused(false);
+    setHover(`已拼接「${TEMPLATE_BY_ID[id]?.name || id}」· 入口 ${entrancesRef.current.length}`);
+  }
+
+  function skipTileOffer() {
+    setTileOffer(null);
+    tileOfferRef.current = null;
+    setPickTemplate(null);
+    pickTemplateRef.current = null;
+    pausedRef.current = false;
+    setPaused(false);
+    setHover("已略過拼接，下一波即將開始");
+  }
 
   function canPlace(gx: number, gy: number) {
     if (!Number.isInteger(gx) || !Number.isInteger(gy)) return false;
@@ -2897,31 +3021,56 @@ export function FoxTD() {
             </div>
           )}
           {phase === "play" && tileOffer && tileOffer.length > 0 && (
-            <div className="overlay">
-              <h2>疆域擴張 · 地塊</h2>
+            <div
+              className="overlay"
+              style={{
+                pointerEvents: "none",
+                background: "transparent",
+                justifyContent: "flex-start",
+                paddingTop: 12,
+              }}
+            >
+              <div
+                style={{
+                  pointerEvents: "auto",
+                  background: "rgba(8,20,36,0.92)",
+                  borderRadius: 12,
+                  padding: 16,
+                  maxWidth: 420,
+                }}
+              >
+              <h2>疆域擴張 · 地塊拼接</h2>
               <p className="mb-2 max-w-md text-sm text-[#c5dff2]">
-                第 {wave} 波結束。可選模板稍後完整放置；目前可略過以繼續下一波。
+                第 {wave} 波結束。選一塊模板，可旋轉後點地圖相鄰空格放置。
               </p>
               <div className="mb-2 flex flex-wrap justify-center gap-2">
                 {tileOffer.map((id) => (
-                  <span key={id} className="btn ghost">
-                    {id}
-                  </span>
+                  <button
+                    key={id}
+                    className={"btn" + (pickTemplate === id ? "" : " ghost")}
+                    onClick={() => selectTileTemplate(id)}
+                  >
+                    {TEMPLATE_BY_ID[id]?.name ?? id}
+                  </button>
                 ))}
               </div>
-              <button
-                className="btn"
-                onClick={() => {
-                  setTileOffer(null);
-                  tileOfferRef.current = null;
-                  setHover("已略過拼接，下一波即將開始");
-                }}
-              >
+              {pickTemplate && (
+                <div className="mb-2 flex flex-wrap justify-center gap-2">
+                  <button className="btn ghost" onClick={rotatePickTile}>
+                    旋轉 {pickRot * 90}°
+                  </button>
+                  <span className="self-center text-xs text-[#9ad7ff]">
+                    可放 {validPlacements(boardRef.current, pickTemplate).filter((x) => x.rot === pickRot).length} 格 · 點地圖放置
+                  </span>
+                </div>
+              )}
+              <button className="btn ghost" onClick={skipTileOffer}>
                 略過，繼續戰鬥
               </button>
+              </div>
             </div>
           )}
-          {phase === "play" && paused && !(tileOffer && tileOffer.length) && (
+          {phase === "play" && paused && !(tileOffer && tileOffer.length) && !skillOffer && (
             <div className="overlay">
               <h2>已暫停</h2>
               <p className="mb-4 text-sm text-[#c5dff2]">時間停住了。可以繼續守城，或回到主畫面。</p>

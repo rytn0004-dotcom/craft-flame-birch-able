@@ -347,6 +347,13 @@ export function validPlacements(board: TileBoard, templateId: string): { tc: num
   return out;
 }
 
+/** placed 為空 = 完整地圖模式（不限制地塊格子） */
 export function isCellOnBoard(board: TileBoard, c: number, r: number): boolean {
+  if (!board.placed.length) return true;
   return slotOccupied(board, Math.floor(c / TILE), Math.floor(r / TILE));
+}
+
+/** 完整地圖模式：不啟用地塊拼接 */
+export function isExpandBoard(board: TileBoard): boolean {
+  return board.placed.length > 0;
 }
