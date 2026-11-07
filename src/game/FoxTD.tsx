@@ -1158,11 +1158,12 @@ export function FoxTD() {
         const towersNear: { index: number; dist: number }[] = [];
         for (let ti = 0; ti < s.towers.length; ti++) {
           const tw = s.towers[ti];
-          if (tw.stake) continue;
           const d = Math.hypot(tw.x - p.x, tw.y - p.y);
+          // 路障可被近戰拆；略優先攻擊路障以便擋路有意義
+          const weight = tw.stake ? d * 0.85 : d;
           towersNear.push({ index: ti, dist: d });
-          if (d < bestD) {
-            bestD = d;
+          if (weight < bestD) {
+            bestD = weight;
             targetTower = ti;
           }
         }
@@ -1180,16 +1181,24 @@ export function FoxTD() {
           if (fx.towerHits) {
             for (const h of fx.towerHits) {
               const tw = s.towers[h.index];
-              if (!tw || tw.stake) continue;
-              tw.hp -= h.damage * (e.rage ? 1.3 : 1);
+              if (!tw) continue;
+              tw.hp -= h.damage * (e.rage ? 1.3 : 1) * (tw.stake ? 0.75 : 1);
               tw.shake = 0.2;
               burst(tw.x, tw.y, "#ffb4c8", 8, 1.8);
             }
             for (let ti = s.towers.length - 1; ti >= 0; ti--) {
-              if (!s.towers[ti].stake && s.towers[ti].hp <= 0) {
-                float(s.towers[ti].x, s.towers[ti].y, "塔被拆毀", "#ff8aa0");
-                s.towers.splice(ti, 1);
+              if (s.towers[ti].hp > 0) continue;
+              const dead = s.towers[ti];
+              if (dead.stake) {
+                const next = new Set(s.blocked);
+                next.delete(cellKey(dead.gx, dead.gy));
+                const commit = (canvasRef.current as HTMLCanvasElement & { __commit?: (n: Set<string>) => boolean })?.__commit;
+                commit?.(next);
+                float(dead.x, dead.y, "路障摧毀", "#ffd2a8");
+              } else {
+                float(dead.x, dead.y, "塔被拆毀", "#ff8aa0");
               }
+              s.towers.splice(ti, 1);
             }
           }
           if (fx.terror) {
@@ -1231,14 +1240,24 @@ export function FoxTD() {
           castSkill,
           attackTower: (towerIndex, damage) => {
             const tw = s.towers[towerIndex];
-            if (!tw || tw.stake) return false;
+            if (!tw) return false;
             e.face = tw.x >= p.x ? 1 : -1;
-            tw.hp -= damage * (e.rage ? 1.4 : 1);
+            // 路障較耐打一點
+            const mul = (e.rage ? 1.4 : 1) * (tw.stake ? 0.75 : 1);
+            tw.hp -= damage * mul;
             tw.shake = 0.18;
             burst(tw.x, tw.y, e.rage ? "#ff6fa8" : "#ffb4c8", e.boss ? 10 : 6, 1.8);
             if (tw.hp <= 0) {
+              if (tw.stake) {
+                const next = new Set(s.blocked);
+                next.delete(cellKey(tw.gx, tw.gy));
+                const commit = (canvasRef.current as HTMLCanvasElement & { __commit?: (n: Set<string>) => boolean })?.__commit;
+                commit?.(next);
+                float(tw.x, tw.y, "路障摧毀", "#ffd2a8");
+              } else {
+                float(tw.x, tw.y, "塔被拆毀", "#ff8aa0");
+              }
               s.towers.splice(towerIndex, 1);
-              float(tw.x, tw.y, "塔被拆毀", "#ff8aa0");
             }
             return true;
           },
@@ -1329,6 +1348,9 @@ export function FoxTD() {
             if (kind === "dmg") tw.damage *= 1.22;
             else tw.cooldown = Math.max(0.18, tw.cooldown * 0.82);
             tw.level += 1;
+            const before = tw.maxHp;
+            tw.maxHp = Math.round(tw.maxHp * 1.18 + 12);
+            tw.hp = Math.min(tw.maxHp, tw.hp + (tw.maxHp - before) + 20);
             setGold(goldRef.current);
             if (isSkillLevel(tw.level)) {
               const idx = s.towers.indexOf(tw);
@@ -2289,38 +2311,37 @@ export function FoxTD() {
         confirmPlaceTile(Math.floor(gx / TILE), Math.floor(gy / TILE));
         return;
       }
-      for (let i = 0; i < s.towers.length; i++) {
-        const tw = s.towers[i];
-        const py = tw.y - cellHeight(s.heights, tw.gx, tw.gy) * 5;
-        if (Math.hypot(tw.x - p.x, py - p.y) < 28 / (s.cam.zoom || 1)) {
-          selRef.current = i;
-          setSel(i);
-          pickRef.current = null;
-          setPick(null);
+      const gx0 = Math.floor(p.x / GRID);
+      const gy0 = Math.floor(p.y / GRID);
+      // 路障模式優先：點地圖即放，不先選中塔
+      if (stakeRef.current && phaseRef.current === "play") {
+        const gx = gx0;
+        const gy = gy0;
+        if (gx < 0 || gy < 0 || gx >= COLS || gy >= ROWS) return;
+        if (!isCellOnBoard(boardRef.current, gx, gy)) {
+          setHover("只能放在已解鎖地塊上");
           return;
         }
-      }
-      const id = pickRef.current;
-      const gx = Math.floor(p.x / GRID);
-      const gy = Math.floor(p.y / GRID);
-      if (stakeRef.current) {
-        if (gx < 0 || gy < 0 || gx >= COLS || gy >= ROWS) return;
         if (gateHere(gx, gy)) {
           setHover("不能堵住出入口");
           return;
         }
-        if (s.towers.some((t) => t.gx === gx && t.gy === gy) || s.blocked.has(cellKey(gx, gy))) {
-          setHover("這格已經有東西");
+        if (s.towers.some((t) => t.gx === gx && t.gy === gy)) {
+          setHover("這格已有塔或路障");
+          return;
+        }
+        if (s.blocked.has(cellKey(gx, gy))) {
+          setHover("這格是地形／障礙，請點可走的路徑格");
           return;
         }
         if (goldRef.current < STAKE_COST) {
-          setHover("金幣不夠");
+          setHover(`金幣不夠（需要 ${STAKE_COST}）`);
           return;
         }
         const next = new Set(s.blocked);
         next.add(cellKey(gx, gy));
         if (!commitBlocks(next)) {
-          setHover("不能完全封死最短路");
+          setHover("不能完全封死最短路，換一格試試");
           return;
         }
         goldRef.current -= STAKE_COST;
@@ -2336,8 +2357,8 @@ export function FoxTD() {
           level: 1,
           aim: 0,
           recoil: 0,
-          hp: 160,
-          maxHp: 160,
+          hp: 240,
+          maxHp: 240,
           shake: 0,
           stake: true,
           gx,
@@ -2346,9 +2367,23 @@ export function FoxTD() {
           terrorT: 0,
           spent: STAKE_COST,
         });
-        setHover("路障已放，妖潮改走最短路");
+        setHover("路障已放（可被近戰拆毀）· 妖潮改道");
         return;
       }
+      for (let i = 0; i < s.towers.length; i++) {
+        const tw = s.towers[i];
+        const py = tw.y - cellHeight(s.heights, tw.gx, tw.gy) * 5;
+        if (Math.hypot(tw.x - p.x, py - p.y) < 28 / (s.cam.zoom || 1)) {
+          selRef.current = i;
+          setSel(i);
+          pickRef.current = null;
+          setPick(null);
+          return;
+        }
+      }
+      const id = pickRef.current;
+      const gx = gx0;
+      const gy = gy0;
       if (id === null) {
         // 左鍵空白處也可拖鏡頭
         sim.current.drag = {
@@ -2392,8 +2427,8 @@ export function FoxTD() {
         level: 1,
         aim: 0,
         recoil: 0,
-        hp: 90,
-        maxHp: 90,
+        hp: 140,
+        maxHp: 140,
         shake: 0,
         stake: false,
         gx,
@@ -2891,7 +2926,15 @@ export function FoxTD() {
     if (kind === "dmg") tw.damage *= 1.22;
     else tw.cooldown = Math.max(0.18, tw.cooldown * 0.82);
     tw.level += 1;
-    setHover(kind === "dmg" ? `傷害提升（−${cost}）` : `射速提升（−${cost}）`);
+    // 升級強化耐久：最大生命 +18% 並回一部分血
+    const before = tw.maxHp;
+    tw.maxHp = Math.round(tw.maxHp * 1.18 + 12);
+    tw.hp = Math.min(tw.maxHp, tw.hp + (tw.maxHp - before) + 20);
+    setHover(
+      kind === "dmg"
+        ? `傷害提升 · 生命 ${Math.round(tw.hp)}/${tw.maxHp}（−${cost}）`
+        : `射速提升 · 生命 ${Math.round(tw.hp)}/${tw.maxHp}（−${cost}）`,
+    );
     setSel(sel);
     if (isSkillLevel(tw.level) && sel != null) {
       queueSkillOffer(sel, tw.level);
@@ -3278,13 +3321,22 @@ export function FoxTD() {
             <button
               className={"btn ghost flex-1" + (staking ? " on" : "")}
               onClick={() => {
-                setStaking((v) => !v);
+                setStaking((v) => {
+                  const next = !v;
+                  stakeRef.current = next;
+                  setHover(
+                    next
+                      ? `路障模式：點可走路徑放置（${STAKE_COST} 金，可被近戰拆毀）`
+                      : "已關閉路障模式",
+                  );
+                  return next;
+                });
                 setPick(null);
                 pickRef.current = null;
               }}
               disabled={phase !== "play"}
             >
-              路障 {STAKE_COST}
+              {staking ? "路障中…" : `路障 ${STAKE_COST}`}
             </button>
           </div>
           <div className="mb-2 flex gap-2">
