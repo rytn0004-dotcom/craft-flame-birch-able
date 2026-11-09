@@ -1,135 +1,103 @@
-@import "tailwindcss";
-
-@layer base {
-  button:not(:disabled),
-  [role="button"]:not(:disabled) {
-    cursor: pointer;
-  }
-  html,
-  body,
-  #app {
-    min-height: 100%;
-  }
-  body {
-    margin: 0;
-    background: #071422;
-    color: #e8f4ff;
-    font-family: "Noto Sans TC", "PingFang TC", sans-serif;
-  }
-}
-
-.td-shell {
+.shell {
   min-height: 100vh;
   background:
-    radial-gradient(1200px 500px at 10% -10%, rgba(126, 203, 255, 0.18), transparent 55%),
-    radial-gradient(900px 480px at 100% 0%, rgba(255, 143, 184, 0.16), transparent 50%),
-    #071422;
+    radial-gradient(ellipse 80% 50% at 50% -10%, #1a3a5c 0%, transparent 55%),
+    radial-gradient(ellipse 60% 40% at 80% 100%, #0d2840 0%, transparent 50%),
+    linear-gradient(180deg, #071525 0%, #0a1a2e 40%, #061018 100%);
+  color: #e8f4ff;
+  font-family: "Segoe UI", system-ui, sans-serif;
 }
 
-.td-layout {
+.hud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 14px;
+  background: rgba(8, 20, 36, 0.72);
+  border-bottom: 1px solid rgba(120, 180, 255, 0.15);
+  backdrop-filter: blur(8px);
+}
+
+.hud b {
+  color: #7ec8ff;
+  font-weight: 600;
+}
+
+.playfield {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 300px;
-  gap: 14px;
-  max-width: 1320px;
+  grid-template-columns: 1fr 200px;
+  gap: 12px;
+  padding: 12px;
+  max-width: 1100px;
   margin: 0 auto;
-  padding: 14px 14px 24px;
 }
 
-.stage {
+@media (max-width: 800px) {
+  .playfield {
+    grid-template-columns: 1fr;
+  }
+}
+
+.canvas-wrap {
   position: relative;
-  border-radius: 18px;
+  border-radius: 14px;
   overflow: hidden;
-  border: 1px solid rgba(126, 203, 255, 0.28);
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
-  background: #061018;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45), inset 0 0 0 1px rgba(120, 180, 255, 0.12);
+  background: #040c16;
 }
 
-.stage canvas {
+.canvas-wrap canvas {
   display: block;
   width: 100%;
   height: auto;
-  touch-action: none;
-  image-rendering: auto;
-  background: #071420;
+  cursor: crosshair;
 }
 
-.hud-float {
-  position: absolute;
-  top: 10px;
-  left: 10px;
-  display: flex;
-  gap: 8px;
-  pointer-events: none;
-}
-
-.chip {
-  background: rgba(4, 14, 28, 0.72);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  backdrop-filter: blur(8px);
-  border-radius: 999px;
-  padding: 6px 12px;
-  font-size: 13px;
-  letter-spacing: 0.02em;
-}
-
-.overlay {
-  position: absolute;
-  inset: 0;
+.tower-rail {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  background: rgba(4, 12, 24, 0.72);
-  text-align: center;
-  padding: 24px;
-}
-
-.overlay h2 {
-  font-family: "Cormorant Garamond", serif;
-  font-size: 46px;
-  margin: 0 0 8px;
-  background: linear-gradient(90deg, #ffe3ef, #7ecbff);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-}
-
-.panel {
-  background: rgba(8, 22, 40, 0.88);
-  border: 1px solid rgba(126, 203, 255, 0.22);
-  border-radius: 18px;
-  padding: 12px;
-  max-height: calc(100vh - 28px);
-  overflow: auto;
+  gap: 8px;
+  max-height: 70vh;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
 .tower-card {
-  width: 100%;
-  display: grid;
-  grid-template-columns: 58px 1fr;
+  display: flex;
   gap: 8px;
+  align-items: center;
   text-align: left;
-  background: rgba(12, 32, 54, 0.8);
-  border: 1px solid rgba(126, 203, 255, 0.18);
+  padding: 8px;
   border-radius: 12px;
-  padding: 6px;
+  border: 1px solid rgba(120, 180, 255, 0.18);
+  background: rgba(12, 28, 48, 0.85);
   color: inherit;
-  margin-bottom: 8px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, transform 0.12s;
 }
 
-.tower-card.on {
-  border-color: #ff9ec4;
-  box-shadow: 0 0 0 1px rgba(255, 158, 196, 0.45);
+.tower-card:hover {
+  border-color: rgba(126, 200, 255, 0.45);
+  background: rgba(18, 40, 68, 0.95);
+  transform: translateY(-1px);
 }
 
-.tower-card img {
+.tower-card.selected {
+  border-color: #7ec8ff;
+  box-shadow: 0 0 0 1px rgba(126, 200, 255, 0.35);
+}
+
+.tower-card img,
+.tower-card video {
   width: 58px;
   height: 58px;
   object-fit: cover;
   border-radius: 8px;
 }
 
-.tower-card img.tower-idle {
+.tower-card img.tower-idle,
+.tower-card video.tower-idle {
   animation: tower-breathe 1.5s ease-in-out infinite;
   transform-origin: center 30%;
 }
@@ -148,44 +116,15 @@
   border: 0;
   border-radius: 10px;
   padding: 9px 12px;
-  color: white;
-  font-weight: 700;
-  background: linear-gradient(135deg, #c44d86, #6a4dff);
+  font-weight: 600;
+  cursor: pointer;
+  background: linear-gradient(180deg, #2a6a9e, #1a4a72);
+  color: #e8f4ff;
+  border: 1px solid rgba(126, 200, 255, 0.25);
 }
 
-.btn.ghost {
-  background: rgba(40, 80, 120, 0.7);
-  border: 1px solid rgba(126, 203, 255, 0.3);
-}
-
-.btn.on {
-  outline: 2px solid #ffd27a;
-  background: rgba(70, 110, 90, 0.85);
-}
-
-.map-editor {
-  position: absolute;
-  left: 8px;
-  right: 8px;
-  bottom: 8px;
-  z-index: 3;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-  padding: 8px;
-  border-radius: 14px;
-  background: rgba(6, 18, 32, 0.92);
-  border: 1px solid rgba(126, 203, 255, 0.35);
-}
-
-.map-editor input {
-  width: 7.5rem;
-  border-radius: 8px;
-  border: 1px solid rgba(126, 203, 255, 0.4);
-  background: rgba(0, 0, 0, 0.35);
-  color: white;
-  padding: 7px 8px;
+.btn:hover {
+  filter: brightness(1.08);
 }
 
 .btn:disabled {
@@ -193,11 +132,20 @@
   cursor: not-allowed;
 }
 
-@media (max-width: 900px) {
-  .td-layout {
-    grid-template-columns: 1fr;
-  }
-  .panel {
-    max-height: none;
-  }
+.btn-ghost {
+  background: transparent;
+  border: 1px solid rgba(120, 180, 255, 0.25);
+  color: #b7ddf5;
+}
+
+.panel {
+  background: rgba(8, 20, 36, 0.88);
+  border: 1px solid rgba(120, 180, 255, 0.15);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.hint {
+  color: #8eb8d8;
+  font-size: 12px;
 }
