@@ -83,77 +83,123 @@ export function rotatedTemplate(t: TileTemplate, rot: Rot) {
 
 function makeStraight(): TileTemplate {
   const blocked = emptyBlocked(true);
-  carveH(blocked, 8, 11);
-  return { id: "straight", name: "直道", blocked, ports: [port("W", 9), port("W", 10), port("E", 9), port("E", 10)] };
+  carveH(blocked, 9, 10);
+  return {
+    id: "straight", name: "直道", blocked,
+    ports: [port("W", 9), port("W", 10), port("E", 9), port("E", 10)],
+    heights: [
+      { c: 3, r: 6, h: 1 }, { c: 4, r: 6, h: 2 }, { c: 8, r: 6, h: 1 },
+      { c: 12, r: 13, h: 1 }, { c: 15, r: 13, h: 2 }, { c: 16, r: 13, h: 1 },
+    ],
+  };
 }
 function makeCorner(): TileTemplate {
   const blocked = emptyBlocked(true);
-  carveH(blocked, 8, 11, 0, 11);
-  carveV(blocked, 8, 11, 8, TILE - 1);
-  return { id: "corner", name: "轉角", blocked, ports: [port("W", 9), port("W", 10), port("S", 9), port("S", 10)] };
+  carveH(blocked, 9, 10, 0, 10);
+  carveV(blocked, 9, 10, 9, TILE - 1);
+  return {
+    id: "corner", name: "轉角", blocked,
+    ports: [port("W", 9), port("W", 10), port("S", 9), port("S", 10)],
+    heights: [
+      { c: 3, r: 6, h: 1 }, { c: 4, r: 7, h: 2 },
+      { c: 13, r: 13, h: 2 }, { c: 14, r: 14, h: 1 },
+    ],
+  };
 }
 function makeTee(): TileTemplate {
   const blocked = emptyBlocked(true);
-  carveH(blocked, 8, 11);
-  carveV(blocked, 8, 11, 0, 11);
-  return { id: "tee", name: "三叉", blocked, ports: [port("W", 9), port("W", 10), port("E", 9), port("E", 10), port("N", 9), port("N", 10)] };
+  carveH(blocked, 9, 10);
+  carveV(blocked, 9, 10, 0, 10);
+  return {
+    id: "tee", name: "三叉", blocked,
+    ports: [port("W", 9), port("W", 10), port("E", 9), port("E", 10), port("N", 9), port("N", 10)],
+    heights: [
+      { c: 4, r: 13, h: 2 }, { c: 5, r: 14, h: 1 },
+      { c: 14, r: 13, h: 2 }, { c: 15, r: 4, h: 1 },
+    ],
+  };
 }
 function makeCross(): TileTemplate {
   const blocked = emptyBlocked(true);
-  carveH(blocked, 8, 11);
-  carveV(blocked, 8, 11);
-  return { id: "cross", name: "十字", blocked, ports: [port("N", 9), port("N", 10), port("E", 9), port("E", 10), port("S", 9), port("S", 10), port("W", 9), port("W", 10)] };
+  carveH(blocked, 9, 10);
+  carveV(blocked, 9, 10);
+  return {
+    id: "cross", name: "十字", blocked,
+    ports: [port("N", 9), port("N", 10), port("E", 9), port("E", 10), port("S", 9), port("S", 10), port("W", 9), port("W", 10)],
+    heights: [
+      { c: 5, r: 5, h: 2 }, { c: 14, r: 5, h: 2 },
+      { c: 5, r: 14, h: 1 }, { c: 14, r: 14, h: 2 },
+    ],
+  };
 }
 function makeOpen(): TileTemplate {
-  const blocked = emptyBlocked(false);
-  for (const [c, r] of [[4, 4], [15, 4], [4, 15], [15, 15], [9, 9], [10, 10]] as const) blocked[r][c] = true;
+  const blocked = emptyBlocked(true);
+  carveH(blocked, 8, 11);
+  carveV(blocked, 8, 11);
+  for (let r = 3; r <= 5; r++) for (let c = 3; c <= 5; c++) blocked[r][c] = false;
+  for (let r = 3; r <= 5; r++) for (let c = 14; c <= 16; c++) blocked[r][c] = false;
+  for (let r = 14; r <= 16; r++) for (let c = 3; c <= 5; c++) blocked[r][c] = false;
+  for (let r = 14; r <= 16; r++) for (let c = 14; c <= 16; c++) blocked[r][c] = false;
   return {
     id: "open", name: "開闊", blocked,
-    ports: [port("N", 5), port("N", 14), port("E", 5), port("E", 14), port("S", 5), port("S", 14), port("W", 5), port("W", 14)],
-    heights: [{ c: 6, r: 6, h: 1 }, { c: 13, r: 6, h: 1 }, { c: 6, r: 13, h: 2 }, { c: 13, r: 13, h: 2 }],
+    ports: [port("N", 9), port("N", 10), port("E", 9), port("E", 10), port("S", 9), port("S", 10), port("W", 9), port("W", 10)],
+    heights: [
+      { c: 5, r: 5, h: 2 }, { c: 14, r: 5, h: 2 }, { c: 5, r: 14, h: 2 }, { c: 14, r: 14, h: 2 },
+      { c: 6, r: 7, h: 1 }, { c: 13, r: 7, h: 1 }, { c: 7, r: 13, h: 1 }, { c: 12, r: 13, h: 1 },
+    ],
   };
 }
 function makeChoke(): TileTemplate {
   const blocked = emptyBlocked(true);
   carveH(blocked, 9, 10);
-  carveV(blocked, 3, 5, 3, 7);
-  carveV(blocked, 14, 16, 12, 16);
   return {
     id: "choke", name: "瓶頸", blocked,
     ports: [port("W", 9), port("W", 10), port("E", 9), port("E", 10)],
-    heights: [{ c: 9, r: 7, h: 2 }, { c: 10, r: 7, h: 2 }, { c: 9, r: 12, h: 2 }, { c: 10, r: 12, h: 2 }],
+    heights: [
+      { c: 4, r: 6, h: 2 }, { c: 5, r: 6, h: 2 }, { c: 4, r: 7, h: 1 },
+      { c: 14, r: 12, h: 2 }, { c: 15, r: 12, h: 2 }, { c: 15, r: 13, h: 1 },
+      { c: 9, r: 5, h: 1 }, { c: 10, r: 14, h: 1 },
+    ],
   };
 }
 function makeSpawn(): TileTemplate {
   const blocked = emptyBlocked(true);
-  carveH(blocked, 8, 11);
-  carveV(blocked, 8, 11, 0, 11);
+  carveH(blocked, 9, 10);
+  carveV(blocked, 9, 10);
   return {
     id: "spawn", name: "裂口", blocked,
-    ports: [port("W", 9, "entrance"), port("W", 10, "entrance"), port("E", 9), port("E", 10), port("N", 9, "entrance"), port("N", 10, "entrance")],
+    ports: [
+      port("W", 9, "entrance"), port("W", 10, "entrance"),
+      port("N", 9, "entrance"), port("N", 10, "entrance"),
+      port("E", 9), port("E", 10),
+      port("S", 9), port("S", 10),
+    ],
+    heights: [
+      { c: 4, r: 4, h: 2 }, { c: 5, r: 4, h: 1 },
+      { c: 14, r: 14, h: 2 }, { c: 15, r: 5, h: 1 },
+      { c: 6, r: 14, h: 1 },
+    ],
   };
 }
 function makeHq(): TileTemplate {
   const blocked = emptyBlocked(true);
-  for (let r = 0; r <= 7; r++) for (let c = 9; c <= 10; c++) blocked[r][c] = false;
-  for (let r = 13; r < TILE; r++) for (let c = 9; c <= 10; c++) blocked[r][c] = false;
-  for (let c = 0; c <= 7; c++) for (let r = 9; r <= 10; r++) blocked[r][c] = false;
-  for (let c = 13; c < TILE; c++) for (let r = 9; r <= 10; r++) blocked[r][c] = false;
-  for (let r = 8; r <= 12; r++) for (let c = 8; c <= 12; c++) blocked[r][c] = true;
+  for (let r = 0; r < TILE; r++) for (let c = 9; c <= 10; c++) blocked[r][c] = false;
+  for (let c = 0; c < TILE; c++) for (let r = 9; r <= 10; r++) blocked[r][c] = false;
+  for (const [c, r] of [[8, 8], [12, 8], [8, 12], [12, 12]] as const) blocked[r][c] = true;
+  for (const [c, r] of [[8, 11], [11, 8], [12, 11], [11, 12]] as const) blocked[r][c] = true;
   return {
     id: "hq",
     name: "聖地",
     blocked,
     ports: [
-      port("W", 9, "exit"), port("W", 10, "exit"),
-      port("E", 9, "exit"), port("E", 10, "exit"),
-      port("N", 9, "exit"), port("N", 10, "exit"),
-      port("S", 9, "exit"), port("S", 10, "exit"),
+      port("W", 9), port("W", 10),
+      port("E", 9), port("E", 10),
+      port("N", 9), port("N", 10),
+      port("S", 9), port("S", 10),
     ],
     heights: [
-      { c: 8, r: 8, h: 2 }, { c: 12, r: 8, h: 2 }, { c: 8, r: 12, h: 2 }, { c: 12, r: 12, h: 2 },
-      { c: 10, r: 10, h: 3 }, { c: 9, r: 10, h: 3 }, { c: 11, r: 10, h: 3 },
-      { c: 10, r: 9, h: 3 }, { c: 10, r: 11, h: 3 },
+      { c: 8, r: 8, h: 3 }, { c: 12, r: 8, h: 3 }, { c: 8, r: 12, h: 3 }, { c: 12, r: 12, h: 3 },
+      { c: 8, r: 11, h: 2 }, { c: 11, r: 8, h: 2 }, { c: 12, r: 11, h: 2 }, { c: 11, r: 12, h: 2 },
     ],
   };
 }
@@ -309,10 +355,13 @@ export function buildHeights(board: TileBoard): number[] {
   for (const p of board.placed) {
     const tpl = TEMPLATE_BY_ID[p.templateId];
     if (!tpl) continue;
-    const { heights: hs } = rotatedTemplate(tpl, p.rot);
+    const { blocked, heights: hs } = rotatedTemplate(tpl, p.rot);
     const origin = worldOrigin(p.tc, p.tr);
     for (const h of hs) {
-      const c = origin.c + h.c, r = origin.r + h.r;
+      const lc = h.c, lr = h.r;
+      if (lc < 0 || lr < 0 || lc >= TILE || lr >= TILE) continue;
+      if (!blocked[lr][lc]) continue;
+      const c = origin.c + lc, r = origin.r + lr;
       if (c >= 0 && r >= 0 && c < COLS && r < ROWS) heights[r * COLS + c] = h.h;
     }
   }
@@ -344,6 +393,18 @@ export function collectGates(board: TileBoard): { entrances: Cell[]; exits: Cell
       else { c += TILE - 1; r += port.i; }
       if (port.kind === "entrance") entrances.push({ c, r });
       if (port.kind === "exit") exits.push({ c, r });
+    }
+    if (p.templateId === "hq") {
+      for (const dc of [9, 10]) for (const dr of [9, 10]) {
+        exits.push({ c: origin.c + dc, r: origin.r + dr });
+      }
+    }
+  }
+  if (!exits.length) {
+    const hq = board.placed.find((x) => x.templateId === "hq");
+    if (hq) {
+      const origin = worldOrigin(hq.tc, hq.tr);
+      exits.push({ c: origin.c + 9, r: origin.r + 9 }, { c: origin.c + 10, r: origin.r + 10 });
     }
   }
   return { entrances, exits };
