@@ -119,3 +119,9 @@ export function upsertCustomDifficulty(profile: DifficultyProfile) {
   list.unshift({ ...profile, builtin: false });
   saveCustomDifficulties(list);
 }
+
+export function deleteCustomDifficulty(id: string) {
+  const list = loadCustomDifficulties().filter((d) => d.id !== id);
+  saveCustomDifficulties(list);
+  return list;
+}

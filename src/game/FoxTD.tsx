@@ -30,6 +30,7 @@ import {
   loadActiveDifficultyId,
   saveActiveDifficultyId,
   upsertCustomDifficulty,
+  deleteCustomDifficulty,
   type DifficultyProfile,
 } from "./difficulty";
 import {
@@ -4085,7 +4086,59 @@ export function FoxTD() {
     setHover("");
   }
 
-  function callWave() {
+
+  function deleteSavedMap(id: string) {
+    const next = savedMaps.filter((m) => m.id !== id);
+    setSavedMaps(next);
+    writeSavedMaps(next);
+    if (selectedLevelId === id) {
+      setSelectedLevelId("mode-expand");
+      setMapMode("expand");
+      setActiveMap("潮汐擴張");
+    }
+    setHover("已刪除自訂地圖");
+  }
+
+  /** 修改難度欄位：自訂檔自動寫入 localStorage；內建則另存為自訂並切換過去 */
+  function patchDifficulty(partial: Partial<DifficultyProfile>) {
+    const cur = getDifficulty(difficultyId);
+    let next: DifficultyProfile;
+    if (cur.builtin) {
+      next = {
+        ...cur,
+        ...partial,
+        id: `custom-${Date.now()}`,
+        label: (diffName.trim() || cur.label + "·改").slice(0, 12),
+        builtin: false,
+      };
+    } else {
+      next = { ...cur, ...partial, builtin: false };
+      if (partial.label) next.label = String(partial.label).slice(0, 12);
+    }
+    upsertCustomDifficulty(next);
+    setDiffList(allDifficulties());
+    setDifficultyId(next.id);
+    difficultyRef.current = next;
+    setDiffName(next.label);
+    setHover(`難度「${next.label}」已自動儲存`);
+  }
+
+  function removeCustomDifficulty(id: string) {
+    const cur = getDifficulty(id);
+    if (cur.builtin) {
+      setHover("內建難度無法刪除");
+      return;
+    }
+    deleteCustomDifficulty(id);
+    setDiffList(allDifficulties());
+    if (difficultyId === id) {
+      setDifficultyId("normal");
+      difficultyRef.current = getDifficulty("normal");
+    }
+    setHover("已刪除自訂難度");
+  }
+
+    function callWave() {
     const c = canvasRef.current as HTMLCanvasElement & { __begin?: () => void };
     const s = sim.current;
     // 備戰（wave=0）：直接開第 1 波，無提前金
@@ -4803,17 +4856,17 @@ export function FoxTD() {
             </div>
           )}
           {phase !== "play" && !workshop && (
-            <div className="overlay" style={{ maxHeight: "90vh", overflowY: "auto" }}>
+            <div className="overlay" style={{ maxHeight: "100%", overflowY: "auto" }}>
               <h2>{phase === "win" ? "潮退，聖地仍在" : phase === "lose" ? "結界破碎" : "狐仙結界"}</h2>
-              <p className="mb-3 max-w-lg text-sm text-[#c5dff2]">
+              <p className="mb-3 max-w-xl text-sm leading-6 text-[#d8eefc]">
                 {phase === "ready"
-                  ? "先選關卡或自訂地圖，再開始守城。也可進工房編輯後保存，出現在下方清單。"
+                  ? "先選開局與難度，再按開始守城。自訂地圖／難度可刪除；難度數值修改會自動儲存。"
                   : phase === "win"
                     ? "十二波妖潮已被擋下。"
                     : "生命歸零。重新布置結界再試一次。"}
               </p>
               {phase === "ready" && (
-                <div className="mb-4 w-full max-w-lg text-left">
+                <div className="mb-4 w-full max-w-xl text-left">
                   <p className="mb-1 text-xs tracking-wide text-[#8ec8ee]">選擇開局</p>
                   <div className="mb-2 flex flex-wrap gap-2">
                     <button
@@ -4839,15 +4892,27 @@ export function FoxTD() {
                   {savedMaps.length > 0 && (
                     <>
                       <p className="mb-1 mt-2 text-xs tracking-wide text-[#8ec8ee]">自訂地圖</p>
-                      <div className="mb-2 flex flex-wrap gap-2">
+                      <div className="mb-2 flex flex-col gap-1.5">
                         {savedMaps.map((m) => (
-                          <button
-                            key={m.id}
-                            className={"btn" + (selectedLevelId === m.id ? "" : " ghost")}
-                            onClick={() => selectLevel(m.id, "layout")}
-                          >
-                            {m.name}
-                          </button>
+                          <div key={m.id} className="flex items-center gap-1">
+                            <button
+                              className={"btn flex-1" + (selectedLevelId === m.id ? "" : " ghost")}
+                              onClick={() => selectLevel(m.id, "layout")}
+                            >
+                              {m.name}
+                            </button>
+                            <button
+                              className="btn ghost"
+                              style={{ padding: "7px 10px", color: "#ffb0b0" }}
+                              title="刪除此地圖"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                deleteSavedMap(m.id);
+                              }}
+                            >
+                              刪
+                            </button>
+                          </div>
                         ))}
                       </div>
                     </>
@@ -4857,25 +4922,69 @@ export function FoxTD() {
                     {mapMode === "expand" ? " · 地塊拼接模式" : " · 完整地圖"}
                   </p>
                   <p className="mb-1 mt-3 text-xs tracking-wide text-[#8ec8ee]">難度</p>
-                  <div className="mb-1 flex flex-wrap gap-2">
+                  <div className="mb-2 flex flex-col gap-1.5">
                     {diffList.map((d) => (
-                      <button
-                        key={d.id}
-                        className={"btn" + (difficultyId === d.id ? "" : " ghost")}
-                        onClick={() => {
-                          setDifficultyId(d.id);
-                          difficultyRef.current = d;
-                          setHover(
-                            `${d.label} · 怪血×${d.enemyHpMul} · 塔傷×${d.towerDmgMul} · 金幣${d.startGold}`,
-                          );
-                        }}
-                      >
-                        {d.label}
-                      </button>
+                      <div key={d.id} className="flex items-center gap-1">
+                        <button
+                          className={"btn flex-1" + (difficultyId === d.id ? "" : " ghost")}
+                          onClick={() => {
+                            setDifficultyId(d.id);
+                            difficultyRef.current = d;
+                            setDiffName(d.label);
+                            setHover(
+                              `${d.label} · 怪血×${d.enemyHpMul} · 塔傷×${d.towerDmgMul} · 金幣${d.startGold}`,
+                            );
+                          }}
+                        >
+                          {d.label}
+                          {!d.builtin ? " ·自訂" : ""}
+                        </button>
+                        {!d.builtin && (
+                          <button
+                            className="btn ghost"
+                            style={{ padding: "7px 10px", color: "#ffb0b0" }}
+                            title="刪除此難度"
+                            onClick={() => removeCustomDifficulty(d.id)}
+                          >
+                            刪
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  {/* 倍率即時改、自訂自動存 */}
+                  <div className="mb-2 grid grid-cols-2 gap-x-3 gap-y-1 rounded-lg border border-[#9ad7ff33] bg-[#0a1828cc] p-2 text-[11px] text-[#c5dff2]">
+                    {(
+                      [
+                        ["enemyHpMul", "怪血", 0.4, 3, 0.05],
+                        ["towerDmgMul", "塔傷", 0.5, 2, 0.05],
+                        ["enemyGoldMul", "掉金", 0.5, 2, 0.05],
+                        ["enemySpeedMul", "怪速", 0.7, 1.5, 0.02],
+                        ["towerCostMul", "造價", 0.7, 1.5, 0.05],
+                        ["startGold", "開局金", 80, 500, 10],
+                        ["waveHpScale", "波次成長", 0.02, 0.25, 0.01],
+                      ] as const
+                    ).map(([key, label, min, max, step]) => (
+                      <label key={key} className="flex items-center justify-between gap-1">
+                        <span className="text-[#9ec4de]">{label}</span>
+                        <input
+                          className="w-[4.5rem] rounded bg-[#08131f] px-1 text-right text-[#e7f6ff]"
+                          type="number"
+                          min={min}
+                          max={max}
+                          step={step}
+                          value={Number(getDifficulty(difficultyId)[key] ?? 1)}
+                          onChange={(ev) => {
+                            const v = Number(ev.target.value);
+                            if (!Number.isFinite(v)) return;
+                            patchDifficulty({ [key]: v } as Partial<DifficultyProfile>);
+                          }}
+                        />
+                      </label>
                     ))}
                   </div>
                   <p className="text-xs text-[#9ec4de]">
-                    怪血 ×{getDifficulty(difficultyId).enemyHpMul} · 塔傷 ×{getDifficulty(difficultyId).towerDmgMul} · 開局 {getDifficulty(difficultyId).startGold} 金
+                    改動會自動存成自訂難度 · 怪血 ×{getDifficulty(difficultyId).enemyHpMul} · 開局 {getDifficulty(difficultyId).startGold}
                   </p>
                 </div>
               )}
@@ -5216,7 +5325,7 @@ export function FoxTD() {
                 </button>
               </div>
               <p className="mt-1 text-[10px] text-[#8eb6d4]">
-                怪物／塔數值立即生效；「保存倍率」把目前難度倍率存成可選檔。建議先用「普通」試平衡。
+                怪物／塔基準數值即時生效。主畫面難度倍率改動會自動存檔；此處可另存命名副本。
               </p>
             </div>
           )}

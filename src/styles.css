@@ -1,19 +1,27 @@
-.shell {
+html, body, #root, #app {
+  margin: 0;
+  min-height: 100%;
+  background: #071525;
+  color: #e8f4ff;
+}
+.shell,
+.td-shell {
   min-height: 100vh;
+  width: 100%;
   background:
     radial-gradient(ellipse 80% 50% at 50% -10%, #1a3a5c 0%, transparent 55%),
     radial-gradient(ellipse 60% 40% at 80% 100%, #0d2840 0%, transparent 50%),
     linear-gradient(180deg, #071525 0%, #0a1a2e 40%, #061018 100%);
   color: #e8f4ff;
-  font-family: "Segoe UI", system-ui, sans-serif;
+  font-family: "Noto Sans TC", "Segoe UI", system-ui, sans-serif;
 }
 
 .td-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 280px;
-  gap: 14px;
-  padding: 12px 16px 24px;
-  max-width: 1320px;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 340px);
+  gap: 16px;
+  padding: 12px 16px 28px;
+  max-width: 1480px;
   margin: 0 auto;
   align-items: start;
 }
@@ -32,15 +40,19 @@
   box-shadow:
     0 8px 32px rgba(0, 0, 0, 0.45),
     inset 0 0 0 1px rgba(120, 180, 255, 0.12);
-  min-height: 360px;
+  min-height: min(72vh, 640px);
+  width: 100%;
 }
 
 .stage canvas {
   display: block;
   width: 100%;
   height: auto;
+  min-height: min(72vh, 640px);
+  object-fit: contain;
   cursor: crosshair;
   vertical-align: top;
+  background: #040c16;
 }
 
 .hud-float {
@@ -76,31 +88,45 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  padding: 20px;
+  justify-content: flex-start;
+  padding: 18px 16px 24px;
   text-align: center;
-  background: rgba(4, 12, 22, 0.82);
-  backdrop-filter: blur(6px);
+  background: rgba(4, 12, 22, 0.88);
+  backdrop-filter: blur(8px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .overlay h2 {
-  margin: 0 0 8px;
-  font-size: 1.5rem;
+  margin: 4px 0 10px;
+  font-size: clamp(1.25rem, 2.5vw, 1.75rem);
   color: #ffe7f1;
+  text-shadow: 0 1px 8px rgba(0,0,0,0.5);
 }
 
 .overlay p {
   margin: 0 0 12px;
+  color: #d2e8f8;
+  line-height: 1.5;
+  max-width: 36rem;
+}
+
+.overlay .btn {
+  font-size: 13px;
+  padding: 8px 14px;
 }
 
 .panel {
-  background: rgba(8, 20, 36, 0.9);
-  border: 1px solid rgba(120, 180, 255, 0.15);
+  background: rgba(8, 20, 36, 0.94);
+  border: 1px solid rgba(120, 180, 255, 0.18);
   border-radius: 14px;
-  padding: 12px;
-  max-height: calc(100vh - 100px);
+  padding: 14px;
+  max-height: calc(100vh - 88px);
   overflow-y: auto;
+  font-size: 13px;
+  line-height: 1.45;
 }
+.panel .chip, .panel .text-xs { font-size: 12px; }
 
 .panel .btn,
 .panel button.btn {
