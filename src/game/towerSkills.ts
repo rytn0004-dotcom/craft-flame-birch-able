@@ -56,7 +56,9 @@ export type TowerSkillDef = {
   name: string;
   desc: string;
   color: string;
+  /** 技能強度分檔：低階池 / 中階池 / 高階池（依塔等級解鎖深度） */
   tier: SkillTier;
+  /** 三選二路徑（BTD 規則） */
   path: SkillPath;
   effects: SkillEffect[];
 };
@@ -65,6 +67,7 @@ export const SKILL_EVERY_LEVELS = 5;
 export const SKILL_CHOICE_COUNT = 3;
 
 export const TOWER_SKILL_POOL: TowerSkillDef[] = [
+  // ——— 低階（Lv5+ 可抽到）———
   { id: "keen_edge", name: "鋭刃", desc: "傷害 +12%", color: "#ffe08a", tier: "low", path: "edge", effects: [{ type: "dmgMul", value: 1.12 }] },
   { id: "brisk_wind", name: "疾風", desc: "射速 +12%（冷卻縮短）", color: "#d7b6ff", tier: "low", path: "tide", effects: [{ type: "cooldownMul", value: 0.88 }] },
   { id: "long_reach", name: "延展", desc: "射程 +28", color: "#9ad7ff", tier: "low", path: "tide", effects: [{ type: "rangeAdd", value: 28 }] },
@@ -79,27 +82,31 @@ export const TOWER_SKILL_POOL: TowerSkillDef[] = [
   { id: "hunter", name: "追傷", desc: "對 50% 血以下 +20% 傷害", color: "#ffb87a", tier: "low", path: "edge", effects: [{ type: "lowHpDmgMul", hpRatio: 0.5, mul: 1.2 }] },
   { id: "echo_soft", name: "輕回響", desc: "命中後對附近再彈 25%", color: "#8ef0ff", tier: "low", path: "bloom", effects: [{ type: "multihitEcho", pct: 0.25, radius: 70 }] },
   { id: "root_sting", name: "刺縛", desc: "定身中的敵人 +15% 傷害", color: "#c9a0ff", tier: "low", path: "tide", effects: [{ type: "rootExtraDmg", mul: 1.15 }] },
+
+  // ——— 中階（Lv10+ 權重提高）———
   { id: "moon_crit", name: "月刃", desc: "14% 暴擊 2.3 倍", color: "#e8fbff", tier: "mid", path: "edge", effects: [{ type: "crit", chance: 0.14, mul: 2.3 }] },
   { id: "riptide", name: "裂潮", desc: "每 4 發範圍裂潮", color: "#ff9ec4", tier: "mid", path: "bloom", effects: [{ type: "everyNShotsNova", n: 4, dmgMul: 0.7, radius: 72 }] },
   { id: "deep_freeze", name: "深凍", desc: "18% 短暫定身", color: "#a8e4ff", tier: "mid", path: "tide", effects: [{ type: "rootChance", chance: 0.18, duration: 0.5 }] },
-  { id: "wildfire", name: "野火", desc: "燃燒更強並擴散", color: "#ff7a45", tier: "mid", path: "tide", effects: [{ type: "burnBoost", dps: 14, duration: 3.2 }, { type: "burnSpread", radius: 48 }] },
-  { id: "blood_scent", name: "血嗅", desc: "低血量目標額外傷害", color: "#ff6b8a", tier: "mid", path: "edge", effects: [{ type: "lowHpDmgMul", hpRatio: 0.4, mul: 1.35 }] },
-  { id: "exec_edge", name: "斷首", desc: "低血斬殺線", color: "#ff9f4a", tier: "mid", path: "edge", effects: [{ type: "execLine", ratio: 0.12 }] },
-  { id: "chain_surge", name: "鏈涌", desc: "連鎖強化", color: "#2bd3ff", tier: "mid", path: "bloom", effects: [{ type: "chainBonus", extra: 1, range: 120, pct: 0.55 }] },
-  { id: "vuln_brand", name: "易傷烙", desc: "命中上易傷", color: "#ffc857", tier: "mid", path: "tide", effects: [{ type: "vulnOnHit", mul: 1.25, duration: 2.8 }] },
-  { id: "double_volley", name: "雙連", desc: "25% 連珠", color: "#b388ff", tier: "mid", path: "bloom", effects: [{ type: "doubleShot", chance: 0.25 }] },
-  { id: "kill_bloom", name: "葬華", desc: "擊殺小爆", color: "#ff5c9a", tier: "mid", path: "bloom", effects: [{ type: "killNova", radius: 64, pctOfMaxHp: 0.08 }] },
-  { id: "far_power", name: "遠勢", desc: "距離越遠傷害越高", color: "#9ad7ff", tier: "mid", path: "edge", effects: [{ type: "distDmgMul", maxBonus: 0.35 }] },
-  { id: "center_crush", name: "中核", desc: "範圍中心加傷", color: "#ff8ec8", tier: "mid", path: "bloom", effects: [{ type: "aoeCenterMul", value: 1.35 }] },
-  { id: "pierce_fan", name: "貫扇", desc: "穿透加寬", color: "#ffe08a", tier: "mid", path: "edge", effects: [{ type: "pierceWiden", add: 1 }] },
-  { id: "mark_brand", name: "深潮印", desc: "印記更高", color: "#7ec8c8", tier: "mid", path: "tide", effects: [{ type: "markStack", max: 6, perStack: 0.07 }] },
-  { id: "haste_kill", name: "凱旋", desc: "擊殺加速", color: "#d7b6ff", tier: "mid", path: "tide", effects: [{ type: "hasteOnKill", duration: 1.2, rateMul: 1.35 }] },
-  { id: "echo_hard", name: "重回響", desc: "附近再彈 40%", color: "#8ef0ff", tier: "mid", path: "bloom", effects: [{ type: "multihitEcho", pct: 0.4, radius: 85 }] },
-  { id: "moonfall", name: "月落", desc: "高暴擊", color: "#e8fbff", tier: "high", path: "edge", effects: [{ type: "crit", chance: 0.22, mul: 2.6 }] },
-  { id: "blizzard", name: "暴雪", desc: "強減速+定身", color: "#a8e4ff", tier: "high", path: "tide", effects: [{ type: "slowOnHit", factor: 0.4, duration: 2.8 }, { type: "rootChance", chance: 0.22, duration: 0.65 }] },
-  { id: "catastrophe", name: "災域", desc: "週期大範圍", color: "#ff6b9d", tier: "high", path: "bloom", effects: [{ type: "periodicNova", period: 5, dmgMul: 1.1, radiusMul: 1.4 }] },
-  { id: "god_music", name: "神樂", desc: "遠距與護盾剋制", color: "#ffd27a", tier: "high", path: "edge", effects: [{ type: "distDmgMul", maxBonus: 0.5 }, { type: "shieldDmgMul", mul: 1.8 }] },
-  { id: "final_cut", name: "終焉", desc: "斬殺+金幣+加速", color: "#ff9f4a", tier: "high", path: "edge", effects: [{ type: "execLine", ratio: 0.28 }, { type: "goldOnKill", amount: 30 }, { type: "hasteOnKill", duration: 1.6, rateMul: 1.55 }] },
+  { id: "wildfire", name: "野火", desc: "燃燒更強並可蔓延", color: "#ff6a3a", tier: "mid", path: "tide", effects: [{ type: "burnBoost", dps: 14, duration: 3.5 }, { type: "burnSpread", radius: 70 }] },
+  { id: "blood_scent", name: "血息", desc: "半血以下 +40% 傷害", color: "#ff6fa8", tier: "mid", path: "edge", effects: [{ type: "lowHpDmgMul", hpRatio: 0.5, mul: 1.4 }] },
+  { id: "exec_edge", name: "斬界", desc: "生命低於 22% 直接斬殺", color: "#ffd2a8", tier: "mid", path: "edge", effects: [{ type: "execLine", ratio: 0.22 }] },
+  { id: "chain_surge", name: "鏈湧", desc: "連鎖 +1 跳、傷害更高", color: "#5ee7ff", tier: "mid", path: "bloom", effects: [{ type: "chainBonus", extra: 1, range: 130, pct: 0.7 }] },
+  { id: "vuln_brand", name: "易傷烙", desc: "命中施加易傷 +30%", color: "#ffc857", tier: "mid", path: "tide", effects: [{ type: "vulnOnHit", mul: 1.3, duration: 3 }] },
+  { id: "double_volley", name: "連珠", desc: "28% 機率再射一發", color: "#c9a0ff", tier: "mid", path: "bloom", effects: [{ type: "doubleShot", chance: 0.28 }] },
+  { id: "kill_bloom", name: "葬花", desc: "擊殺時範圍爆炸", color: "#ff5c9a", tier: "mid", path: "bloom", effects: [{ type: "killNova", radius: 90, pctOfMaxHp: 0.12 }] },
+  { id: "far_power", name: "遠勢", desc: "距離越遠傷害越高（最高 +40%）", color: "#5ec4ff", tier: "mid", path: "edge", effects: [{ type: "distDmgMul", maxBonus: 0.4 }] },
+  { id: "center_crush", name: "心毀", desc: "範圍技中心傷害 +40%", color: "#ff7eb3", tier: "mid", path: "bloom", effects: [{ type: "aoeCenterMul", value: 1.4 }] },
+  { id: "pierce_fan", name: "貫扇", desc: "穿透判定變寬", color: "#ff8fb3", tier: "mid", path: "edge", effects: [{ type: "pierceWiden", add: 14 }] },
+  { id: "mark_brand", name: "重印", desc: "潮印每層 +8%（最高 6）", color: "#9ad7ff", tier: "mid", path: "tide", effects: [{ type: "markStack", max: 6, perStack: 0.08 }] },
+  { id: "haste_kill", name: "祭速", desc: "擊殺後短暫大幅加速", color: "#d7b6ff", tier: "mid", path: "tide", effects: [{ type: "hasteOnKill", duration: 1.4, rateMul: 1.5 }] },
+  { id: "echo_hard", name: "強回響", desc: "彈射 45% 傷害", color: "#2bd3ff", tier: "mid", path: "bloom", effects: [{ type: "multihitEcho", pct: 0.45, radius: 100 }] },
+
+  // ——— 高階（Lv15+ 權重提高，可扭轉戰局）———
+  { id: "moonfall", name: "月墜", desc: "每 5.5 秒對射程內全敵月華", color: "#ffe08a", tier: "high", path: "edge", effects: [{ type: "periodicNova", period: 5.5, dmgMul: 1.6, radiusMul: 1 }] },
+  { id: "blizzard", name: "極寒域", desc: "射程內敵人持續強減速", color: "#4db8ff", tier: "high", path: "tide", effects: [{ type: "auraSlow", factor: 0.55 }] },
+  { id: "catastrophe", name: "潮劫", desc: "擊殺大範圍爆炸（比例生命）", color: "#ff4500", tier: "high", path: "bloom", effects: [{ type: "killNova", radius: 120, pctOfMaxHp: 0.22 }] },
+  { id: "god_music", name: "神樂", desc: "每 7 秒大範圍傷+燃+緩", color: "#ff2d7b", tier: "high", path: "edge", effects: [{ type: "periodicNova", period: 7, dmgMul: 1.35, radiusMul: 1 }] },
+  { id: "final_cut", name: "終焉", desc: "28% 血處決；斬殺回 30 金並加速", color: "#ff9f4a", tier: "high", path: "edge", effects: [{ type: "execLine", ratio: 0.28 }, { type: "goldOnKill", amount: 30 }, { type: "hasteOnKill", duration: 1.6, rateMul: 1.55 }] },
   { id: "sky_chain", name: "天鏈", desc: "連鎖大強化並回彈", color: "#2bd3ff", tier: "high", path: "bloom", effects: [{ type: "chainBonus", extra: 2, range: 150, pct: 0.8 }, { type: "chainReturn", pct: 0.45 }] },
   { id: "rift_flash", name: "斷潮閃", desc: "穿透命中 3 人末端爆", color: "#ff6b9d", tier: "high", path: "edge", effects: [{ type: "pierceNovaAt", count: 3, radius: 88, dmgMul: 0.85 }] },
   { id: "overpower", name: "破軍", desc: "傷害 +28%", color: "#ff6fa8", tier: "high", path: "edge", effects: [{ type: "dmgMul", value: 1.28 }] },
@@ -121,6 +128,7 @@ export function hasSkill(skills: string[] | undefined, id: string) {
   return !!skills?.includes(id);
 }
 
+/** 該等級是否觸發選技（5,10,15...） */
 export function isSkillLevel(level: number) {
   return level > 0 && level % SKILL_EVERY_LEVELS === 0;
 }
@@ -136,11 +144,13 @@ function tierWeight(skillTier: SkillTier, towerLevel: number): number {
     if (skillTier === "mid") return 2.4;
     return 1;
   }
+  // Lv5
   if (skillTier === "high") return 0.15;
   if (skillTier === "mid") return 0.9;
   return 2.5;
 }
 
+/** 已擁有技能對應的路徑集合 */
 export function ownedSkillPaths(owned: string[] | undefined): Set<SkillPath> {
   const paths = new Set<SkillPath>();
   for (const id of owned || []) {
@@ -150,9 +160,14 @@ export function ownedSkillPaths(owned: string[] | undefined): Set<SkillPath> {
   return paths;
 }
 
+/**
+ * 第三路徑鎖死規則（BTD 風格）：
+ * - 0 或 1 條路徑：三路皆可
+ * - 已有 2 條：只能繼續這兩條
+ */
 export function allowedSkillPaths(owned: string[] | undefined): Set<SkillPath> | null {
   const have = ownedSkillPaths(owned);
-  if (have.size < 2) return null;
+  if (have.size < 2) return null; // null = 不限
   return have;
 }
 
@@ -162,6 +177,7 @@ export function isPathLocked(owned: string[] | undefined, path: SkillPath): bool
   return !allow.has(path);
 }
 
+/** 從池中抽 choices 個：排除已擁有 + 鎖死的第三路徑 */
 export function rollSkillChoices(
   owned: string[] | undefined,
   towerLevel: number,
@@ -192,6 +208,7 @@ export function rollSkillChoices(
   return out;
 }
 
+/** 彙總塔上所有技能的某類效果 */
 export function collectEffects(skills: string[] | undefined): SkillEffect[] {
   const out: SkillEffect[] = [];
   for (const id of skills || []) {

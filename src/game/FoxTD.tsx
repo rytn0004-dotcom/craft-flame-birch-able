@@ -14,10 +14,12 @@ import { ENEMY_TYPES, stockBestiary, TOWERS, TRAIT_INFO, type EnemyDef, type Spe
 import {
   collectEffects,
   isSkillLevel,
+  ownedSkillPaths,
   rollSkillChoices,
   skillLabelShort,
   SKILL_BY_ID,
   SKILL_CHOICE_COUNT,
+  SKILL_PATH_META,
   sumDmgMul,
   type SkillEffect,
   type TowerSkillDef,
@@ -51,6 +53,8 @@ import {
   shouldOfferTiles,
   TEMPLATE_BY_ID,
   TILE,
+  TILE_COLS,
+  TILE_ROWS,
   validPlacements,
   type Rot,
   type TileBoard,
@@ -67,8 +71,8 @@ const VIEWW = VIEW_W;
 const VIEWH = VIEW_H;
 const GRID = CELL;
 const MAX_WAVE = 20;
-const STAKE_COST = 35;
-const START_GOLD = 220; // fallback；實際以難度 startGold 為準
+const STAKE_COST = 28;
+const START_GOLD = 250; // fallback；備戰期可放 銀月+寒霜+餘額
 
 /** 聖地：本陣防禦建築 + 週期護衛 + 一場一條升級路線 */
 const HQ_BASE_DMG = 10;
@@ -76,11 +80,29 @@ const HQ_BASE_CD = 1.0;
 const HQ_BASE_RANGE = 150;
 /** 週期投放基礎間隔（秒）；路線會縮短 */
 const HQ_ESCORT_BASE_CD = 14;
-const HQ_ESCORT_COST = 28;
-/** 接觸結算間隔 */
-const HQ_CONTACT_TICK = 0.25;
-const HQ_ATK_W = 0.12;
-const HQ_REFLECT_W = 0.04;
+const HQ_ESCORT_COST = 22;
+/**
+ * 聖地建築血量（與一般塔／舊「生命條數」分離）
+ * 平衡假設：雜兵剩餘 ~30–50，漏一隻約扣 12–15；滿編漏 15 隻約 200 傷。
+ * 本體 1200 → 約能扛 5–6 波「全漏」；正常半漏可打到中後期。
+ * Boss 有倍率但單次有上限，避免一隻秒殺。
+ */
+const HQ_BUILDING_HP = 1200;
+const HQ_LEAK_HP_MUL = 0.18;
+const HQ_LEAK_FLAT = 6;
+const HQ_LEAK_HIT_CAP = 100;
+const HQ_LEAK_BOSS_MUL = 1.35;
+const HQ_HP_PER_CORE_LV = 100; // 主砲升級附帶建築耐久
+/** 接觸結算間隔（越短換血越快） */
+const HQ_CONTACT_TICK = 0.12;
+/** 護衛對怪傷害 ≈ 自身當前生命 × 此權重（每 tick） */
+const HQ_ATK_W = 0.28;
+/** 怪對護衛反傷權重 */
+const HQ_REFLECT_W = 0.1;
+/** 沿路徑判定接觸的距離（格距像素感） */
+const HQ_CONTACT_PATH = 32;
+/** 像素距離備援 */
+const HQ_CONTACT_PX = 40;
 
 type HqPathId = "blade" | "bow" | "tide";
 type EscortKind = "melee" | "ranged" | "healer";
@@ -139,7 +161,7 @@ function defaultHqProgress(): HqProgress {
     squad: 2,
     deployCd: HQ_ESCORT_BASE_CD,
     atkW: HQ_ATK_W,
-    meleeHp: 48,
+    meleeHp: 62,
     ranged: false,
     rangedDmg: 7,
     healer: false,
@@ -151,9 +173,9 @@ function defaultHqProgress(): HqProgress {
 
 /** 鎖定路線：三選一 */
 const HQ_PATH_LOCK: { path: HqPathId; cost: number; name: string; desc: string }[] = [
-  { path: "blade", cost: 45, name: "刃衛之路", desc: "近戰為主，提高編制與換傷，適合硬擋高壓線" },
-  { path: "bow", cost: 45, name: "羽矢之路", desc: "解鎖遠程護衛，邊推進邊輸出，適合多雜兵" },
-  { path: "tide", cost: 45, name: "潮愈之路", desc: "解鎖回復兵，延長護衛存活，適合長波與 Boss 拖時間" },
+  { path: "blade", cost: 40, name: "刃衛之路", desc: "近戰為主，提高編制與換傷，適合硬擋高壓線" },
+  { path: "bow", cost: 40, name: "羽矢之路", desc: "解鎖遠程護衛，邊推進邊輸出，適合多雜兵" },
+  { path: "tide", cost: 40, name: "潮愈之路", desc: "解鎖回復兵，延長護衛存活，適合長波與 Boss 拖時間" },
 ];
 
 /** 各路線三階；第 2 階為二選一，其餘單選推進 */
@@ -224,7 +246,7 @@ function applyPassiveSkillEffects(tw: {
 
 
 function sellRefund(spent: number) {
-  return Math.floor(spent * 0.7);
+  return Math.floor(spent * 0.75);
 }
 const MAP_KEY = "foxtd-maps-v1";
 const LAST_KEY = "foxtd-last-layout";
@@ -465,23 +487,135 @@ type Tower = {
   /** 聖地本體（不可出售、獨特升級路線） */
   sanctuary?: boolean;
   hqCoreLv?: number;
+  /** 火力分支：傷／速／射程 */
+  hqFireLv?: number;
+  /** 加固分支：建築血／漏傷抗性 */
+  hqFortifyLv?: number;
   /** 週期投放計時 */
   escortCd?: number;
 };
 
-function sanctuaryStats(tw: { hqCoreLv?: number }) {
-  const coreLv = tw.hqCoreLv ?? 1;
-  const damage = HQ_BASE_DMG * Math.pow(1.18, coreLv - 1);
-  const range = HQ_BASE_RANGE + (coreLv - 1) * 10;
-  const cooldown = Math.max(0.4, HQ_BASE_CD * Math.pow(0.94, coreLv - 1));
-  return { damage, range, cooldown };
+function sanctuaryStats(tw: {
+  hqCoreLv?: number;
+  hqFireLv?: number;
+  hqFortifyLv?: number;
+}) {
+  const fire = tw.hqFireLv ?? 0;
+  const fort = tw.hqFortifyLv ?? 0;
+  const damage = HQ_BASE_DMG * Math.pow(1.2, fire) * Math.pow(1.05, fort);
+  const range = HQ_BASE_RANGE + fire * 12 + fort * 4;
+  const cooldown = Math.max(0.38, HQ_BASE_CD * Math.pow(0.91, fire) * Math.pow(0.98, fort));
+  const maxHp = HQ_BUILDING_HP + fort * 150 + fire * 35;
+  const leakResist = Math.min(0.45, fort * 0.09);
+  return { damage, range, cooldown, maxHp, leakResist };
 }
 
+/** 漏怪傷害：剩餘生命折算 × 加固抗性 */
+function sanctuaryLeakDamage(
+  e: { hp: number; boss?: boolean; maxHp?: number },
+  resist = 0,
+) {
+  const rem = Math.max(0, e.hp);
+  let dmg = rem * HQ_LEAK_HP_MUL + HQ_LEAK_FLAT;
+  if (e.boss) dmg *= HQ_LEAK_BOSS_MUL;
+  dmg = Math.min(HQ_LEAK_HIT_CAP, Math.max(HQ_LEAK_FLAT, dmg));
+  dmg *= Math.max(0.55, 1 - Math.min(0.45, resist));
+  return Math.round(dmg);
+}
+
+/** 狐緣：鄰格（切比雪夫距離 ≤1）是否有指定 special 的塔 */
+function hasNeighborSpecial(
+  towers: { gx: number; gy: number; special?: string; def: number; stake?: boolean; sanctuary?: boolean }[],
+  tw: { gx: number; gy: number },
+  special: string,
+  book: { special: string }[],
+): boolean {
+  for (const o of towers) {
+    if (o.stake || o.sanctuary) continue;
+    if (o.gx === tw.gx && o.gy === tw.gy) continue;
+    if (Math.max(Math.abs(o.gx - tw.gx), Math.abs(o.gy - tw.gy)) > 1) continue;
+    const sp = o.special || book[o.def]?.special;
+    if (sp === special) return true;
+  }
+  return false;
+}
+
+/** Boss／敵技能顯示名（避免橫幅出現英文 id） */
+const BOSS_SKILL_LABEL: Record<string, string> = {
+  slam: "震地重擊",
+  nova: "潮爆新星",
+  terror: "威壓恐襲",
+  howl: "潮嚎",
+  barrier: "護潮屏障",
+  mend: "癒合潮息",
+  charge: "衝鋒",
+};
+
+/** 狐緣組合說明（固定 3 組） */
+const FOX_BONDS: { a: string; b: string; name: string; desc: string }[] = [
+  { a: "slow", b: "burn", name: "霜焰", desc: "霜塔鄰火塔：對減速中的敵人融化額外傷" },
+  { a: "chain", b: "pierce", name: "璃貫", desc: "鏈塔鄰貫塔：連鎖多跳一程、穿透更易擴散" },
+  { a: "root", b: "execute", name: "影裁", desc: "縛塔鄰處決塔：定身／緩速中更易觸發斬殺" },
+];
+
 function coreUpgradeCost(lv: number) {
+
   return Math.round(40 * Math.pow(1.4, Math.max(0, lv - 1)));
 }
 
 let __escortSeq = 1;
+
+/** —— 創意玩法：連殺、潮汐事件、奇遇波、背水 —— */
+const COMBO_WINDOW = 1.35;
+const COMBO_GOLD_PER = 0.06; // 每層連殺額外金幣比例
+const LAST_STAND_LIVES = 3;
+
+type TideEventId = "gold_rain" | "blood_tide" | "sanctuary_roar" | "mist" | "still_water";
+type TideEvent = { id: TideEventId; name: string; desc: string; t: number; dur: number };
+
+const TIDE_TABLE: { id: TideEventId; name: string; desc: string; weight: number; dur: number }[] = [
+  { id: "gold_rain", name: "金沙落潮", desc: "本波擊殺金幣 +35%", weight: 1.1, dur: 999 },
+  { id: "blood_tide", name: "赤潮催行", desc: "敵人移速 +18%，擊殺連殺窗口更長", weight: 1, dur: 999 },
+  { id: "sanctuary_roar", name: "聖地鳴振", desc: "護衛動員免費一次、間隔暫時縮短", weight: 0.9, dur: 20 },
+  { id: "mist", name: "海霧", desc: "所有塔射程 -12%，近戰護衛換傷 +25%", weight: 0.85, dur: 999 },
+  { id: "still_water", name: "靜水片刻", desc: "敵人 -12% 移速，塔冷卻 -8%", weight: 1, dur: 999 },
+];
+
+type WaveQuirk = { name: string; tag: string; enemyHp: number; enemySpd: number; gold: number; note: string };
+
+function waveQuirk(wave: number): WaveQuirk | null {
+  if (wave <= 0) return null;
+  if (wave % 5 === 0) {
+    const table: WaveQuirk[] = [
+      { name: "潮汐祭", tag: "祭典", enemyHp: 1.15, enemySpd: 1.05, gold: 1.2, note: "強敵厚賞" },
+      { name: "裂口狂潮", tag: "裂口", enemyHp: 0.9, enemySpd: 1.22, gold: 1.1, note: "又快又密" },
+      { name: "沉船遺寶", tag: "遺寶", enemyHp: 1.05, enemySpd: 0.95, gold: 1.45, note: "偏肥的怪" },
+    ];
+    return table[(wave / 5 - 1) % table.length];
+  }
+  if (wave === 7) return { name: "初見巨影", tag: "預兆", enemyHp: 1.25, enemySpd: 0.88, gold: 1.15, note: "偏肉的試煉" };
+  if (wave === 13) return { name: "雙月", tag: "雙月", enemyHp: 1.1, enemySpd: 1.1, gold: 1.2, note: "節奏加快" };
+  return null;
+}
+
+function pickTideEvent(wave: number): TideEvent | null {
+  if (wave < 2) return null;
+  // 約 40% 機率觸發；奇遇波必觸
+  const force = wave % 5 === 0;
+  if (!force && Math.random() > 0.42) return null;
+  const sum = TIDE_TABLE.reduce((a, x) => a + x.weight, 0);
+  let r = Math.random() * sum;
+  let row = TIDE_TABLE[0];
+  for (const t of TIDE_TABLE) {
+    r -= t.weight;
+    if (r <= 0) {
+      row = t;
+      break;
+    }
+  }
+  return { id: row.id, name: row.name, desc: row.desc, t: 0, dur: row.dur };
+}
+
 
 
 
@@ -740,6 +874,12 @@ export function FoxTD() {
   /** 明潮砂：重骰地塊用，基礎產量 0 */
   const [mingSand, setMingSand] = useState(0);
   const mingSandRef = useRef(0);
+  const comboRef = useRef({ n: 0, t: 0, best: 0 });
+  const tideRef = useRef<TideEvent | null>(null);
+  const freeEscortRef = useRef(0);
+  const lastStandRef = useRef(false);
+  const [, setFlavorTick] = useState(0);
+  const bumpFlavor = () => setFlavorTick((x) => x + 1);
   const [lives, setLives] = useState(20);
   const [wave, setWave] = useState(0);
   const [phase, setPhase] = useState<Phase>("ready");
@@ -750,6 +890,7 @@ export function FoxTD() {
   const [endless, setEndless] = useState(false);
   const [autoUpgrade, setAutoUpgrade] = useState<AutoUpgradeMode>("off");
   const autoUpgradeRef = useRef<AutoUpgradeMode>("off");
+  const [bossBannerUi, setBossBannerUi] = useState<null | { name: string; skills: string[] }>(null);
   const [skillOffer, setSkillOffer] = useState<{
     towerIndex: number;
     level: number;
@@ -893,6 +1034,11 @@ export function FoxTD() {
     rings: [] as Ring[],
     pops: [] as Pop[],
     queue: [] as { type: number; at: number; route: number }[],
+    /** Boss 進場橫幅 */
+    bossBanner: null as null | { name: string; skills: string[]; life: number },
+    bossFreezeT: 0,
+    /** 壓力最高的戰線 */
+    hotRoute: 0,
     clock: 0,
     between: 0,
     wave: 0,
@@ -1021,6 +1167,53 @@ export function FoxTD() {
       let amount = dmg * (e.vulnT > 0 ? e.vuln : 1);
       amount *= sumDmgMul(effects);
 
+      // 狐緣連攜（鄰格固定 3 組）
+      let bondTag: string | null = null;
+      if (fromTower != null) {
+        const tw = sim.current.towers[fromTower];
+        const book = towerBookRef.current;
+        if (tw && !tw.stake && !tw.sanctuary) {
+          const sp = (tw as { special?: string }).special || book[tw.def]?.special;
+          // 霜焰：slow 鄰 burn（或反向）— 目標處於減速時融化
+          if (
+            (sp === "burn" || sp === "ultimate") &&
+            hasNeighborSpecial(sim.current.towers, tw, "slow", book) &&
+            e.slowT > 0 &&
+            e.slow < 0.95
+          ) {
+            amount *= 1.32;
+            bondTag = "霜焰";
+          } else if (
+            sp === "slow" &&
+            hasNeighborSpecial(sim.current.towers, tw, "burn", book) &&
+            e.burnT > 0
+          ) {
+            amount *= 1.2;
+            bondTag = "霜焰";
+          }
+          // 璃貫：chain 鄰 pierce
+          if (sp === "chain" && hasNeighborSpecial(sim.current.towers, tw, "pierce", book)) {
+            amount *= 1.12;
+            bondTag = bondTag || "璃貫";
+          }
+          if (sp === "pierce" && hasNeighborSpecial(sim.current.towers, tw, "chain", book)) {
+            amount *= 1.12;
+            bondTag = bondTag || "璃貫";
+          }
+          // 影裁：root 鄰 execute — 定身或深緩中提高斬線
+          if (
+            (sp === "execute" || sp === "root") &&
+            (hasNeighborSpecial(sim.current.towers, tw, sp === "execute" ? "root" : "execute", book))
+          ) {
+            if (e.rootT > 0 || (e.slowT > 0 && e.slow <= 0.4)) {
+              amount *= 1.18;
+              bondTag = bondTag || "影裁";
+            }
+          }
+        }
+      }
+      if (bondTag) float(px, py - 42, bondTag, "#ffb4e0");
+
       // 暴擊
       for (const c of get("crit")) {
         if (Math.random() < c.chance) {
@@ -1101,12 +1294,24 @@ export function FoxTD() {
         e.tideMark = Math.min(m.max, (e.tideMark || 0) + 1);
       }
 
-      // 處決
+      // 處決（影裁：定身／深緩中斬線提高）
       let exec = special === "execute" ? 0.18 : 0;
       for (const ex of get("execLine")) exec = Math.max(exec, ex.ratio);
+      if (fromTower != null) {
+        const tw = sim.current.towers[fromTower];
+        const book = towerBookRef.current;
+        if (
+          tw &&
+          special === "execute" &&
+          hasNeighborSpecial(sim.current.towers, tw, "root", book) &&
+          (e.rootT > 0 || (e.slowT > 0 && e.slow <= 0.4))
+        ) {
+          exec = Math.max(exec, 0.28);
+        }
+      }
       if (exec > 0 && e.hp > 0 && e.hp < e.maxHp * exec) {
         e.hp = 0;
-        float(px, py - 28, "斬", "#ffd2a8");
+        float(px, py - 28, exec >= 0.25 ? "影斬" : "斬", "#ffd2a8");
       }
 
       burst(px, py, color, 6, 1.6);
@@ -1169,6 +1374,15 @@ export function FoxTD() {
           pct = Math.max(pct, c.pct);
         }
         for (const c of get("chainReturn")) ret = Math.max(ret, c.pct);
+        // 璃貫：鄰有穿透塔 → 多跳 1 程、距離略增
+        if (fromTower != null) {
+          const tw = sim.current.towers[fromTower];
+          if (tw && hasNeighborSpecial(sim.current.towers, tw, "pierce", towerBookRef.current)) {
+            extra += 1;
+            jump += 28;
+            pct = Math.max(pct, 0.62);
+          }
+        }
         const p0 = posAt(e.dist, e.route);
         const near = sim.current.enemies
           .filter((o) => o !== e)
@@ -1282,6 +1496,38 @@ export function FoxTD() {
       if (phaseRef.current !== "play" || pausedRef.current) return;
       s.clock += dt;
 
+      // Boss 橫幅倒數
+      if (s.bossBanner) {
+        s.bossBanner.life -= dt;
+        if (s.bossBanner.life <= 0) {
+          s.bossBanner = null;
+          setBossBannerUi(null);
+        }
+      }
+      if (s.bossFreezeT > 0) s.bossFreezeT -= dt;
+
+      // 戰線壓力：Σ (路徑剩餘比例 × 血量權重)，最高者標紅
+      {
+        const pressure = routes.map(() => 0);
+        for (const e of s.enemies) {
+          if (e.hp <= 0) continue;
+          const len = routeLen(e.route) || 1;
+          const left = Math.max(0, len - e.dist);
+          const w = (0.35 + 0.65 * (left / len)) * (e.boss ? 3.5 : 1) * (0.5 + 0.5 * (e.hp / Math.max(1, e.maxHp)));
+          if (e.route >= 0 && e.route < pressure.length) pressure[e.route] += w;
+        }
+        let hot = 0;
+        let best = -1;
+        for (let i = 0; i < pressure.length; i++) {
+          if (pressure[i] > best) {
+            best = pressure[i];
+            hot = i;
+          }
+        }
+        s.hotRoute = hot;
+        (s as { routePressure?: number[] }).routePressure = pressure;
+      }
+
       if (s.queue.length) {
         while (s.queue.length && s.clock >= s.queue[0].at) {
           const job = s.queue.shift()!;
@@ -1301,10 +1547,12 @@ export function FoxTD() {
           s.enemies.push({
             type: job.type,
             dist: 0,
-            hp: et.hp * hpMul,
-            maxHp: et.hp * hpMul,
-            speed: et.speed * (0.96 + Math.random() * 0.08) * speedMul,
-            gold: Math.max(1, Math.round(et.gold * goldMul * (1 + job.type * 0.08))),
+            hp: et.hp * hpMul * 0.92 * (waveQuirk(s.wave)?.enemyHp ?? 1),
+            maxHp: et.hp * hpMul * 0.92 * (waveQuirk(s.wave)?.enemyHp ?? 1),
+            speed: et.speed * (0.96 + Math.random() * 0.08) * speedMul
+              * (waveQuirk(s.wave)?.enemySpd ?? 1)
+              * (tideRef.current?.id === "blood_tide" ? 1.18 : tideRef.current?.id === "still_water" ? 0.88 : 1),
+            gold: Math.max(1, Math.round(et.gold * goldMul * (1 + job.type * 0.08) * (waveQuirk(s.wave)?.gold ?? 1) * (s.wave <= 3 ? 1.2 : s.wave <= 6 ? 1.08 : 1))),
             slow: 1,
             slowT: 0,
             burn: 0,
@@ -1337,11 +1585,42 @@ export function FoxTD() {
             hasteT: 0,
             hasteMul: 1,
           });
+          // Boss 儀式：進場橫幅 + 短凍結 + 聖地震動
+          if (et.boss) {
+            const sk = (et.skills as string[] | undefined) || [];
+            const labeled = sk.length
+              ? sk.slice(0, 4).map((id) => BOSS_SKILL_LABEL[id] || String(id))
+              : ["強襲"];
+            const skillHint = labeled.join(" · ");
+            s.bossBanner = {
+              name: et.name || "潮潮巨敵",
+              skills: labeled,
+              life: 2.4,
+            };
+            s.bossFreezeT = Math.max(s.bossFreezeT, 0.55);
+            const hq = s.towers.find((t) => t.sanctuary);
+            if (hq) hq.shake = Math.max(hq.shake, 0.55);
+            float(hq?.x ?? 0, (hq?.y ?? 0) - 40, `Boss · ${et.name}`, "#ffd27a");
+            setHover(`Boss 來襲：${et.name}（${skillHint}）`);
+            setBossBannerUi({ name: s.bossBanner.name, skills: s.bossBanner.skills });
+          }
         }
       } else if (s.enemies.length === 0 && s.wave > 0) {
         if (tileOfferRef.current && tileOfferRef.current.length) {
           s.between = 0;
         } else {
+          // 清波獎勵（僅在剛清空的第一幀發，用 between==0 判斷）
+          if (s.between === 0 && s.queue.length === 0) {
+            const clearBonus = 10 + s.wave * 3;
+            goldRef.current += clearBonus;
+            setGold(goldRef.current);
+            // 每波微量明潮砂
+            if (s.wave % 2 === 0) {
+              mingSandRef.current += 1;
+              setMingSand(mingSandRef.current);
+            }
+            setHover(`波次清除 · +${clearBonus} 金` + (s.wave % 2 === 0 ? " · 明潮砂 +1" : ""));
+          }
           s.between += dt;
           const cap = wavesRef.current?.length || MAX_WAVE;
           if (s.wave >= cap && !endlessRef.current) {
@@ -1355,11 +1634,34 @@ export function FoxTD() {
               setMingSand(mingSandRef.current);
               tileOfferRef.current = opts;
               setTileOffer(opts);
-              setPickTemplate(null);
-              pickTemplateRef.current = null;
+              // 預選第一塊，讓游標移到接口就能立刻預覽
+              const first = opts[0] || null;
+              setPickTemplate(first);
+              pickTemplateRef.current = first;
+              pickRotRef.current = 0;
+              setPickRot(0);
               pausedRef.current = true;
               setPaused(true);
-              setHover(`第 ${s.wave} 波結束 · 疆域可擴張 · 明潮砂 +1（現有 ${mingSandRef.current}）`);
+              // 鏡頭移到最新 frontier 中心，方便對準接口
+              {
+                const fronts = frontierSlots(boardRef.current);
+                if (fronts.length) {
+                  // 偏好「尚未被佔、離已放地塊外緣」的槽：取平均
+                  let sx = 0, sy = 0;
+                  for (const f of fronts) {
+                    sx += (f.tc + 0.5) * TILE * CELL;
+                    sy += (f.tr + 0.5) * TILE * CELL;
+                  }
+                  const z = s.cam.zoom || 1;
+                  s.cam.x = sx / fronts.length - VIEWW / (2 * z);
+                  s.cam.y = sy / fronts.length - VIEWH / (2 * z);
+                  clampCam(s.cam);
+                }
+              }
+              const nValid = first ? validPlacements(boardRef.current, first).length : 0;
+              setHover(
+                `第 ${s.wave} 波結束 · 疆域擴張 · 已選「${TEMPLATE_BY_ID[first!]?.name || first}」· 綠格可接 · 接口 ${nValid} 處`,
+              );
               s.between = 0;
             } else {
               const gap = endlessRef.current ? (s.wave % 5 === 0 ? 5.5 : 4.2) : 7;
@@ -1482,12 +1784,20 @@ export function FoxTD() {
             const tw = s.towers[towerIndex];
             if (!tw) return false;
             e.face = tw.x >= p.x ? 1 : -1;
-            // 路障較耐打一點
-            const mul = (e.rage ? 1.4 : 1) * (tw.stake ? 0.75 : 1);
+            // 路障較耐打；聖地建築另有減傷（近戰拆建築不該秒掉）
+            let mul = (e.rage ? 1.4 : 1) * (tw.stake ? 0.75 : 1);
+            if (tw.sanctuary) mul *= 0.55;
             tw.hp -= damage * mul;
             tw.shake = 0.18;
             burst(tw.x, tw.y, e.rage ? "#ff6fa8" : "#ffb4c8", e.boss ? 10 : 6, 1.8);
             if (tw.hp <= 0) {
+              if (tw.sanctuary) {
+                tw.hp = 0;
+                phaseRef.current = "lose";
+                setPhase("lose");
+                float(tw.x, tw.y, "聖地崩毀", "#ff6a80");
+                return true;
+              }
               if (tw.stake) {
                 const next = new Set(s.blocked);
                 next.delete(cellKey(tw.gx, tw.gy));
@@ -1503,25 +1813,65 @@ export function FoxTD() {
           },
         });
         e.aiAction = bb.lastAction;
-        if (e.rootT <= 0 && e.aiSpeed > 0.05) {
+        if (s.bossFreezeT <= 0 && e.rootT <= 0 && e.aiSpeed > 0.05) {
           const slow = e.noslow ? 1 : e.slowT > 0 ? e.slow : 1;
-          e.dist += e.speed * slow * e.aiSpeed * e.hasteMul * (e.rage ? 1.12 : 1) * dt;
+          e.dist += e.speed * 0.88 * slow * e.aiSpeed * e.hasteMul * (e.rage ? 1.12 : 1) * dt;
         }
         if (e.dist >= routeLen(e.route)) {
-          livesRef.current -= 1;
-          setLives(livesRef.current);
-          s.enemies.splice(i, 1);
-          if (livesRef.current <= 0) {
-            phaseRef.current = "lose";
-            setPhase("lose");
+          const hq = s.towers.find((t) => t.sanctuary);
+          const resist = hq ? sanctuaryStats(hq).leakResist : 0;
+          const leakDmg = sanctuaryLeakDamage(e, resist);
+          const pLeak = posAt(e.dist, e.route);
+          if (hq) {
+            hq.hp = Math.max(0, hq.hp - leakDmg);
+            hq.shake = Math.max(hq.shake, 0.25);
+            float(pLeak.x, pLeak.y - 10, e.boss ? `Boss 破陣 −${leakDmg}` : `聖地 −${leakDmg}`, e.boss ? "#ff6a80" : "#ff8aa0");
+            if (e.boss) {
+              const hq2 = s.towers.find((t) => t.sanctuary);
+              if (hq2) hq2.shake = Math.max(hq2.shake, 0.4);
+              setHover("Boss 已殺入聖地中心！");
+            }
+            // 用 lives 顯示「完整度百分比」方便舊 UI；真正勝負看 hq.hp
+            const pct = hq.maxHp > 0 ? hq.hp / hq.maxHp : 0;
+            livesRef.current = Math.max(0, Math.ceil(pct * 20));
+            setLives(livesRef.current);
+            if (hq.hp <= 0) {
+              phaseRef.current = "lose";
+              setPhase("lose");
+              setHover("聖地建築崩毀");
+            } else if (pct <= 0.25) {
+              setHover(`聖地告急 ${Math.round(hq.hp)}/${hq.maxHp}（本隻漏傷 ${leakDmg}）`);
+            }
+          } else {
+            livesRef.current -= 1;
+            setLives(livesRef.current);
+            if (livesRef.current <= 0) {
+              phaseRef.current = "lose";
+              setPhase("lose");
+            }
           }
+          s.enemies.splice(i, 1);
           continue;
         }
         if (e.hp <= 0) {
-          goldRef.current += e.gold;
-          setGold(goldRef.current);
-          const p = posAt(e.dist, e.route);
-          float(p.x, p.y, `+${e.gold}`, "#ffd27a");
+          {
+            const p = posAt(e.dist, e.route);
+            const tide = tideRef.current;
+            let g = e.gold;
+            if (tide?.id === "gold_rain") g = Math.round(g * 1.35);
+            const combo = comboRef.current;
+            combo.t = COMBO_WINDOW + (tide?.id === "blood_tide" ? 0.4 : 0);
+            combo.n += 1;
+            if (combo.n > combo.best) combo.best = combo.n;
+            if (combo.n >= 3) g += Math.max(1, Math.round(e.gold * COMBO_GOLD_PER * Math.min(combo.n, 20)));
+            goldRef.current += g;
+            setGold(goldRef.current);
+            if (e.boss) float(p.x, p.y - 36, "Boss 討伐", "#ffd27a");
+            if (combo.n >= 5 && combo.n % 5 === 0) float(p.x, p.y - 14, `連殺 ×${combo.n}`, "#ff9ecd");
+            float(p.x, p.y, `+${g}`, combo.n >= 3 ? "#ffe08a" : "#ffd27a");
+            if (combo.n >= 3) bumpFlavor();
+            else bumpFlavor();
+          }
           burst(p.x, p.y, e.color, 12, 2.4);
           s.enemies.splice(i, 1);
         }
@@ -1588,6 +1938,15 @@ export function FoxTD() {
             if (kind === "dmg") tw.damage *= 1.22;
             else tw.cooldown = Math.max(0.18, tw.cooldown * 0.82);
             tw.level += 1;
+            if (tw.level === 5 || tw.level === 10 || tw.level === 15) {
+              if (kind === "dmg") {
+                tw.damage *= 1.1;
+                tw.range += 8;
+              } else {
+                tw.cooldown = Math.max(0.16, tw.cooldown * 0.9);
+                tw.range += 4;
+              }
+            }
             const before = tw.maxHp;
             tw.maxHp = Math.round(tw.maxHp * 1.18 + 12);
             tw.hp = Math.min(tw.maxHp, tw.hp + (tw.maxHp - before) + 20);
@@ -1626,6 +1985,37 @@ export function FoxTD() {
         }
       }
 
+      // 連殺計時衰減
+      if (comboRef.current.t > 0) {
+        comboRef.current.t -= dt;
+        if (comboRef.current.t <= 0) {
+          if (comboRef.current.n >= 8) setHover(`連殺中斷 · 本波最高 ×${comboRef.current.best}`);
+          comboRef.current.n = 0;
+        }
+      }
+      // 背水一戰
+      {
+        const hq = s.towers.find((t) => t.sanctuary);
+        const hqPct = hq && hq.maxHp > 0 ? hq.hp / hq.maxHp : 1;
+        if (!lastStandRef.current && hq && hqPct > 0 && hqPct <= 0.28 && phaseRef.current === "play") {
+          lastStandRef.current = true;
+          freeEscortRef.current += 1;
+          for (const tw of s.towers) {
+            if (tw.stake || tw.sanctuary) continue;
+            tw.rateMul = Math.max(tw.rateMul || 1, 1.25);
+            tw.terrorT = Math.max(tw.terrorT || 0, 12);
+          }
+          setHover(`背水一戰！聖地耐久 ${(hqPct * 100).toFixed(0)}% · 全塔射速提升，護衛免費名額 +1`);
+          bumpFlavor();
+        }
+      }
+      // 潮汐：靜水加速冷卻感（以 rateMul 近似）
+      if (tideRef.current?.id === "still_water") {
+        for (const tw of s.towers) {
+          if (!tw.stake && (tw.rateMul || 1) < 1.08) tw.rateMul = 1.08;
+        }
+      }
+
       for (const tw of s.towers) {
         if (tw.terrorT > 0) {
           tw.terrorT -= dt;
@@ -1633,7 +2023,16 @@ export function FoxTD() {
         } else if (tw.rateMul === undefined) tw.rateMul = 1;
         tw.cd -= dt;
         const twDef = towerBookRef.current[tw.def] ?? TOWERS[tw.def];
-        const best = tw.stake ? null : pickTowerTarget(tw, s.enemies, twDef?.special ?? "high");
+        const best = tw.stake
+          ? null
+          : pickTowerTarget(
+              {
+                ...tw,
+                range: tw.range * (tideRef.current?.id === "mist" ? 0.88 : 1) * (1 + Math.min(0.12, (comboRef.current.n || 0) * 0.008)),
+              },
+              s.enemies,
+              twDef?.special ?? "high",
+            );
         if (best && tw.cd <= 0) {
           let cd = tw.cooldown / (tw.rateMul > 0 ? tw.rateMul : 1);
           // 終焉疾射 / 羽嵐已在 cooldown 寫入
@@ -1658,17 +2057,21 @@ export function FoxTD() {
           if (tw.escortCd <= 0 && s.enemies.some((e) => e.hp > 0)) {
             // 自動動員（耗金，金幣不足則延遲重試）
             const p = hqProgRef.current;
-            if (goldRef.current >= HQ_ESCORT_COST) {
+            if (goldRef.current >= HQ_ESCORT_COST || freeEscortRef.current > 0) {
               // 內聯一次部署避免閉包問題：重用部署邏輯的最小子集
-              tw.escortCd = p.deployCd;
+              tw.escortCd = p.deployCd * (tideRef.current?.id === "sanctuary_roar" ? 0.7 : 1);
+              // 優先高壓戰線（與壓力標紅同一語意），同線再取最接近終點
               let threat: Enemy | null = null;
-              let bestD = 1e15;
+              let bestScore = -1e15;
+              const hot = s.hotRoute ?? 0;
               for (const e of s.enemies) {
                 if (e.hp <= 0) continue;
                 const pos = posAt(e.dist, e.route);
-                const d = Math.hypot(pos.x - tw.x, pos.y - tw.y);
-                if (d < bestD) {
-                  bestD = d;
+                const distHq = Math.hypot(pos.x - tw.x, pos.y - tw.y);
+                const onHot = e.route === hot ? 80 : 0;
+                const score = onHot + e.dist * 2 - distHq * 0.15;
+                if (score > bestScore) {
+                  bestScore = score;
                   threat = e;
                 }
               }
@@ -1676,8 +2079,12 @@ export function FoxTD() {
                 const route = threat.route;
                 const live = routes[route] ?? routes[0];
                 if (live) {
-                  goldRef.current -= HQ_ESCORT_COST;
-                  setGold(goldRef.current);
+                  if (freeEscortRef.current > 0) {
+                    freeEscortRef.current -= 1;
+                  } else {
+                    goldRef.current -= HQ_ESCORT_COST;
+                    setGold(goldRef.current);
+                  }
                   const baseDist = Math.min(live.len - 20, Math.max(40, threat.dist + 40));
                   const kinds: EscortKind[] = [];
                   let rangedLeft = p.ranged ? p.mixRanged : 0;
@@ -1718,43 +2125,73 @@ export function FoxTD() {
         }
       }
 
-      // 護衛：迎擊推進、接觸換傷、遠程射擊、治療
+      // 護衛：迎擊、貼怪互消、不因到終點消失
       {
         const p = hqProgRef.current;
+        const mistMul = tideRef.current?.id === "mist" ? 1.25 : 1;
         for (let i = s.escorts.length - 1; i >= 0; i--) {
           const u = s.escorts[i];
           if (u.hp <= 0) {
             s.escorts.splice(i, 1);
             continue;
           }
-          // 向入口方向迎擊（dist 減少）
-          u.dist = Math.max(8, u.dist - u.speed * dt);
-          const pos = posAt(u.dist, u.route);
-          u.x = pos.x;
-          u.y = pos.y;
           u.contactT -= dt;
           u.shootCd -= dt;
           u.healCd -= dt;
 
-          // 近戰接觸
-          if (u.kind === "melee" && u.contactT <= 0) {
-            for (const e of s.enemies) {
-              if (e.hp <= 0) continue;
-              const ep = posAt(e.dist, e.route);
-              if (Math.hypot(ep.x - u.x, ep.y - u.y) > 22) continue;
-              const dmg = u.hp * p.atkW;
-              const reflect = Math.max(0, e.hp) * HQ_REFLECT_W + 3;
-              e.hp -= dmg;
-              u.hp -= reflect;
-              u.contactT = HQ_CONTACT_TICK;
-              if (e.hp <= 0) {
-                goldRef.current += Math.max(1, Math.round((e.gold || 4) * 0.85));
-                setGold(goldRef.current);
-              }
-              break;
+          // 找接觸／攔截目標：同路線優先，用路徑距離判斷（避免穿模）
+          let engage: Enemy | null = null;
+          let engageGap = 1e9;
+          for (const e of s.enemies) {
+            if (e.hp <= 0) continue;
+            const ep = posAt(e.dist, e.route);
+            const same = e.route === u.route;
+            const pathGap = same ? Math.abs(e.dist - u.dist) : 1e9;
+            const pxGap = Math.hypot(ep.x - u.x, ep.y - u.y);
+            const hit =
+              (same && pathGap <= HQ_CONTACT_PATH) ||
+              pxGap <= HQ_CONTACT_PX;
+            if (!hit) continue;
+            const score = same ? pathGap : pxGap + 80;
+            if (score < engageGap) {
+              engageGap = score;
+              engage = e;
             }
           }
-          // 遠程
+
+          // 有接觸：停下互砍；無接觸：沿路向入口推進，到頭就駐守
+          if (engage && u.kind === "melee") {
+            // 對齊到怪前方一點，避免視覺穿過去
+            if (engage.route === u.route) {
+              u.dist = Math.max(8, engage.dist + 6);
+            }
+            const pos = posAt(u.dist, u.route);
+            u.x = pos.x;
+            u.y = pos.y;
+            // 怪被刃衛拖住
+            engage.slow = Math.min(engage.slow, 0.2);
+            engage.slowT = Math.max(engage.slowT, 0.2);
+            if (u.contactT <= 0) {
+              const dmg = Math.max(4, u.hp * p.atkW * mistMul);
+              // 反傷與怪血量、護衛攻擊力掛鉤，雙方快速互消
+              const reflect = Math.max(3, Math.min(u.maxHp * 0.35, Math.max(0, engage.hp) * HQ_REFLECT_W + dmg * 0.35));
+              engage.hp -= dmg;
+              u.hp -= reflect;
+              u.contactT = HQ_CONTACT_TICK;
+              if (engage.hp <= 0) {
+                goldRef.current += Math.max(1, Math.round((engage.gold || 4) * 0.85));
+                setGold(goldRef.current);
+              }
+            }
+          } else {
+            // 無近戰鎖定：向入口推進，最低 dist 駐守（不刪除）
+            u.dist = Math.max(8, u.dist - u.speed * dt);
+            const pos = posAt(u.dist, u.route);
+            u.x = pos.x;
+            u.y = pos.y;
+          }
+
+          // 遠程：同線優先，邊走邊射
           if (u.kind === "ranged" && u.shootCd <= 0) {
             let target: Enemy | null = null;
             let td = 1e9;
@@ -1762,28 +2199,30 @@ export function FoxTD() {
               if (e.hp <= 0) continue;
               const ep = posAt(e.dist, e.route);
               const d = Math.hypot(ep.x - u.x, ep.y - u.y);
-              if (d < 110 && d < td) {
-                td = d;
+              const bias = e.route === u.route ? 0 : 40;
+              if (d + bias < 130 && d + bias < td) {
+                td = d + bias;
                 target = e;
               }
             }
             if (target) {
-              target.hp -= p.rangedDmg;
-              u.shootCd = 0.85;
+              target.hp -= p.rangedDmg * 1.15;
+              u.shootCd = 0.7;
               if (target.hp <= 0) {
                 goldRef.current += Math.max(1, Math.round((target.gold || 4) * 0.85));
                 setGold(goldRef.current);
               }
-            } else u.shootCd = 0.2;
+            } else u.shootCd = 0.15;
           }
+
           // 治療
           if (u.kind === "healer" && u.healCd <= 0) {
             for (const o of s.escorts) {
               if (o.id === u.id || o.hp <= 0) continue;
-              if (Math.hypot(o.x - u.x, o.y - u.y) > 70) continue;
+              if (Math.hypot(o.x - u.x, o.y - u.y) > 80) continue;
               o.hp = Math.min(o.maxHp, o.hp + p.healAmt);
             }
-            u.healCd = 2.4;
+            u.healCd = 2.0;
           }
           if (u.hp <= 0) s.escorts.splice(i, 1);
         }
@@ -1900,6 +2339,16 @@ export function FoxTD() {
       const cap = wavesRef.current?.length || MAX_WAVE;
       if (!endlessRef.current && s.wave >= cap) return;
       if (s.queue.length || s.enemies.length) return;
+      // 備戰結束進第 1 波：依佈署給一點週轉金
+      if (s.wave === 0) {
+        const n = s.towers.filter((t) => !t.stake && !t.sanctuary).length;
+        if (n >= 2) {
+          const interest = 12 + Math.min(24, n * 4);
+          goldRef.current += interest;
+          setGold(goldRef.current);
+          setHover(`佈署完備 · 週轉 +${interest} 金 · 第 1 波來襲`);
+        }
+      }
       s.wave += 1;
       s.clock = 0;
       s.between = 0;
@@ -1913,6 +2362,22 @@ export function FoxTD() {
       } else {
         s.queue = spawnPlan(s.wave);
       }
+      // 奇遇波 + 潮汐事件
+      const quirk = waveQuirk(s.wave);
+      const tide = pickTideEvent(s.wave);
+      tideRef.current = tide;
+      freeEscortRef.current = tide?.id === "sanctuary_roar" ? 1 : 0;
+      if (tide?.id === "sanctuary_roar") {
+        const hq = s.towers.find((t) => t.sanctuary);
+        if (hq) hq.escortCd = Math.min(hq.escortCd ?? 0, 2);
+      }
+      comboRef.current.n = 0;
+      comboRef.current.t = 0;
+      let msg = `第 ${s.wave} 波`;
+      if (quirk) msg += ` · ${quirk.name}（${quirk.note}）`;
+      if (tide) msg += ` · 潮汐「${tide.name}」：${tide.desc}`;
+      setHover(msg);
+      bumpFlavor();
       setWave(s.wave);
     };
     (canvas as HTMLCanvasElement & { __begin?: () => void }).__begin = beginWave;
@@ -1981,7 +2446,7 @@ export function FoxTD() {
       const y1 = Math.min(ROWS - 1, Math.ceil((s.cam.y + VIEWH / vz) / CELL) + 1);
       // 僅工房顯示格線（戰鬥中不顯示網點）
       if (workshopRef.current) {
-        ctx.strokeStyle = "rgba(180,230,255,0.12)";
+        ctx.strokeStyle = "rgba(180,230,255,0.04)";
         ctx.lineWidth = 1;
         ctx.beginPath();
         for (let x = x0; x <= x1; x++) {
@@ -2022,53 +2487,70 @@ export function FoxTD() {
 
       if (tileOfferRef.current && pickTemplateRef.current) {
         const tid = pickTemplateRef.current;
-        const rot = pickRotRef.current;
+        let rot = pickRotRef.current;
         const tpl = TEMPLATE_BY_ID[tid];
-        const rt = tpl ? rotatedTemplate(tpl, rot) : null;
-        const valid = validPlacements(boardRef.current, tid).filter((s) => s.rot === rot);
-        // 可放槽位底色
-        for (const slot of valid) {
-          const ox = slot.tc * TILE * CELL;
-          const oy = slot.tr * TILE * CELL;
-          ctx.fillStyle = "rgba(120, 220, 180, 0.22)";
+        // 任一旋轉可放的槽（綠底）；避免只顯示當前旋轉導致「接口看起來不能放」
+        const validAll = validPlacements(boardRef.current, tid);
+        const slotKeys = new Set(validAll.map((v) => `${v.tc},${v.tr}`));
+        for (const key of slotKeys) {
+          const [tc, tr] = key.split(",").map(Number);
+          const ox = tc * TILE * CELL;
+          const oy = tr * TILE * CELL;
+          const matchCur = validAll.some((v) => v.tc === tc && v.tr === tr && v.rot === rot);
+          ctx.fillStyle = matchCur ? "rgba(120, 220, 180, 0.28)" : "rgba(120, 200, 255, 0.16)";
           ctx.fillRect(ox, oy, TILE * CELL, TILE * CELL);
-          ctx.strokeStyle = "rgba(160, 255, 210, 0.9)";
-          ctx.lineWidth = 2;
+          ctx.strokeStyle = matchCur ? "rgba(160, 255, 210, 0.95)" : "rgba(140, 210, 255, 0.75)";
+          ctx.lineWidth = matchCur ? 2.5 : 1.5;
           ctx.strokeRect(ox + 2, oy + 2, TILE * CELL - 4, TILE * CELL - 4);
         }
-        // 游標所在槽：道路／礁石形狀預覽（確認放置效果）
-        if (rt) {
-          const gx = Math.floor(s.pointer.x / CELL);
-          const gy = Math.floor(s.pointer.y / CELL);
-          const hovTc = Math.floor(gx / TILE);
-          const hovTr = Math.floor(gy / TILE);
-          const canHere = valid.some((v) => v.tc === hovTc && v.tr === hovTr);
+        // 游標所在 frontier：自動選可用旋轉並畫道路形狀
+        const gx = Math.floor(s.pointer.x / CELL);
+        const gy = Math.floor(s.pointer.y / CELL);
+        const hovTc = Math.floor(gx / TILE);
+        const hovTr = Math.floor(gy / TILE);
+        const fronts = frontierSlots(boardRef.current);
+        const near = fronts.some((f) => f.tc === hovTc && f.tr === hovTr) || slotKeys.has(`${hovTc},${hovTr}`);
+        if (tpl && near && hovTc >= 0 && hovTr >= 0 && hovTc < TILE_COLS && hovTr < TILE_ROWS) {
+          // 優先當前旋轉，否則該槽任一可放旋轉
+          let useRot: Rot = rot;
+          let canHere = validAll.some((v) => v.tc === hovTc && v.tr === hovTr && v.rot === rot);
+          if (!canHere) {
+            const alt = validAll.find((v) => v.tc === hovTc && v.tr === hovTr);
+            if (alt) {
+              useRot = alt.rot;
+              canHere = true;
+            }
+          }
+          const rt = rotatedTemplate(tpl, useRot);
           const ox = hovTc * TILE * CELL;
           const oy = hovTr * TILE * CELL;
-          // 僅在鄰近 frontier 槽上畫形狀，避免滿圖塗抹
-          const near = frontierSlots(boardRef.current).some(
-            (f) => f.tc === hovTc && f.tr === hovTr,
-          ) || canHere;
-          if (near && hovTc >= 0 && hovTr >= 0 && hovTc < 10 && hovTr < 10) {
-            for (let r = 0; r < TILE; r++) {
-              for (let c = 0; c < TILE; c++) {
-                const blocked = rt.blocked[r][c];
-                const x = ox + c * CELL;
-                const y = oy + r * CELL;
-                if (blocked) {
-                  ctx.fillStyle = canHere ? "rgba(40, 70, 90, 0.55)" : "rgba(90, 40, 40, 0.45)";
-                } else {
-                  ctx.fillStyle = canHere ? "rgba(180, 230, 255, 0.35)" : "rgba(255, 120, 100, 0.28)";
-                }
-                ctx.fillRect(x, y, CELL, CELL);
+          for (let r = 0; r < TILE; r++) {
+            for (let c = 0; c < TILE; c++) {
+              const blocked = rt.blocked[r][c];
+              const x = ox + c * CELL;
+              const y = oy + r * CELL;
+              if (blocked) {
+                ctx.fillStyle = canHere ? "rgba(40, 70, 90, 0.55)" : "rgba(90, 40, 40, 0.45)";
+              } else {
+                ctx.fillStyle = canHere ? "rgba(180, 230, 255, 0.4)" : "rgba(255, 120, 100, 0.28)";
               }
+              ctx.fillRect(x, y, CELL, CELL);
             }
-            ctx.strokeStyle = canHere ? "rgba(200, 255, 230, 0.95)" : "rgba(255, 140, 140, 0.9)";
-            ctx.lineWidth = 3;
-            ctx.strokeRect(ox + 1, oy + 1, TILE * CELL - 2, TILE * CELL - 2);
-            ctx.fillStyle = canHere ? "#c8ffe0" : "#ffb0b0";
-            ctx.font = "bold 13px sans-serif";
-            ctx.fillText(canHere ? "可放置 · 點一下確認" : "無法銜接", ox + 12, oy + 22);
+          }
+          ctx.strokeStyle = canHere ? "rgba(200, 255, 230, 0.98)" : "rgba(255, 140, 140, 0.9)";
+          ctx.lineWidth = 3;
+          ctx.strokeRect(ox + 1, oy + 1, TILE * CELL - 2, TILE * CELL - 2);
+          ctx.fillStyle = canHere ? "#c8ffe0" : "#ffb0b0";
+          ctx.font = "bold 13px sans-serif";
+          const tip = !canHere
+            ? "無法銜接 · 換一塊或換邊"
+            : useRot !== rot
+              ? `可放置 · 將自動轉 ${useRot * 90}°`
+              : "可放置 · 點一下確認";
+          ctx.fillText(tip, ox + 12, oy + 22);
+          // 寫回：若滑鼠停在可放槽且旋轉不同，同步旋轉狀態方便點擊
+          if (canHere && useRot !== rot) {
+            pickRotRef.current = useRot;
           }
         }
       }
@@ -2092,17 +2574,70 @@ export function FoxTD() {
           ctx.beginPath();
           ctx.moveTo(a.x, a.y);
           ctx.lineTo(b.x, b.y);
-          ctx.strokeStyle =
-            idx % 2 === 0
+          const isHot = idx === s.hotRoute && (s.enemies?.length ?? 0) > 0;
+          ctx.strokeStyle = isHot
+            ? `rgba(255,90,110,${0.42 * fade})`
+            : idx % 2 === 0
               ? `rgba(255,230,180,${0.18 * fade})`
               : `rgba(140,210,255,${0.16 * fade})`;
-          ctx.lineWidth = 30;
+          ctx.lineWidth = isHot ? 36 : 30;
           ctx.stroke();
-          ctx.strokeStyle = `rgba(100,190,230,${0.12 * fade})`;
-          ctx.lineWidth = 14;
+          ctx.strokeStyle = isHot
+            ? `rgba(255,160,80,${0.28 * fade})`
+            : `rgba(100,190,230,${0.12 * fade})`;
+          ctx.lineWidth = isHot ? 18 : 14;
           ctx.stroke();
         }
       });
+
+      // 狐緣：鄰格有連攜的塔之間畫淡粉連線
+      {
+        const book = towerBookRef.current;
+        const list = s.towers.filter((tw) => !tw.stake && !tw.sanctuary);
+        ctx.save();
+        ctx.lineWidth = 2;
+        for (let i = 0; i < list.length; i++) {
+          for (let j = i + 1; j < list.length; j++) {
+            const a = list[i], b = list[j];
+            if (Math.max(Math.abs(a.gx - b.gx), Math.abs(a.gy - b.gy)) > 1) continue;
+            const sa = (a as { special?: string }).special || book[a.def]?.special;
+            const sb = (b as { special?: string }).special || book[b.def]?.special;
+            const pair = [sa, sb].sort().join("+");
+            let col: string | null = null;
+            if ((sa === "slow" && sb === "burn") || (sa === "burn" && sb === "slow") ||
+                (sa === "slow" && sb === "ultimate") || (sa === "ultimate" && sb === "slow"))
+              col = "rgba(120,200,255,0.45)";
+            else if ((sa === "chain" && sb === "pierce") || (sa === "pierce" && sb === "chain"))
+              col = "rgba(140,240,255,0.5)";
+            else if ((sa === "root" && sb === "execute") || (sa === "execute" && sb === "root"))
+              col = "rgba(255,180,220,0.5)";
+            if (!col) continue;
+            ctx.strokeStyle = col;
+            ctx.beginPath();
+            ctx.moveTo(a.x, a.y);
+            ctx.lineTo(b.x, b.y);
+            ctx.stroke();
+          }
+        }
+        ctx.restore();
+      }
+
+      // 戰線壓力數值（中段）
+      {
+        const pressure = (s as { routePressure?: number[] }).routePressure || [];
+        ctx.save();
+        ctx.font = "600 11px system-ui,sans-serif";
+        ctx.textAlign = "center";
+        routes.forEach((live, idx) => {
+          if (!live.pts.length || !pressure[idx]) return;
+          const mid = live.pts[Math.floor(live.pts.length * 0.55)] || live.pts[0];
+          const isHot = idx === s.hotRoute;
+          const val = pressure[idx];
+          ctx.fillStyle = isHot ? "rgba(255,120,120,0.95)" : "rgba(180,220,255,0.75)";
+          ctx.fillText(isHot ? `⚠ 壓力 ${val.toFixed(0)}` : `壓力 ${val.toFixed(0)}`, mid.x, mid.y - 10);
+        });
+        ctx.restore();
+      }
 
       // 少量氣泡（勿過密）
       ctx.fillStyle = "rgba(180,230,255,0.2)";
@@ -2438,7 +2973,7 @@ export function FoxTD() {
           ctx.fillText("聖地", 0, -6);
           ctx.font = "10px sans-serif";
           ctx.fillStyle = "#9ad7ff";
-          ctx.fillText(`主砲 Lv.${tw.hqCoreLv ?? 1}`, 0, 10);
+          ctx.fillText(`火${tw.hqFireLv ?? 0}/固${tw.hqFortifyLv ?? 0}`, 0, 10);
           const prog = hqProgRef.current;
           ctx.fillText(prog.path ? HQ_PATH_META[prog.path].name : "未選路線", 0, 22);
           // 射程環
@@ -2837,7 +3372,28 @@ export function FoxTD() {
         drag.moved = Math.hypot(sc.x - drag.sx, sc.y - drag.sy) > 4;
         return;
       }
-      sim.current.pointer = { ...local(ev), down: sim.current.pointer.down };
+      const world = local(ev);
+      sim.current.pointer = { ...world, down: sim.current.pointer.down };
+      // 擴張預覽：游標移到最新接口時提示可否放置
+      if (tileOfferRef.current && pickTemplateRef.current && phaseRef.current === "play") {
+        const tid = pickTemplateRef.current;
+        const gx = Math.floor(world.x / CELL);
+        const gy = Math.floor(world.y / CELL);
+        const tc = Math.floor(gx / TILE);
+        const tr = Math.floor(gy / TILE);
+        const all = validPlacements(boardRef.current, tid);
+        const hit = all.find((v) => v.tc === tc && v.tr === tr && v.rot === pickRotRef.current)
+          || all.find((v) => v.tc === tc && v.tr === tr);
+        if (hit) {
+          if (hit.rot !== pickRotRef.current) {
+            pickRotRef.current = hit.rot;
+            setPickRot(hit.rot);
+          }
+          setHover(`接口 (${tc},${tr}) 可接「${TEMPLATE_BY_ID[tid]?.name || tid}」· 點擊放置`);
+        } else if (frontierSlots(boardRef.current).some((f) => f.tc === tc && f.tr === tr)) {
+          setHover(`接口 (${tc},${tr}) 與目前圖塊／旋轉無法銜接 · 按旋轉或換一塊`);
+        }
+      }
     };
     const onUp = () => {
       sim.current.drag.on = false;
@@ -3052,8 +3608,9 @@ export function FoxTD() {
         targetMode: "auto",
         skills: [],
         skillShots: 0,
+        special: base.special,
       });
-      setHover(bonus > 0 ? `已放置 ${def.name} · 高地射程 +${bonus}` : `已放置 ${def.name}`);
+      setHover(bonus > 0 ? `已放置 ${base.name} · 高地射程 +${bonus}` : `已放置 ${base.name}`);
     };
 
     const onWheel = (ev: WheelEvent) => {
@@ -3242,6 +3799,10 @@ export function FoxTD() {
     setSel(null);
     selRef.current = null;
     phaseRef.current = "play";
+    lastStandRef.current = false;
+    comboRef.current = { n: 0, t: 0, best: 0 };
+    tideRef.current = null;
+    freeEscortRef.current = 0;
     setPhase("play");
     setTileOffer(null);
     tileOfferRef.current = null;
@@ -3311,8 +3872,13 @@ export function FoxTD() {
     pausedRef.current = false;
     const commit = (canvasRef.current as HTMLCanvasElement & { __commit?: (n: Set<string>) => boolean }).__commit;
     commit?.(new Set(mapRef.current));
-    const c = canvasRef.current as HTMLCanvasElement & { __begin?: () => void };
-    c.__begin?.();
+    // 開局備戰：先放塔，不自動出怪；按「開始第 1 波」才开战
+    sim.current.wave = 0;
+    sim.current.queue = [];
+    sim.current.enemies = [];
+    sim.current.between = 0;
+    setWave(0);
+    setHover("備戰中 · 先放置狐仙／路障，再按「開始第 1 波」出怪");
   }
 
   function selectLevel(id: string, mode: "expand" | "layout") {
@@ -3515,7 +4081,14 @@ export function FoxTD() {
 
   function callWave() {
     const c = canvasRef.current as HTMLCanvasElement & { __begin?: () => void };
-    if (sim.current.enemies.length === 0 && sim.current.queue.length === 0 && sim.current.wave > 0 && (endless || sim.current.wave < (waves?.length || MAX_WAVE))) {
+    const s = sim.current;
+    // 備戰（wave=0）：直接開第 1 波，無提前金
+    if (s.wave === 0 && s.enemies.length === 0 && s.queue.length === 0) {
+      c.__begin?.();
+      setHover("第 1 波開始");
+      return;
+    }
+    if (s.enemies.length === 0 && s.queue.length === 0 && s.wave > 0 && (endless || s.wave < (waves?.length || MAX_WAVE))) {
       goldRef.current += 25;
       setGold(goldRef.current);
       setHover("提前出波 +25 金");
@@ -3562,7 +4135,18 @@ export function FoxTD() {
           if (e.type === "rangeAdd") tw.range += e.value;
         }
       }
-      setHover(`習得「${skillLabelShort(skillId)}」`);
+      {
+        const def = SKILL_BY_ID[skillId];
+        const pn = def ? SKILL_PATH_META[def.path].name : "";
+        const paths = [...ownedSkillPaths(tw.skills)];
+        const lock =
+          paths.length >= 2
+            ? ` · 雙修 ${paths.map((p) => SKILL_PATH_META[p].name).join("、")}（第三鎖死）`
+            : paths.length === 1
+              ? ` · 已開「${SKILL_PATH_META[paths[0]].name}」`
+              : "";
+        setHover(`習得「${skillLabelShort(skillId)}」[${pn}]${lock}`);
+      }
     }
     const next = skillOfferQueueRef.current.shift() || null;
     setSkillOffer(next);
@@ -3589,6 +4173,16 @@ export function FoxTD() {
     if (kind === "dmg") tw.damage *= 1.22;
     else tw.cooldown = Math.max(0.18, tw.cooldown * 0.82);
     tw.level += 1;
+    // 關鍵等級小偏科（參考 KR 中段直線強化）：延續玩家選的傷／速方向
+    if (tw.level === 5 || tw.level === 10 || tw.level === 15) {
+      if (kind === "dmg") {
+        tw.damage *= 1.1;
+        tw.range += 8;
+      } else {
+        tw.cooldown = Math.max(0.16, tw.cooldown * 0.9);
+        tw.range += 4;
+      }
+    }
     // 升級強化耐久：最大生命 +18% 並回一部分血
     const before = tw.maxHp;
     tw.maxHp = Math.round(tw.maxHp * 1.18 + 12);
@@ -3675,8 +4269,8 @@ export function FoxTD() {
       recoil: 0,
       atkT: 0,
       atkDur: 0,
-      hp: 800,
-      maxHp: 800,
+      hp: stats.maxHp,
+      maxHp: stats.maxHp,
       shake: 0,
       stake: false,
       gx,
@@ -3689,6 +4283,8 @@ export function FoxTD() {
       skillShots: 0,
       sanctuary: true,
       hqCoreLv: 1,
+      hqFireLv: 0,
+      hqFortifyLv: 0,
       escortCd: 3,
     });
     hqProgRef.current = defaultHqProgress();
@@ -3728,7 +4324,7 @@ export function FoxTD() {
   }
 
 
-  function upgradeSanctuaryCore() {
+  function upgradeSanctuaryCore(branch: "fire" | "fortify") {
     const idx = selRef.current ?? sel;
     if (idx === null) return;
     const tw = sim.current.towers[idx];
@@ -3736,7 +4332,7 @@ export function FoxTD() {
     const lv = tw.hqCoreLv ?? 1;
     const cost = coreUpgradeCost(lv);
     if (goldRef.current < cost) {
-      setHover(`金幣不足（主砲升級需要 ${cost}）`);
+      setHover(`金幣不足（需要 ${cost}）`);
       return;
     }
     goldRef.current -= cost;
@@ -3744,18 +4340,25 @@ export function FoxTD() {
     tw.hqCoreLv = lv + 1;
     tw.level = tw.hqCoreLv;
     tw.spent = (tw.spent || 0) + cost;
+    if (branch === "fire") tw.hqFireLv = (tw.hqFireLv ?? 0) + 1;
+    else tw.hqFortifyLv = (tw.hqFortifyLv ?? 0) + 1;
     const st = sanctuaryStats(tw);
     tw.damage = st.damage;
     tw.range = st.range;
     tw.cooldown = st.cooldown;
-    tw.maxHp = Math.round(tw.maxHp * 1.1);
-    tw.hp = Math.min(tw.maxHp, tw.hp + 30);
-    setHover(`聖地主砲 → Lv.${tw.hqCoreLv}（−${cost}）· 主線仍以護衛路線為核心`);
+    const prevMax = tw.maxHp;
+    tw.maxHp = st.maxHp;
+    if (branch === "fortify") {
+      tw.hp = Math.min(tw.maxHp, tw.hp + Math.max(50, tw.maxHp - prevMax));
+    } else {
+      tw.hp = Math.min(tw.maxHp, tw.hp + Math.max(20, Math.floor((tw.maxHp - prevMax) * 0.5)));
+    }
+    const tag = branch === "fire" ? "火力" : "加固";
+    setHover(
+      `聖地${tag} → 總Lv.${tw.hqCoreLv}（火${tw.hqFireLv ?? 0}/固${tw.hqFortifyLv ?? 0}）· ${Math.round(tw.hp)}/${tw.maxHp} · 漏抗 ${Math.round(st.leakResist * 100)}%（−${cost}）`,
+    );
     setSel(idx);
   }
-
-
-
 
   function compositionForSquad(p: HqProgress): EscortKind[] {
     const kinds: EscortKind[] = [];
@@ -3782,19 +4385,21 @@ export function FoxTD() {
     if (!force) {
       if ((hq.escortCd ?? 0) > 0) return;
     }
-    if (goldRef.current < HQ_ESCORT_COST) {
+    if (goldRef.current < HQ_ESCORT_COST && freeEscortRef.current <= 0) {
       if (force) setHover(`護衛動員需要 ${HQ_ESCORT_COST} 金`);
       return;
     }
     // 威脅：離聖地最近的怪
+    // 只打「最靠近聖地」那一條線的怪
     let threat: Enemy | null = null;
-    let bestD = 1e15;
+    let bestScore = -1e15;
     for (const e of s.enemies) {
       if (e.hp <= 0) continue;
       const pos = posAt(e.dist, e.route);
-      const d = Math.hypot(pos.x - hq.x, pos.y - hq.y);
-      if (d < bestD) {
-        bestD = d;
+      const distHq = Math.hypot(pos.x - hq.x, pos.y - hq.y);
+      const score = e.dist * 2 - distHq * 0.15;
+      if (score > bestScore) {
+        bestScore = score;
         threat = e;
       }
     }
@@ -3807,9 +4412,14 @@ export function FoxTD() {
     if (!live) return;
     // 在威脅與出口之間偏本陣：取 threat.dist 再往出口方向一點
     const baseDist = Math.min(live.len - 20, Math.max(40, threat.dist + 40));
-    goldRef.current -= HQ_ESCORT_COST;
-    setGold(goldRef.current);
-    hq.escortCd = p.deployCd;
+    if (freeEscortRef.current > 0) {
+      freeEscortRef.current -= 1;
+      setHover("動用免費護衛名額");
+    } else {
+      goldRef.current -= HQ_ESCORT_COST;
+      setGold(goldRef.current);
+    }
+    hq.escortCd = p.deployCd * (tideRef.current?.id === "sanctuary_roar" ? 0.7 : 1);
     const kinds = compositionForSquad(p);
     kinds.forEach((kind, i) => {
       const dist = Math.min(live.len - 10, baseDist + i * 18);
@@ -3958,28 +4568,87 @@ export function FoxTD() {
           <p className="text-xs tracking-[0.28em] text-[#8ec8ee]">UNDERWATER WARD</p>
           <h1 className="font-['Cormorant_Garamond'] text-4xl leading-none text-[#ffe7f1]">狐仙塔防</h1>
         </div>
-        <p className="hidden text-sm text-[#9ec4de] sm:block">滾輪縮放 · 拖曳平移 · [1-0-=]選塔 · [D/F]升級 · [S]賣出 · [Esc]取消 · [P]暫停</p>
+        <p className="hidden text-sm text-[#9ec4de] sm:block">
+          滾輪縮放 · [D/F]升級 · 狐緣：霜+火／鏈+貫／縛+斬（鄰格）· 紅線=高壓戰線
+        </p>
       </header>
       <div className="td-layout">
         <div className="stage" ref={wrapRef}>
           <canvas ref={canvasRef} width={VIEWW} height={VIEWH} />
           <div className="hud-float">
-            <div className="chip">生命 {lives}</div>
+            <div className="chip" title="聖地建築耐久（漏怪依怪物剩餘生命扣血）">
+              {(() => {
+                const hq = sim.current.towers.find((t) => t.sanctuary);
+                if (!hq) return `結界 ${lives}`;
+                const pct = hq.maxHp > 0 ? hq.hp / hq.maxHp : 0;
+                const tag = pct <= 0.28 && pct > 0 ? " · 背水" : "";
+                return `聖地 ${Math.round(hq.hp)}/${hq.maxHp}${tag}`;
+              })()}
+            </div>
             <div className="chip">金幣 {gold}</div>
             <div className="chip">
-              波次 {wave}
-              {endless ? " · 無盡" : `/${waves?.length || MAX_WAVE}`}
-              {speed === 10 ? " · 10倍" : ""}
+              {wave === 0 && phase === "play"
+                ? "備戰中 · 放塔後開戰"
+                : `波次 ${wave}${endless ? " · 無盡" : `/${waves?.length || MAX_WAVE}`}`}
+              {wave > 0 && speed === 10 ? " · 10倍" : ""}
+              {wave > 0 && waveQuirk(wave) ? ` · ${waveQuirk(wave)!.name}` : ""}
             </div>
+            {comboRef.current.n >= 3 && phase === "play" && (
+              <div className="chip" style={{ borderColor: "#ff9ecd", color: "#ffd0ea" }}>
+                連殺 ×{comboRef.current.n}
+              </div>
+            )}
+            {tideRef.current && phase === "play" && (
+              <div className="chip" style={{ borderColor: "#7ec8ff", color: "#c5e8ff" }} title={tideRef.current.desc}>
+                潮汐 · {tideRef.current.name}
+              </div>
+            )}
+            {freeEscortRef.current > 0 && (
+              <div className="chip" style={{ borderColor: "#ffe08a", color: "#ffe08a" }}>
+                免費護衛 ×{freeEscortRef.current}
+              </div>
+            )}
           </div>
+          {phase === "play" && bossBannerUi && (
+            <div
+              className="overlay"
+              style={{
+                background: "rgba(8,4,16,0.55)",
+                pointerEvents: "none",
+                justifyContent: "flex-start",
+                paddingTop: "18%",
+              }}
+            >
+              <h2 style={{ color: "#ffd27a", textShadow: "0 0 24px #ff6a80" }}>
+                {bossBannerUi.name}
+              </h2>
+              <p className="text-sm text-[#ffc8d8]">Boss 來襲 · 戰線壓力將集中</p>
+              <p className="mt-1 text-xs text-[#c5dff2]">
+                招式：{bossBannerUi.skills.join(" · ")}
+              </p>
+            </div>
+          )}
           {phase === "play" && skillOffer && (
             <div className="overlay" style={{ maxHeight: "90vh", overflowY: "auto" }}>
-              <h2>塔覺醒 · 三選一</h2>
-              <p className="mb-2 max-w-md text-sm text-[#c5dff2]">
+              <h2>塔覺醒 · 路徑三選一</h2>
+              <p className="mb-1 max-w-md text-sm text-[#c5dff2]">
                 {sim.current.towers[skillOffer.towerIndex]
                   ? (towerBook[sim.current.towers[skillOffer.towerIndex].def]?.name || "塔")
                   : "塔"}{" "}
-                升至 Lv.{skillOffer.level} — 選擇一項技能（效果立即生效）
+                升至 Lv.{skillOffer.level} — 選一項（立即生效）
+              </p>
+              <p className="mb-2 max-w-md text-[11px] text-[#9ec4de]">
+                {(() => {
+                  const tw = sim.current.towers[skillOffer.towerIndex];
+                  const paths = [...ownedSkillPaths(tw?.skills)];
+                  if (!paths.length) return "路徑：锋锐／潮控／裂域 — 最多修兩條，第三條永久鎖死";
+                  if (paths.length === 1) {
+                    const m = SKILL_PATH_META[paths[0]];
+                    return `已開「${m.name}」· 再開一條後，其餘路徑鎖死`;
+                  }
+                  const names = paths.map((p) => SKILL_PATH_META[p].name).join("、");
+                  return `雙修「${names}」· 第三路徑已鎖死（本塔）`;
+                })()}
               </p>
               <div className="flex max-w-lg flex-col gap-2">
                 {skillOffer.choices.map((c) => (
@@ -3989,7 +4658,13 @@ export function FoxTD() {
                     style={{ borderColor: c.color, textAlign: "left" }}
                     onClick={() => pickSkillChoice(c.id)}
                   >
-                    <b style={{ color: c.color }}>{c.name}</b>
+                    <b style={{ color: c.color }}>
+                      {c.name}
+                      <span className="ml-2 text-[10px] font-normal" style={{ color: SKILL_PATH_META[c.path].color }}>
+                        [{SKILL_PATH_META[c.path].name}]
+                      </span>
+                    </b>
+                    <span className="mt-0.5 block text-[10px] font-normal text-[#8eb6d0]">{SKILL_PATH_META[c.path].tag}</span>
                     <span className="mt-0.5 block text-xs font-normal text-[#c5dff2]">{c.desc}</span>
                     <span className="text-[10px] text-[#8eb6d4]">
                       {c.tier === "high" ? "高階" : c.tier === "mid" ? "中階" : "低階"}
@@ -4295,8 +4970,13 @@ export function FoxTD() {
             >
               暫停
             </button>
-            <button className="btn ghost flex-1" onClick={callWave} disabled={phase !== "play" || paused}>
-              下一波
+            <button
+              className="btn flex-1"
+              onClick={callWave}
+              disabled={phase !== "play" || paused || (wave > 0 && (sim.current.enemies.length > 0 || sim.current.queue.length > 0))}
+              title={wave === 0 ? "佈署完成後開始第 1 波" : "清空戰場後可提前召下一波（+25金）"}
+            >
+              {wave === 0 ? "開始第 1 波" : "下一波"}
             </button>
             <button
               className="btn ghost flex-1"
@@ -4547,25 +5227,40 @@ export function FoxTD() {
             <div className="mb-3 rounded-xl border border-[#ffe08a66] bg-[#1a1420cc] p-2 text-xs text-[#e7f6ff]">
               <b className="text-[#ffe08a]">聖地 · 本陣與護衛</b>
               <div className="mt-1 text-[#c5dff2]">
-                主砲 Lv.{selected.hqCoreLv ?? 1} · 傷 {selected.damage.toFixed(0)} · 護衛CD{" "}
-                {Math.max(0, selected.escortCd ?? 0).toFixed(1)}s · 場上 {sim.current.escorts.length}
+                總Lv.{selected.hqCoreLv ?? 1} · 火{selected.hqFireLv ?? 0}/固{selected.hqFortifyLv ?? 0} · 傷{" "}
+                {selected.damage.toFixed(0)} · 血 {Math.round(selected.hp)}/{selected.maxHp}
               </div>
               <div className="mt-1 text-[#9ec4de]">
-                編制 {hqProgRef.current.squad} · 間隔 {hqProgRef.current.deployCd.toFixed(0)}s · 動員 {HQ_ESCORT_COST} 金／次（自動週期）
+                漏抗 {Math.round(sanctuaryStats(selected).leakResist * 100)}% · 護衛CD{" "}
+                {Math.max(0, selected.escortCd ?? 0).toFixed(1)}s · 場上 {sim.current.escorts.length} · 編制{" "}
+                {hqProgRef.current.squad}
               </div>
               <div className="mt-2 flex gap-1">
                 <button className="btn ghost" style={{ flex: 1, fontSize: 11 }} onClick={() => deployEscortSquad(true)}>
                   立即動員
                 </button>
+              </div>
+              <div className="mt-1 flex gap-1">
                 <button
                   className="btn"
                   style={{ flex: 1, fontSize: 11 }}
                   disabled={gold < coreUpgradeCost(selected.hqCoreLv ?? 1)}
-                  onClick={upgradeSanctuaryCore}
+                  onClick={() => upgradeSanctuaryCore("fire")}
+                  title="強化主砲傷害、射速與射程"
                 >
-                  主砲 {coreUpgradeCost(selected.hqCoreLv ?? 1)}
+                  火力 {coreUpgradeCost(selected.hqCoreLv ?? 1)}
+                </button>
+                <button
+                  className="btn ghost"
+                  style={{ flex: 1, fontSize: 11, borderColor: "#9dffc0" }}
+                  disabled={gold < coreUpgradeCost(selected.hqCoreLv ?? 1)}
+                  onClick={() => upgradeSanctuaryCore("fortify")}
+                  title="強化建築血量並降低漏怪傷害"
+                >
+                  加固 {coreUpgradeCost(selected.hqCoreLv ?? 1)}
                 </button>
               </div>
+              <p className="mt-1 text-[10px] text-[#9ec4de]">參考 KR：每次二選一偏科，費用隨總等級上升</p>
               {!hqProgRef.current.path ? (
                 <div className="mt-2">
                   <p className="text-[10px] text-[#ffd27a]">鎖定本場唯一路線（三選一，不可更改）</p>

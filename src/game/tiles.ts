@@ -435,6 +435,7 @@ export function canPlaceTile(board: TileBoard, tc: number, tr: number, templateI
   const { ports } = rotatedTemplate(tpl, rot);
   let adjacent = false;
   let roadLinked = false;
+  let neighborOffersRoad = false;
   for (const edge of ["N", "E", "S", "W"] as Edge[]) {
     const nb = neighborSlot(tc, tr, edge);
     if (!nb || !slotOccupied(board, nb.tc, nb.tr)) continue;
@@ -445,9 +446,13 @@ export function canPlaceTile(board: TileBoard, tc: number, tr: number, templateI
     const nPorts = rotatedTemplate(nTpl, neighbor.rot).ports;
     const need = opposite(edge);
     if (!edgesRoadCompatible(ports, edge, nPorts, need)) return false;
+    if (edgeHasRoad(nPorts, need)) neighborOffersRoad = true;
     if (edgeHasRoad(ports, edge) && edgeHasRoad(nPorts, need)) roadLinked = true;
   }
-  return adjacent && roadLinked;
+  // 有道路接口必須接上路；純牆鄰接則允許（壁對壁）
+  if (!adjacent) return false;
+  if (neighborOffersRoad) return roadLinked;
+  return true;
 }
 
 export function placeTile(board: TileBoard, tc: number, tr: number, templateId: string, rot: Rot): TileBoard | null {
