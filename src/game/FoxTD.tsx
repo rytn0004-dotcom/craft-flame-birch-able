@@ -35,6 +35,7 @@ import {
 import {
   buildBlocked,
   buildHeights,
+  bestRotForSlot,
   canPlaceTile,
   collectGates,
   EXPAND_EVERY,
@@ -51,6 +52,7 @@ import {
   seedBoard,
   setTileRngSeed,
   shouldOfferTiles,
+  suggestPlacement,
   TEMPLATE_BY_ID,
   TILE,
   TILE_COLS,
@@ -3682,10 +3684,17 @@ export function FoxTD() {
   function selectTileTemplate(id: string) {
     setPickTemplate(id);
     pickTemplateRef.current = id;
-    setPickRot(0);
-    pickRotRef.current = 0;
+    const sug = suggestPlacement(boardRef.current, id);
+    const rot = (sug?.rot ?? 0) as Rot;
+    setPickRot(rot);
+    pickRotRef.current = rot;
     const n = validPlacements(boardRef.current, id).length;
-    setHover(n ? `已選「${TEMPLATE_BY_ID[id]?.name || id}」· 可放 ${n} 處 · 點地圖高亮格` : "此塊無法銜接，請換一塊或旋轉");
+    setHover(
+      n
+        ? `已選「${TEMPLATE_BY_ID[id]?.name || id}」· 可放 ${n} 處` +
+          (sug ? ` · 建議接口 (${sug.tc},${sug.tr}) 轉 ${rot * 90}°` : "")
+        : "此塊無法銜接，請換一塊或旋轉",
+    );
   }
 
   function rotatePickTile() {
@@ -3704,12 +3713,12 @@ export function FoxTD() {
     }
     let rot = pickRotRef.current;
     if (!canPlaceTile(boardRef.current, tc, tr, id, rot)) {
-      const hit = validPlacements(boardRef.current, id).find((p) => p.tc === tc && p.tr === tr);
-      if (!hit) {
+      const best = bestRotForSlot(boardRef.current, tc, tr, id);
+      if (best == null) {
         setHover("此格無法銜接道路");
         return;
       }
-      rot = hit.rot;
+      rot = best;
       pickRotRef.current = rot;
       setPickRot(rot);
     }

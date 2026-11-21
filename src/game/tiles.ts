@@ -54,14 +54,28 @@ function rotateBlocked(src: boolean[][], rot: Rot): boolean[][] {
   return out;
 }
 
+/** 順時針 90°×rot；索引與 blocked 旋轉一致 */
 function rotatePort(p: Port, rot: Rot): Port {
   if (rot === 0) return { ...p };
-  let { edge, i } = p;
+  let edge = p.edge;
+  let i = p.i;
   for (let k = 0; k < rot; k++) {
-    if (edge === "N") edge = "E";
-    else if (edge === "E") { edge = "S"; i = TILE - 1 - i; }
-    else if (edge === "S") { edge = "W"; i = TILE - 1 - i; }
-    else edge = "N";
+    // (c,r) on edge → CW: (TILE-1-r, c)
+    if (edge === "N") {
+      // (i,0) → (TILE-1, i) = E@i
+      edge = "E";
+    } else if (edge === "E") {
+      // (TILE-1,i) → (TILE-1-i, TILE-1) = S@(TILE-1-i)
+      edge = "S";
+      i = TILE - 1 - i;
+    } else if (edge === "S") {
+      // (i,TILE-1) → (0, i) = W@i
+      edge = "W";
+    } else {
+      // (0,i) → (TILE-1-i, 0) = N@(TILE-1-i)
+      edge = "N";
+      i = TILE - 1 - i;
+    }
   }
   return { edge, i, kind: p.kind };
 }
@@ -444,32 +458,130 @@ export function frontierSlots(board: TileBoard): { tc: number; tr: number }[] {
   return out;
 }
 
-export function canPlaceTile(board: TileBoard, tc: number, tr: number, templateId: string, rot: Rot): boolean {
-  if (tc < 0 || tr < 0 || tc >= TILE_COLS || tr >= TILE_ROWS) return false;
-  if (slotOccupied(board, tc, tr)) return false;
+export type PlacementScore = {
+  ok: boolean;
+  /** 總分，越高越好 */
+  score: number;
+  roadLinks: number;
+  /** 對齊的道路格子數（端口 i 重疊） */
+  portOverlap: number;
+  openRoadEdges: number;
+  buriedEntrance: boolean;
+};
+
+/**
+ * 評分放置：道路銜接、端口對齊、可繼續擴張、入口不要埋進已佔槽。
+ * ok=false 時不可放。
+ */
+export function scorePlacement(
+  board: TileBoard,
+  tc: number,
+  tr: number,
+  templateId: string,
+  rot: Rot,
+): PlacementScore {
+  const bad: PlacementScore = { ok: false, score: -1e9, roadLinks: 0, portOverlap: 0, openRoadEdges: 0, buriedEntrance: false };
+  if (tc < 0 || tr < 0 || tc >= TILE_COLS || tr >= TILE_ROWS) return bad;
+  if (slotOccupied(board, tc, tr)) return bad;
   const tpl = TEMPLATE_BY_ID[templateId];
-  if (!tpl) return false;
+  if (!tpl) return bad;
   const { ports } = rotatedTemplate(tpl, rot);
+
   let adjacent = false;
   let roadLinked = false;
   let neighborOffersRoad = false;
+  let roadLinks = 0;
+  let portOverlap = 0;
+  let openRoadEdges = 0;
+  let buriedEntrance = false;
+
   for (const edge of ["N", "E", "S", "W"] as Edge[]) {
     const nb = neighborSlot(tc, tr, edge);
-    if (!nb || !slotOccupied(board, nb.tc, nb.tr)) continue;
+    const myRoad = edgeHasRoad(ports, edge);
+    const myIsEntrance = ports.some((p) => p.edge === edge && p.kind === "entrance");
+
+    if (!nb || !slotOccupied(board, nb.tc, nb.tr)) {
+      // 朝外空邊：保留道路接口有利後續擴張
+      if (myRoad) openRoadEdges += 1;
+      continue;
+    }
     adjacent = true;
     const neighbor = board.placed.find((p) => p.tc === nb.tc && p.tr === nb.tr)!;
     const nTpl = TEMPLATE_BY_ID[neighbor.templateId];
-    if (!nTpl) return false;
+    if (!nTpl) return bad;
     const nPorts = rotatedTemplate(nTpl, neighbor.rot).ports;
     const need = opposite(edge);
-    if (!edgesRoadCompatible(ports, edge, nPorts, need)) return false;
-    if (edgeHasRoad(nPorts, need)) neighborOffersRoad = true;
-    if (edgeHasRoad(ports, edge) && edgeHasRoad(nPorts, need)) roadLinked = true;
+    if (!edgesRoadCompatible(ports, edge, nPorts, need)) return bad;
+
+    const theirRoad = edgeHasRoad(nPorts, need);
+    if (theirRoad) neighborOffersRoad = true;
+    if (myRoad && theirRoad) {
+      roadLinked = true;
+      roadLinks += 1;
+      // 端口索引重疊數
+      const mine = new Set(ports.filter((p) => p.edge === edge).map((p) => p.i));
+      const theirs = new Set(nPorts.filter((p) => p.edge === need).map((p) => p.i));
+      for (const i of mine) if (theirs.has(i)) portOverlap += 1;
+    }
+    // 入口貼著已佔用槽 = 假入口，重罰
+    if (myIsEntrance) buriedEntrance = true;
   }
-  // 有道路接口必須接上路；純牆鄰接則允許（壁對壁）
-  if (!adjacent) return false;
-  if (neighborOffersRoad) return roadLinked;
-  return true;
+
+  if (!adjacent) return bad;
+  if (neighborOffersRoad && !roadLinked) return bad;
+
+  // 分數：優先多路銜接與端口對齊，其次外向接口，懲罰埋入口
+  let score =
+    roadLinks * 40 +
+    portOverlap * 12 +
+    openRoadEdges * 8 +
+    (templateId === "spawn" ? (buriedEntrance ? -80 : 25) : 0) +
+    (templateId === "cross" || templateId === "tee" ? 6 : 0) +
+    (templateId === "open" ? 3 : 0);
+  if (buriedEntrance) score -= 50;
+  // 略偏好靠近地圖中心外擴的「前線」：離 HQ 越遠略加分（戰線延伸）
+  const hq = board.placed.find((p) => p.templateId === "hq");
+  if (hq) {
+    const dist = Math.abs(tc - hq.tc) + Math.abs(tr - hq.tr);
+    score += Math.min(12, dist * 2);
+  }
+
+  return { ok: true, score, roadLinks, portOverlap, openRoadEdges, buriedEntrance };
+}
+
+export function canPlaceTile(board: TileBoard, tc: number, tr: number, templateId: string, rot: Rot): boolean {
+  return scorePlacement(board, tc, tr, templateId, rot).ok;
+}
+
+/** 該槽最佳旋轉（同分取較小 rot） */
+export function bestRotForSlot(board: TileBoard, tc: number, tr: number, templateId: string): Rot | null {
+  let best: Rot | null = null;
+  let bestScore = -1e9;
+  for (const rot of [0, 1, 2, 3] as Rot[]) {
+    const s = scorePlacement(board, tc, tr, templateId, rot);
+    if (!s.ok) continue;
+    if (s.score > bestScore) {
+      bestScore = s.score;
+      best = rot;
+    }
+  }
+  return best;
+}
+
+/** 整板最佳放置點（模板） */
+export function suggestPlacement(
+  board: TileBoard,
+  templateId: string,
+): { tc: number; tr: number; rot: Rot; score: number } | null {
+  let best: { tc: number; tr: number; rot: Rot; score: number } | null = null;
+  for (const slot of frontierSlots(board)) {
+    for (const rot of [0, 1, 2, 3] as Rot[]) {
+      const s = scorePlacement(board, slot.tc, slot.tr, templateId, rot);
+      if (!s.ok) continue;
+      if (!best || s.score > best.score) best = { tc: slot.tc, tr: slot.tr, rot, score: s.score };
+    }
+  }
+  return best;
 }
 
 export function placeTile(board: TileBoard, tc: number, tr: number, templateId: string, rot: Rot): TileBoard | null {
@@ -520,14 +632,12 @@ export function bootstrapFrontiers(board: TileBoard, bias?: TileOfferBias): Tile
     for (const edge of CARDINAL) {
       const slot = neighborSlot(hq.tc, hq.tr, edge);
       if (!slot || slotOccupied(next, slot.tc, slot.tr)) continue;
-      for (const rot of [0, 1, 2, 3] as Rot[]) {
-        if (!canPlaceTile(next, slot.tc, slot.tr, "spawn", rot)) continue;
-        const placed = placeTile(next, slot.tc, slot.tr, "spawn", rot);
-        if (placed) {
-          next = placed;
-          hasFront = true;
-          break;
-        }
+      const rot = bestRotForSlot(next, slot.tc, slot.tr, "spawn");
+      if (rot == null) continue;
+      const placed = placeTile(next, slot.tc, slot.tr, "spawn", rot);
+      if (placed) {
+        next = placed;
+        hasFront = true;
       }
       if (hasFront) break;
     }
@@ -552,24 +662,37 @@ export function pickOfferTemplates(
   if (bias?.seed != null) setTileRngSeed(bias.seed);
   const chaos = Math.max(0, Math.min(1, bias?.chaos ?? 0.35));
   const weights = bias?.weights;
-  const placeable = board ? placeableTemplateIds(board) : [...OFFERABLE_IDS];
-  const pool = placeable.length ? placeable : [...OFFERABLE_IDS];
+  const pool = board ? placeableTemplateIds(board) : [...OFFERABLE_IDS];
+  if (!pool.length) return [];
+
+  const ranked = pool
+    .map((id) => {
+      const sug = board ? suggestPlacement(board, id) : null;
+      const fit = sug?.score ?? 0;
+      const w = weightOf(id, weights);
+      const jitter = (tileRandom() - 0.5) * chaos * 30;
+      return { id, rank: fit * 0.5 + w * 20 + jitter };
+    })
+    .sort((a, b) => b.rank - a.rank);
+
+  const family = (id: string) => {
+    if (id === "spawn") return "spawn";
+    if (id === "cross" || id === "tee" || id === "open") return "hub";
+    if (id === "corner" || id === "straight" || id === "bridge" || id === "choke") return "path";
+    return id;
+  };
   const out: string[] = [];
-  if (chaos < 0.99) {
-    const ranked = shuffleWith(pool).sort((a, b) => {
-      const jitter = (tileRandom() - 0.5) * chaos * 2;
-      return weightOf(b, weights) + jitter - weightOf(a, weights);
-    });
-    for (const id of ranked) {
-      if (out.length >= count) break;
-      if (!out.includes(id)) out.push(id);
-    }
+  const usedFam = new Set<string>();
+  for (const row of ranked) {
+    if (out.length >= count) break;
+    const fam = family(row.id);
+    if (usedFam.has(fam) && out.length < count - 1) continue;
+    out.push(row.id);
+    usedFam.add(fam);
   }
-  let guard = 0;
-  while (out.length < count && pool.length && guard++ < 32) {
-    const id = weightedPick(pool, weights);
-    if (id) out.push(id);
-    else break;
+  for (const row of ranked) {
+    if (out.length >= count) break;
+    if (!out.includes(row.id)) out.push(row.id);
   }
   return out.slice(0, count);
 }
@@ -618,14 +741,16 @@ export function shouldOfferTiles(wave: number, board: TileBoard): boolean {
   return frontierSlots(board).length > 0;
 }
 
-export function validPlacements(board: TileBoard, templateId: string): { tc: number; tr: number; rot: Rot }[] {
+export function validPlacements(board: TileBoard, templateId: string): { tc: number; tr: number; rot: Rot; score?: number }[] {
   const slots = frontierSlots(board);
-  const out: { tc: number; tr: number; rot: Rot }[] = [];
+  const out: { tc: number; tr: number; rot: Rot; score: number }[] = [];
   for (const s of slots) {
     for (const rot of [0, 1, 2, 3] as Rot[]) {
-      if (canPlaceTile(board, s.tc, s.tr, templateId, rot)) out.push({ tc: s.tc, tr: s.tr, rot });
+      const sc = scorePlacement(board, s.tc, s.tr, templateId, rot);
+      if (sc.ok) out.push({ tc: s.tc, tr: s.tr, rot, score: sc.score });
     }
   }
+  out.sort((a, b) => b.score - a.score);
   return out;
 }
 
