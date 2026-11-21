@@ -360,6 +360,7 @@ export function buildHeights(board: TileBoard): number[] {
     for (const h of hs) {
       const lc = h.c, lr = h.r;
       if (lc < 0 || lr < 0 || lc >= TILE || lr >= TILE) continue;
+      // 高地只在「非道路」格，避免路中央突起
       if (!blocked[lr][lc]) continue;
       const c = origin.c + lc, r = origin.r + lr;
       if (c >= 0 && r >= 0 && c < COLS && r < ROWS) heights[r * COLS + c] = h.h;
@@ -380,6 +381,19 @@ function neighborSlot(tc: number, tr: number, edge: Edge): { tc: number; tr: num
 
 export function collectGates(board: TileBoard): { entrances: Cell[]; exits: Cell[] } {
   const entrances: Cell[] = [], exits: Cell[] = [];
+  const seenE = new Set<string>(), seenX = new Set<string>();
+  const pushE = (c: number, r: number) => {
+    const k = c + "," + r;
+    if (seenE.has(k)) return;
+    seenE.add(k);
+    entrances.push({ c, r });
+  };
+  const pushX = (c: number, r: number) => {
+    const k = c + "," + r;
+    if (seenX.has(k)) return;
+    seenX.add(k);
+    exits.push({ c, r });
+  };
   for (const p of board.placed) {
     const tpl = TEMPLATE_BY_ID[p.templateId];
     if (!tpl) continue;
@@ -391,20 +405,23 @@ export function collectGates(board: TileBoard): { entrances: Cell[]; exits: Cell
       else if (port.edge === "S") { c += port.i; r += TILE - 1; }
       else if (port.edge === "W") { c += 0; r += port.i; }
       else { c += TILE - 1; r += port.i; }
-      if (port.kind === "entrance") entrances.push({ c, r });
-      if (port.kind === "exit") exits.push({ c, r });
+      // 入口僅在「朝向未佔用槽」的邊生效，避免內部假入口
+      if (port.kind === "entrance") {
+        const nb = neighborSlot(p.tc, p.tr, port.edge);
+        if (!nb || !slotOccupied(board, nb.tc, nb.tr)) pushE(c, r);
+      }
+      if (port.kind === "exit") pushX(c, r);
     }
     if (p.templateId === "hq") {
-      for (const dc of [9, 10]) for (const dr of [9, 10]) {
-        exits.push({ c: origin.c + dc, r: origin.r + dr });
-      }
+      for (const dc of [9, 10]) for (const dr of [9, 10]) pushX(origin.c + dc, origin.r + dr);
     }
   }
   if (!exits.length) {
     const hq = board.placed.find((x) => x.templateId === "hq");
     if (hq) {
       const origin = worldOrigin(hq.tc, hq.tr);
-      exits.push({ c: origin.c + 9, r: origin.r + 9 }, { c: origin.c + 10, r: origin.r + 10 });
+      pushX(origin.c + 9, origin.r + 9);
+      pushX(origin.c + 10, origin.r + 10);
     }
   }
   return { entrances, exits };
@@ -582,6 +599,19 @@ export const DEFAULT_TILE_BIAS: TileOfferBias = {
   chaos: 0.35,
   weights: { ...DEFAULT_WEIGHTS },
 };
+
+/** 放置後是否仍至少有一條入口→聖地可通 */
+export function boardHasPath(board: TileBoard): boolean {
+  const blocked = buildBlocked(board);
+  const { entrances, exits } = collectGates(board);
+  if (!entrances.length || !exits.length) return false;
+  // 輕量：只測第一個入口（完整檢查在 paths 側）
+  for (const e of entrances) {
+    // 延遲 import 迴圈：用 blocked 開通性粗判——格子本身可走
+    if (!blocked.has(e.c + "," + e.r)) return true;
+  }
+  return entrances.some((e) => !blocked.has(`${e.c},${e.r}`));
+}
 
 export function shouldOfferTiles(wave: number, board: TileBoard): boolean {
   if (wave <= 0 || wave % EXPAND_EVERY !== 0) return false;

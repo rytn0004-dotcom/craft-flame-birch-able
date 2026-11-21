@@ -3651,21 +3651,32 @@ export function FoxTD() {
   }, []);
 
 
-  function applyTileBoard(board: TileBoard) {
-    boardRef.current = board;
+  function applyTileBoard(board: TileBoard): boolean {
     const blocked = buildBlocked(board);
     const heights = buildHeights(board);
-    heightsRef.current = heights;
     const gates = collectGates(board);
+    const paths = pathsForGates(blocked, gates.entrances, gates.exits);
+    if (!paths || !paths.length) {
+      setHover("此拼接會切斷所有通往聖地的路，請換位置或圖塊");
+      return false;
+    }
+    boardRef.current = board;
+    heightsRef.current = heights;
     entrancesRef.current = gates.entrances;
     exitsRef.current = gates.exits;
     mapRef.current = blocked;
-    const paths = pathsForGates(blocked, gates.entrances, gates.exits);
-    if (paths) loadRoutes(paths);
+    loadRoutes(paths);
     sim.current.blocked = blocked;
     sim.current.heights = heights;
+    // 重投影場上單位到新路徑
+    for (const e of sim.current.enemies) {
+      const p = posAt(e.dist, e.route);
+      e.route = Math.min(e.route, Math.max(0, paths.length - 1));
+      e.dist = Math.min(routeLen(e.route) - 0.01, Math.max(0.01, projectDist(p.x, p.y, e.route)));
+    }
     const commit = (canvasRef.current as HTMLCanvasElement & { __commit?: (n: Set<string>) => boolean }).__commit;
     commit?.(new Set(blocked));
+    return true;
   }
 
   function selectTileTemplate(id: string) {
@@ -3707,18 +3718,20 @@ export function FoxTD() {
       setHover("放置失敗");
       return;
     }
-    applyTileBoard(next);
+    if (!applyTileBoard(next)) {
+      // 路徑被切斷：不關閉選單，允許改放
+      return;
+    }
     setTileOffer(null);
     tileOfferRef.current = null;
     setPickTemplate(null);
     pickTemplateRef.current = null;
     pausedRef.current = false;
     setPaused(false);
-    // 成功塑界：再凝一撮明潮砂
     mingSandRef.current += 1;
     setMingSand(mingSandRef.current);
     setHover(
-      `已拼接「${TEMPLATE_BY_ID[id]?.name || id}」· 入口 ${entrancesRef.current.length} · 明潮砂 +1（${mingSandRef.current}）`,
+      `已拼接「${TEMPLATE_BY_ID[id]?.name || id}」· 戰線 ${entrancesRef.current.length} · 明潮砂 +1（${mingSandRef.current}）`,
     );
   }
 
@@ -3813,20 +3826,14 @@ export function FoxTD() {
       let board = seedBoard();
       board = bootstrapFrontiers(board, runTileBias);
       boardRef.current = board;
-      const blocked = buildBlocked(board);
-      const heights = buildHeights(board);
-      heightsRef.current = heights;
-      const gates = collectGates(board);
-      entrancesRef.current = gates.entrances;
-      exitsRef.current = gates.exits;
-      mapRef.current = blocked;
-      const paths = pathsForGates(blocked, gates.entrances, gates.exits);
-      if (paths) loadRoutes(paths);
-      sim.current.blocked = blocked;
-      sim.current.heights = heights;
-      const fronts = paths?.length ?? 0;
+      if (!applyTileBoard(board)) {
+        // 極端：再強塞一裂口
+        board = bootstrapFrontiers(seedBoard(), { ...runTileBias, chaos: 0 });
+        applyTileBoard(board);
+      }
+      const fronts = entrancesRef.current.length;
       setActiveMap("潮汐擴張");
-      setHover(`聖地已展開 · 戰線 ${Math.max(fronts, gates.entrances.length)} 條（至少 1 條）`);
+      setHover(`聖地已展開 · 戰線 ${Math.max(fronts, 1)} 條 · 先佈署再按「開始第 1 波」`);
       spawnSanctuaryTower();
     } else {
       // 完整地圖：使用目前 loadLayout 已寫入的 mapRef／入口出口；若尚未載入則找 selectedLevelId
@@ -3847,18 +3854,8 @@ export function FoxTD() {
           setHover("所選地圖路線不通，改以潮汐擴張開局");
           let board = seedBoard();
           board = bootstrapFrontiers(board, runTileBias);
-          boardRef.current = board;
-          const blocked = buildBlocked(board);
-          const heights = buildHeights(board);
-          heightsRef.current = heights;
-          const gates = collectGates(board);
-          entrancesRef.current = gates.entrances;
-          exitsRef.current = gates.exits;
-          mapRef.current = blocked;
-          const paths = pathsForGates(blocked, gates.entrances, gates.exits);
-          if (paths) loadRoutes(paths);
-          sim.current.blocked = blocked;
-          sim.current.heights = heights;
+          applyTileBoard(board);
+          spawnSanctuaryTower();
         } else {
           setActiveMap(layout.name);
           // 完整關卡不啟用地塊擴張（board 標記為「已滿圖」避免誤觸發）

@@ -82,10 +82,10 @@ export function pathsForGates(blocked: Set<string>, entrances: Cell[], exits: Ce
   const paths: Cell[][] = [];
   for (const start of entrances) {
     const path = routeToNearest(blocked, start, exits);
-    if (!path) return null;
-    paths.push(path);
+    // 單條入口不通不整盤作廢：保留可通戰線，至少 1 條才算成功
+    if (path && path.length) paths.push(path);
   }
-  return paths;
+  return paths.length ? paths : null;
 }
 
 export function pointsOf(cells: Cell[]) {
