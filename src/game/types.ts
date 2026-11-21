@@ -27,9 +27,9 @@ export type TowerDef = {
 
 /** 基準數值（普通難度）；實際遊戲會再乘難度倍率 */
 export const TOWERS: TowerDef[] = [
-  { id: 0, name: "銀月狐仙", img: "/towers/t01.jpg?v=8", cost: 45, range: 150, damage: 32, cooldown: 0.85, special: "high", trait: "高傷害", color: "#b9dcff" },
-  { id: 1, name: "寒霜狐仙", img: "/towers/t02.jpg?v=8", cost: 55, range: 135, damage: 14, cooldown: 0.8, special: "slow", trait: "減速敵人 45%", color: "#7ecbff" },
-  { id: 2, name: "潮歌狐仙", img: "/towers/t03.jpg?v=8", cost: 70, range: 210, damage: 20, cooldown: 1.0, special: "range", trait: "超遠射程", color: "#9ad7ff" },
+  { id: 0, name: "銀月狐仙", img: "/towers/t01.jpg?v=8", cost: 40, range: 150, damage: 32, cooldown: 0.85, special: "high", trait: "高傷害", color: "#b9dcff" },
+  { id: 1, name: "寒霜狐仙", img: "/towers/t02.jpg?v=8", cost: 50, range: 135, damage: 14, cooldown: 0.8, special: "slow", trait: "減速敵人 45%", color: "#7ecbff" },
+  { id: 2, name: "潮歌狐仙", img: "/towers/t03.jpg?v=8", cost: 65, range: 210, damage: 20, cooldown: 1.0, special: "range", trait: "超遠射程", color: "#9ad7ff" },
   { id: 3, name: "赤焰狐仙", img: "/towers/t04.jpg?v=8", cost: 80, range: 140, damage: 16, cooldown: 0.95, special: "burn", trait: "燃燒 持續傷害", color: "#ff8a55" },
   { id: 4, name: "疾羽狐仙", img: "/towers/t05.jpg?v=8", cost: 95, range: 125, damage: 11, cooldown: 0.26, special: "rapid", trait: "極高射速", color: "#d7b6ff" },
   { id: 5, name: "花繚狐仙", img: "/towers/t06.jpg?v=8", cost: 120, range: 155, damage: 22, cooldown: 1.1, special: "aoe", trait: "範圍爆炸", color: "#ff9ec4" },
