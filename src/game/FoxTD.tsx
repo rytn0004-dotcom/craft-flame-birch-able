@@ -3669,17 +3669,10 @@ export function FoxTD() {
     if (!applyTileBoard(next)) {
       return;
     }
-    lastExpandWaveRef.current = Math.max(lastExpandWaveRef.current, sim.current.wave);
-    setTileOffer(null);
-    tileOfferRef.current = null;
-    setPickTemplate(null);
-    pickTemplateRef.current = null;
-    pausedRef.current = false;
-    setPaused(false);
     mingSandRef.current += 1;
     setMingSand(mingSandRef.current);
-    setHover(
-      `已拼接「${TEMPLATE_BY_ID[id]?.name || id}」· 戰線 ${entrancesRef.current.length} · 明潮砂 +1（${mingSandRef.current}）`,
+    endTileExpand(
+      `已拼接「${TEMPLATE_BY_ID[id]?.name || id}」· 戰線 ${entrancesRef.current.length} · 明潮砂 +1（${mingSandRef.current}）· 準備下一波`,
     );
   }
 
@@ -3711,21 +3704,28 @@ export function FoxTD() {
     setHover(`第 ${index + 1} 格重骰為「${TEMPLATE_BY_ID[nextId]?.name || nextId}」· 明潮砂 −${MING_SAND_REROLL_COST}`);
   }
 
-  function skipTileOffer() {
+  /** 結束本波擴張（放完或略過都走這裡，避免再彈選單卡住） */
+  function endTileExpand(msg?: string) {
     lastExpandWaveRef.current = Math.max(lastExpandWaveRef.current, sim.current.wave);
-    setTileOffer(null);
     tileOfferRef.current = null;
-    setPickTemplate(null);
+    setTileOffer(null);
     pickTemplateRef.current = null;
+    setPickTemplate(null);
     pausedRef.current = false;
     setPaused(false);
-    setHover("已略過拼接，下一波即將開始");
+    // 立刻進入波間倒數，不會再 shouldOffer
+    if (sim.current.between <= 0) sim.current.between = 0.05;
+    if (msg) setHover(msg);
+  }
+
+  function skipTileOffer() {
+    endTileExpand("已略過拼接，下一波即將開始");
   }
 
   function clearTilePick() {
     setPickTemplate(null);
     pickTemplateRef.current = null;
-    setHover("返回選塊");
+    setHover("返回選塊 · 請再選模板");
   }
 
   function canPlace(gx: number, gy: number) {
@@ -4679,112 +4679,139 @@ export function FoxTD() {
             </div>
           )}
           {phase === "play" && tileOffer && tileOffer.length > 0 && (
-            <div
-              className="overlay"
-              style={{
-                pointerEvents: "none",
-                background: "transparent",
-                justifyContent: "flex-start",
-                paddingTop: 12,
-              }}
-            >
-              <div
-                style={{
-                  pointerEvents: "auto",
-                  background: "rgba(8,20,36,0.92)",
-                  borderRadius: 12,
-                  padding: 16,
-                  maxWidth: 420,
-                }}
-              >
-              <h2>疆域擴張 · 地塊拼接</h2>
-              <p className="mb-2 max-w-md text-sm text-[#c5dff2]">
-                第 {wave} 波結束。選模板 → 旋轉 → 地圖上移入高亮格可預覽道路，再點放。三格可分開重骰。
-              </p>
-              <p className="mb-2 text-xs text-[#9ad7ff]">
-                明潮砂 <b className="text-[#ffe08a]">{mingSand}</b>
-                <span className="text-[#8eb6d4]">（塑界潮息凝成的細砂；重骰一格消耗 {MING_SAND_REROLL_COST}）</span>
-              </p>
+            <>
+              {/* 未選模板：半透明遮罩 + 中央選塊 */}
               {!pickTemplate && (
-              <div className="mb-2 flex flex-wrap justify-center gap-3">
-                {tileOffer.map((id, index) => {
-                  const nPlace = validPlacements(boardRef.current, id).length;
-                  const rotShow = pickTemplate === id ? pickRot : (0 as Rot);
-                  const tpl = TEMPLATE_BY_ID[id];
-                  const rt = tpl ? rotatedTemplate(tpl, rotShow) : null;
-                  return (
-                    <div key={`${id}-${index}`} className="flex flex-col items-center gap-1">
-                      <button
-                        type="button"
-                        className={"btn" + (pickTemplate === id ? "" : " ghost")}
-                        style={{ minWidth: 108, padding: "8px 10px" }}
-                        onClick={() => selectTileTemplate(id)}
-                      >
-                        <b className="block text-sm">{tpl?.name ?? id}</b>
-                        <span className="block text-[10px] text-[#9ec4de]">
-                          {nPlace ? `可銜接 ${nPlace} 處` : "目前無法銜接"}
-                        </span>
-                        {rt && (
-                          <span
-                            className="mt-1 inline-grid gap-px rounded border border-[#3a6080] bg-[#061018] p-0.5"
-                            style={{ gridTemplateColumns: "repeat(8, 5px)" }}
-                            aria-hidden
-                          >
-                            {Array.from({ length: 64 }, (_, i) => {
-                              const r = Math.floor(i / 8);
-                              const c = i % 8;
-                              const br = Math.min(TILE - 1, Math.floor((r / 8) * TILE));
-                              const bc = Math.min(TILE - 1, Math.floor((c / 8) * TILE));
-                              const blocked = rt.blocked[br][bc];
-                              return (
+                <div
+                  className="overlay"
+                  style={{
+                    background: "rgba(4,12,22,0.72)",
+                    justifyContent: "center",
+                    paddingTop: 24,
+                  }}
+                >
+                  <div
+                    style={{
+                      background: "rgba(8,20,36,0.96)",
+                      borderRadius: 14,
+                      padding: 18,
+                      maxWidth: 460,
+                      width: "92%",
+                      border: "1px solid rgba(120,180,255,0.25)",
+                      boxShadow: "0 12px 40px rgba(0,0,0,0.5)",
+                    }}
+                  >
+                    <h2 style={{ marginTop: 0 }}>疆域擴張 · 選一塊地塊</h2>
+                    <p className="mb-2 text-sm text-[#c5dff2]">
+                      第 {wave} 波結束。選完後遮罩會收起，即可看清地圖並放到綠格。
+                    </p>
+                    <p className="mb-2 text-xs text-[#9ad7ff]">
+                      明潮砂 <b className="text-[#ffe08a]">{mingSand}</b>
+                      （重骰一格消耗 {MING_SAND_REROLL_COST}）
+                    </p>
+                    <div className="mb-3 flex flex-wrap justify-center gap-3">
+                      {tileOffer.map((id, index) => {
+                        const nPlace = validPlacements(boardRef.current, id).length;
+                        const tpl = TEMPLATE_BY_ID[id];
+                        const rt = tpl ? rotatedTemplate(tpl, 0) : null;
+                        return (
+                          <div key={`${id}-${index}`} className="flex flex-col items-center gap-1">
+                            <button
+                              type="button"
+                              className="btn"
+                              style={{ minWidth: 108, padding: "8px 10px" }}
+                              onClick={() => selectTileTemplate(id)}
+                            >
+                              <b className="block text-sm">{tpl?.name ?? id}</b>
+                              <span className="block text-[10px] text-[#9ec4de]">
+                                {nPlace ? `可銜接 ${nPlace} 處` : "目前無法銜接"}
+                              </span>
+                              {rt && (
                                 <span
-                                  key={i}
-                                  style={{
-                                    width: 5,
-                                    height: 5,
-                                    background: blocked ? "#2a4058" : "#7ec8e8",
-                                  }}
-                                />
-                              );
-                            })}
-                          </span>
-                        )}
-                      </button>
-                      <button
-                        type="button"
-                        className="btn ghost"
-                        style={{ fontSize: 11, padding: "4px 8px" }}
-                        disabled={mingSand < MING_SAND_REROLL_COST}
-                        onClick={() => rerollTileSlot(index)}
-                        title={`消耗 ${MING_SAND_REROLL_COST} 明潮砂，只重骰這一格`}
-                      >
-                        重骰此格
-                      </button>
+                                  className="mt-1 inline-grid gap-px rounded border border-[#3a6080] bg-[#061018] p-0.5"
+                                  style={{ gridTemplateColumns: "repeat(8, 5px)" }}
+                                  aria-hidden
+                                >
+                                  {Array.from({ length: 64 }, (_, i) => {
+                                    const r = Math.floor(i / 8);
+                                    const c = i % 8;
+                                    const br = Math.min(TILE - 1, Math.floor((r / 8) * TILE));
+                                    const bc = Math.min(TILE - 1, Math.floor((c / 8) * TILE));
+                                    const blocked = rt.blocked[br][bc];
+                                    return (
+                                      <span
+                                        key={i}
+                                        style={{
+                                          width: 5,
+                                          height: 5,
+                                          background: blocked ? "#2a4058" : "#7ec8e8",
+                                        }}
+                                      />
+                                    );
+                                  })}
+                                </span>
+                              )}
+                            </button>
+                            <button
+                              type="button"
+                              className="btn ghost"
+                              style={{ fontSize: 11, padding: "4px 8px" }}
+                              disabled={mingSand < MING_SAND_REROLL_COST}
+                              onClick={() => rerollTileSlot(index)}
+                            >
+                              重骰此格
+                            </button>
+                          </div>
+                        );
+                      })}
                     </div>
-                  );
-                })}
-              </div>
+                    <button className="btn ghost" onClick={skipTileOffer}>
+                      略過，繼續戰鬥
+                    </button>
+                  </div>
+                </div>
               )}
+              {/* 已選模板：無全屏遮罩，僅頂部工具條，地圖可點 */}
               {pickTemplate && (
-                <div className="mb-2 flex flex-wrap justify-center gap-2">
-                  <button className="btn ghost" onClick={rotatePickTile}>
+                <div
+                  style={{
+                    position: "absolute",
+                    top: 10,
+                    left: "50%",
+                    transform: "translateX(-50%)",
+                    zIndex: 25,
+                    pointerEvents: "auto",
+                    display: "flex",
+                    flexWrap: "wrap",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 8,
+                    padding: "8px 12px",
+                    maxWidth: "min(560px, 94%)",
+                    background: "rgba(8,20,36,0.94)",
+                    borderRadius: 12,
+                    border: "1px solid rgba(120,180,255,0.3)",
+                    boxShadow: "0 8px 24px rgba(0,0,0,0.45)",
+                  }}
+                >
+                  <span className="text-sm text-[#e7f6ff]">
+                    放置：<b className="text-[#ffe7f1]">{TEMPLATE_BY_ID[pickTemplate]?.name || pickTemplate}</b>
+                  </span>
+                  <button className="btn ghost" style={{ padding: "6px 10px", fontSize: 12 }} onClick={rotatePickTile}>
                     旋轉 {pickRot * 90}°
                   </button>
-                  <button className="btn ghost" onClick={clearTilePick}>
+                  <button className="btn ghost" style={{ padding: "6px 10px", fontSize: 12 }} onClick={clearTilePick}>
                     返回選塊
                   </button>
-                  <span className="self-center text-xs text-[#9ad7ff]">
-                    可放 {validPlacements(boardRef.current, pickTemplate).length} 格 · 點綠格放置
+                  <button className="btn ghost" style={{ padding: "6px 10px", fontSize: 12 }} onClick={skipTileOffer}>
+                    略過
+                  </button>
+                  <span className="text-[11px] text-[#9ad7ff]">
+                    綠格可放 · 點地圖確認
                   </span>
                 </div>
               )}
-              <div className="mt-1 flex flex-wrap justify-center gap-2">
-                <button className="btn ghost" onClick={skipTileOffer}>
-                  略過，繼續戰鬥
-                </button>
-              </div>
-              </div>
-            </div>
+            </>
           )}
           {phase === "play" && paused && !(tileOffer && tileOffer.length) && !skillOffer && (
             <div className="overlay">
