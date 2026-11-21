@@ -3830,7 +3830,10 @@ export function FoxTD() {
     sim.current.enemies = [];
     sim.current.between = 0;
     setWave(0);
-    setHover("備戰中 · 先放置狐仙／路障，再按「開始第 1 波」出怪");
+    // 預設適中縮放並對準大本，避免玩家找不到聖地
+    sim.current.cam.zoom = Math.max(sim.current.cam.zoom || 1, 0.85);
+    focusCameraOnSanctuary();
+    setHover("備戰中 · 視角已對準聖地 · 先放置狐仙／路障，再按「開始第 1 波」");
   }
 
   function selectLevel(id: string, mode: "expand" | "layout") {
@@ -4247,6 +4250,43 @@ export function FoxTD() {
   }
 
   
+
+  /** 鏡頭對準聖地（大本）中心，開局／換圖後呼叫 */
+  function focusCameraOnSanctuary() {
+    const s = sim.current;
+    const z = s.cam.zoom || 1;
+    // 優先已生成的聖地塔
+    const hqTw = s.towers.find((t) => t.sanctuary);
+    if (hqTw) {
+      s.cam.x = hqTw.x - VIEWW / (2 * z);
+      s.cam.y = hqTw.y - VIEWH / (2 * z);
+      clampCam(s.cam);
+      return;
+    }
+    // 擴張模式：HQ 地塊中心
+    const hq = boardRef.current.placed.find((p) => p.templateId === "hq");
+    if (hq) {
+      const cx = (hq.tc * TILE + TILE / 2) * CELL;
+      const cy = (hq.tr * TILE + TILE / 2) * CELL;
+      s.cam.x = cx - VIEWW / (2 * z);
+      s.cam.y = cy - VIEWH / (2 * z);
+      clampCam(s.cam);
+      return;
+    }
+    // 完整地圖：出口／入口中心
+    const exits = exitsRef.current;
+    if (exits.length) {
+      let sx = 0, sy = 0;
+      for (const g of exits) {
+        sx += (g.c + 0.5) * CELL;
+        sy += (g.r + 0.5) * CELL;
+      }
+      s.cam.x = sx / exits.length - VIEWW / (2 * z);
+      s.cam.y = sy / exits.length - VIEWH / (2 * z);
+      clampCam(s.cam);
+    }
+  }
+
   function spawnSanctuaryTower() {
     const board = boardRef.current;
     const hq = board.placed.find((p) => p.templateId === "hq");
