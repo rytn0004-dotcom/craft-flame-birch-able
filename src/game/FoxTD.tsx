@@ -719,26 +719,24 @@ type Phase = "ready" | "play" | "win" | "lose";
 
 function spawnPlan(wave: number) {
   const list: { type: number; at: number; route: number }[] = [];
-  const count = 6 + wave * 2;
+  const lanes = Math.max(1, routes.length);
+  const baseCount = 6 + wave * 2;
+  const count = Math.round(baseCount * (1 + 0.28 * Math.max(0, lanes - 1)));
   const base = Math.min(ENEMY_TYPES.length - 2, Math.floor((wave - 1) / 2));
   let t = 0.4;
-  let n = 0;
-  const lanes = Math.max(1, routes.length);
   for (let i = 0; i < count; i++) {
     let type = base;
     if (Math.random() < 0.22 && type > 0) type -= 1;
     if (Math.random() < 0.18 + wave * 0.02) type = Math.min(ENEMY_TYPES.length - 2, type + 1);
-    list.push({ type, at: t, route: n % lanes });
-    n += 1;
-    t += Math.max(0.28, 0.72 - wave * 0.03);
+    list.push({ type, at: t, route: i % lanes });
+    t += Math.max(0.26, 0.7 - wave * 0.028 - Math.min(0.12, (lanes - 1) * 0.02));
   }
   if (wave % 5 === 0) {
-    list.push({ type: Math.min(ENEMY_TYPES.length - 1, 6), at: t + 0.4, route: n % lanes });
-    n += 1;
-    list.push({ type: Math.min(ENEMY_TYPES.length - 1, 8), at: t + 1.0, route: n % lanes });
+    list.push({ type: Math.min(ENEMY_TYPES.length - 1, 6), at: t + 0.4, route: 0 });
+    list.push({ type: Math.min(ENEMY_TYPES.length - 1, 8), at: t + 1.0, route: Math.min(1, lanes - 1) });
   }
   if (wave % 4 === 0) {
-    list.push({ type: Math.min(5, 2 + Math.floor(wave / 4)), at: t + 0.6, route: n % lanes });
+    list.push({ type: Math.min(5, 2 + Math.floor(wave / 4)), at: t + 0.6, route: Math.floor(lanes / 2) % lanes });
   }
   return list;
 }
@@ -1499,6 +1497,17 @@ export function FoxTD() {
       const s = sim.current;
       if (phaseRef.current !== "play" || pausedRef.current) return;
       s.clock += dt;
+
+      if (s.wave === 0) {
+        const mark = (s as { prepGoldAcc?: number }).prepGoldAcc ?? 0;
+        const next = mark + dt;
+        if (next >= 9) {
+          (s as { prepGoldAcc?: number }).prepGoldAcc = next - 9;
+          goldRef.current += 4;
+          setGold(goldRef.current);
+          s.floats.push({ x: VIEWW * 0.5, y: 48, text: "+4 潮息", life: 1.1, color: "#ffe08a" });
+        } else (s as { prepGoldAcc?: number }).prepGoldAcc = next;
+      }
 
       // Boss 橫幅倒數
       if (s.bossBanner) {
@@ -4630,6 +4639,14 @@ export function FoxTD() {
               })()}
             </div>
             <div className="chip">金幣 {gold}</div>
+            {phase === "play" && (
+              <div className="chip" title="可連通聖地的進怪入口">
+                戰線 {Math.max(1, entrancesRef.current.length || 1)}
+              </div>
+            )}
+            {phase === "play" && isExpandBoard(boardRef.current) && (
+              <div className="chip" title="重骰地塊用">明潮砂 {mingSand}</div>
+            )}
             <div className="chip">
               {wave === 0 && phase === "play"
                 ? "備戰中 · 放塔後開戰"
@@ -5140,6 +5157,24 @@ export function FoxTD() {
               {staking ? "路障中…" : `路障 ${STAKE_COST}`}
             </button>
           </div>
+          {phase === "play" && (
+            <div className="mb-2 flex gap-2">
+              <button
+                className="btn ghost flex-1"
+                style={{ fontSize: 12 }}
+                onClick={() => {
+                  focusCameraOnSanctuary();
+                  setHover("視角已對準聖地");
+                }}
+              >
+                對準聖地
+              </button>
+              <div className="flex flex-1 items-center justify-center rounded-lg border border-[#9ad7ff33] bg-[#0a1828] px-2 text-[11px] text-[#9ad7ff]">
+                戰線 {Math.max(1, entrancesRef.current.length || 1)}
+                {isExpandBoard(boardRef.current) ? ` · 砂 ${mingSand}` : ""}
+              </div>
+            </div>
+          )}
           <div className="mb-2 flex gap-2">
             <button
               className={"btn ghost flex-1" + (autoUpgrade !== "off" ? " on" : "")}
