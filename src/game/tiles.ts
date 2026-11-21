@@ -327,11 +327,22 @@ export function edgeHasRoad(ports: Port[], edge: Edge): boolean {
   return ports.some((p) => p.edge === edge);
 }
 
+/**
+ * 單邊銜接規則（硬約束）：
+ * - 雙方都無道路（空地／牆）→ 可接
+ * - 一方有路、一方空地 → 不可接（空地不能接到道路上）
+ * - 雙方都有路 → 必須至少一個端口索引 i 重疊（路心對上路心）
+ */
 export function edgesRoadCompatible(myPorts: Port[], myEdge: Edge, theirPorts: Port[], theirEdge: Edge): boolean {
   const mine = new Set(myPorts.filter((p) => p.edge === myEdge).map((p) => p.i));
   const theirs = new Set(theirPorts.filter((p) => p.edge === theirEdge).map((p) => p.i));
-  if (mine.size === 0 && theirs.size === 0) return true;
-  if (mine.size === 0 || theirs.size === 0) return false;
+  const myRoad = mine.size > 0;
+  const theirRoad = theirs.size > 0;
+  // 空地 ↔ 空地
+  if (!myRoad && !theirRoad) return true;
+  // 空地 ↔ 道路：禁止
+  if (myRoad !== theirRoad) return false;
+  // 道路 ↔ 道路：端口必須對齊
   for (const i of mine) if (theirs.has(i)) return true;
   return false;
 }
@@ -528,7 +539,17 @@ export function scorePlacement(
   }
 
   if (!adjacent) return bad;
+
+  const selfHasRoad = (["N", "E", "S", "W"] as Edge[]).some((e) => edgeHasRoad(ports, e));
+
+  // 硬規則：
+  // 1) 鄰居邊上有道路 → 本側必須已形成至少一條道路對接（不能用空地硬貼上路）
   if (neighborOffersRoad && !roadLinked) return bad;
+  // 2) 本圖有道路 → 必須至少接到鄰居的一條路（道路必須連到道路，不能只靠空地邊掛上）
+  if (selfHasRoad && !roadLinked) return bad;
+  // 3) 本圖完全無道路（純空地／牆）→ 只能貼在「鄰居該側也無道路」的邊上
+  //    （已由每邊 edgesRoadCompatible 保證；此處若誤觸有路鄰居會在 1 擋下）
+  if (!selfHasRoad && neighborOffersRoad) return bad;
 
   // 分數：優先多路銜接與端口對齊，其次外向接口，懲罰埋入口
   let score =
@@ -539,7 +560,6 @@ export function scorePlacement(
     (templateId === "cross" || templateId === "tee" ? 6 : 0) +
     (templateId === "open" ? 3 : 0);
   if (buriedEntrance) score -= 50;
-  // 略偏好靠近地圖中心外擴的「前線」：離 HQ 越遠略加分（戰線延伸）
   const hq = board.placed.find((p) => p.templateId === "hq");
   if (hq) {
     const dist = Math.abs(tc - hq.tc) + Math.abs(tr - hq.tr);
