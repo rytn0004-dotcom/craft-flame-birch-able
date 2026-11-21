@@ -404,52 +404,182 @@ function neighborSlot(tc: number, tr: number, edge: Edge): { tc: number; tr: num
   return tc < TILE_COLS - 1 ? { tc: tc + 1, tr } : null;
 }
 
+/**
+ * 入口／出口：
+ * - 出口固定聖地中心
+ * - 入口 = 所有「能連通聖地」的道路外緣；路線重合時以離大本最遠的路口為準（每條枝葉一個入口）
+ */
 export function collectGates(board: TileBoard): { entrances: Cell[]; exits: Cell[] } {
-  const entrances: Cell[] = [], exits: Cell[] = [];
-  const seenE = new Set<string>(), seenX = new Set<string>();
-  const pushE = (c: number, r: number) => {
-    const k = c + "," + r;
-    if (seenE.has(k)) return;
-    seenE.add(k);
-    entrances.push({ c, r });
-  };
+  const exits: Cell[] = [];
+  const seenX = new Set<string>();
   const pushX = (c: number, r: number) => {
     const k = c + "," + r;
     if (seenX.has(k)) return;
     seenX.add(k);
     exits.push({ c, r });
   };
+
+  const hq = board.placed.find((x) => x.templateId === "hq");
+  if (hq) {
+    const origin = worldOrigin(hq.tc, hq.tr);
+    for (const dc of [9, 10]) for (const dr of [9, 10]) pushX(origin.c + dc, origin.r + dr);
+  }
+  // 模板上標記的 exit 仍收（少用）
   for (const p of board.placed) {
     const tpl = TEMPLATE_BY_ID[p.templateId];
     if (!tpl) continue;
     const { ports } = rotatedTemplate(tpl, p.rot);
     const origin = worldOrigin(p.tc, p.tr);
     for (const port of ports) {
+      if (port.kind !== "exit") continue;
       let c = origin.c, r = origin.r;
       if (port.edge === "N") { c += port.i; r += 0; }
       else if (port.edge === "S") { c += port.i; r += TILE - 1; }
       else if (port.edge === "W") { c += 0; r += port.i; }
       else { c += TILE - 1; r += port.i; }
-      // 入口僅在「朝向未佔用槽」的邊生效，避免內部假入口
-      if (port.kind === "entrance") {
-        const nb = neighborSlot(p.tc, p.tr, port.edge);
-        if (!nb || !slotOccupied(board, nb.tc, nb.tr)) pushE(c, r);
+      pushX(c, r);
+    }
+  }
+
+  const blocked = buildBlocked(board);
+  const isOpen = (c: number, r: number) =>
+    c >= 0 && r >= 0 && c < COLS && r < ROWS && !blocked.has(c + "," + r);
+
+  // 從聖地 BFS：只走可通道路
+  const dist = new Map<string, number>();
+  const q: Cell[] = [];
+  for (const e of exits) {
+    if (!isOpen(e.c, e.r)) continue;
+    const k = e.c + "," + e.r;
+    if (dist.has(k)) continue;
+    dist.set(k, 0);
+    q.push(e);
+  }
+  const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]] as const;
+  for (let qi = 0; qi < q.length; qi++) {
+    const cur = q[qi];
+    const d0 = dist.get(cur.c + "," + cur.r)!;
+    for (const [dc, dr] of dirs) {
+      const nc = cur.c + dc, nr = cur.r + dr;
+      if (!isOpen(nc, nr)) continue;
+      const nk = nc + "," + nr;
+      if (dist.has(nk)) continue;
+      dist.set(nk, d0 + 1);
+      q.push({ c: nc, r: nr });
+    }
+  }
+
+  // 外緣候選：可連通聖地、且至少有一側不是「同圖已解鎖道路」
+  // （朝向域外／牆／未解鎖槽）
+  type Cand = { c: number; r: number; d: number };
+  const rim: Cand[] = [];
+  for (const [k, d] of dist) {
+    if (d <= 2) continue; // 太靠近聖地不當入口
+    const [cs, rs] = k.split(",");
+    const c = Number(cs), r = Number(rs);
+    let openN = 0;
+    let outward = false;
+    for (const [dc, dr] of dirs) {
+      const nc = c + dc, nr = r + dr;
+      if (isOpen(nc, nr) && dist.has(nc + "," + nr)) {
+        openN++;
+        continue;
       }
-      if (port.kind === "exit") pushX(c, r);
+      // 外側：未在 path 上
+      outward = true;
     }
-    if (p.templateId === "hq") {
-      for (const dc of [9, 10]) for (const dr of [9, 10]) pushX(origin.c + dc, origin.r + dr);
+    // 枝葉或貼外緣：開口少或有朝外
+    if (outward && openN <= 3) rim.push({ c, r, d });
+  }
+
+  // 路線重合 → 以最遠路口為準：對 rim 做「更遠者抑制較近者」
+  // 若 A 能沿道路走到 B 且 dist(B)>dist(A)，則 A 不作為入口（同一條路只留最遠）
+  rim.sort((a, b) => b.d - a.d);
+  const entrances: Cell[] = [];
+  const suppressed = new Set<string>();
+
+  const canReachThroughPath = (from: Cand, to: Cand): boolean => {
+    // 限制步數的 BFS，只在 dist 集合內
+    const goal = to.c + "," + to.r;
+    const start = from.c + "," + from.r;
+    if (start === goal) return true;
+    const seen = new Set<string>([start]);
+    const qq: Cell[] = [{ c: from.c, r: from.r }];
+    let steps = 0;
+    const limit = Math.abs(to.d - from.d) + 8;
+    for (let i = 0; i < qq.length && steps < 4000; i++) {
+      const cur = qq[i];
+      steps++;
+      for (const [dc, dr] of dirs) {
+        const nc = cur.c + dc, nr = cur.r + dr;
+        const nk = nc + "," + nr;
+        if (!dist.has(nk) || seen.has(nk)) continue;
+        if (nk === goal) return true;
+        // 只往「離 HQ 更遠或持平」走，加速同一枝判斷
+        const nd = dist.get(nk)!;
+        if (nd < from.d - 2) continue;
+        seen.add(nk);
+        qq.push({ c: nc, r: nr });
+        if (seen.size > limit * 12) break;
+      }
+    }
+    return false;
+  };
+
+  for (const cand of rim) {
+    const ck = cand.c + "," + cand.r;
+    if (suppressed.has(ck)) continue;
+    // 若已有更遠入口在同一條可達路上，跳過（rim 已按 d 降序，先放最遠）
+    let dominated = false;
+    for (const e of entrances) {
+      const ed = dist.get(e.c + "," + e.r) ?? 0;
+      if (ed < cand.d) continue;
+      if (canReachThroughPath(cand, { c: e.c, r: e.r, d: ed })) {
+        dominated = true;
+        break;
+      }
+    }
+    if (dominated) continue;
+    entrances.push({ c: cand.c, r: cand.r });
+    // 抑制同一枝上更近的 rim
+    for (const o of rim) {
+      if (o.d >= cand.d) continue;
+      if (canReachThroughPath(o, cand)) suppressed.add(o.c + "," + o.r);
     }
   }
-  if (!exits.length) {
-    const hq = board.placed.find((x) => x.templateId === "hq");
-    if (hq) {
-      const origin = worldOrigin(hq.tc, hq.tr);
-      pushX(origin.c + 9, origin.r + 9);
-      pushX(origin.c + 10, origin.r + 10);
+
+  // 保底：若演算法沒找到，退回「朝外的 entrance 端口」
+  if (!entrances.length) {
+    for (const p of board.placed) {
+      const tpl = TEMPLATE_BY_ID[p.templateId];
+      if (!tpl) continue;
+      const { ports } = rotatedTemplate(tpl, p.rot);
+      const origin = worldOrigin(p.tc, p.tr);
+      for (const port of ports) {
+        if (port.kind !== "entrance") continue;
+        const nb = neighborSlot(p.tc, p.tr, port.edge);
+        if (nb && slotOccupied(board, nb.tc, nb.tr)) continue;
+        let c = origin.c, r = origin.r;
+        if (port.edge === "N") { c += port.i; r += 0; }
+        else if (port.edge === "S") { c += port.i; r += TILE - 1; }
+        else if (port.edge === "W") { c += 0; r += port.i; }
+        else { c += TILE - 1; r += port.i; }
+        if (dist.has(c + "," + r) || isOpen(c, r)) entrances.push({ c, r });
+      }
     }
   }
-  return { entrances, exits };
+
+  // 去重
+  const seenE = new Set<string>();
+  const uniq: Cell[] = [];
+  for (const e of entrances) {
+    const k = e.c + "," + e.r;
+    if (seenE.has(k)) continue;
+    seenE.add(k);
+    uniq.push(e);
+  }
+
+  return { entrances: uniq, exits };
 }
 
 export function frontierSlots(board: TileBoard): { tc: number; tr: number }[] {
