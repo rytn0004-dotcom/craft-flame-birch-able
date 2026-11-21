@@ -948,6 +948,7 @@ export function FoxTD() {
   const bumpHqUi = () => setHqProgTick((n) => n + 1);
   const tileOfferRef = useRef<string[] | null>(null);
   const [tileOffer, setTileOffer] = useState<string[] | null>(null);
+  const lastExpandWaveRef = useRef(0);
   const [pickTemplate, setPickTemplate] = useState<string | null>(null);
   const pickTemplateRef = useRef<string | null>(null);
   const [pickRot, setPickRot] = useState<Rot>(0);
@@ -1629,31 +1630,32 @@ export function FoxTD() {
           if (s.wave >= cap && !endlessRef.current) {
             phaseRef.current = "win";
             setPhase("win");
-          } else if (isExpandBoard(boardRef.current) && shouldOfferTiles(s.wave, boardRef.current) && !tileOfferRef.current) {
+          } else if (
+            isExpandBoard(boardRef.current) &&
+            shouldOfferTiles(s.wave, boardRef.current) &&
+            !tileOfferRef.current &&
+            lastExpandWaveRef.current !== s.wave
+          ) {
             const opts = pickOfferTemplates(OFFER_COUNT, boardRef.current, runTileBias);
             if (opts.length && frontierSlots(boardRef.current).length) {
-              // 擴張波結算：湧出明潮砂（基礎產量 0，僅此事件）
+              lastExpandWaveRef.current = s.wave;
               mingSandRef.current += 1;
               setMingSand(mingSandRef.current);
               tileOfferRef.current = opts;
               setTileOffer(opts);
-              // 預選第一塊，讓游標移到接口就能立刻預覽
-              const first = opts[0] || null;
-              setPickTemplate(first);
-              pickTemplateRef.current = first;
+              setPickTemplate(null);
+              pickTemplateRef.current = null;
               pickRotRef.current = 0;
               setPickRot(0);
               pausedRef.current = true;
               setPaused(true);
-              // 鏡頭移到最新 frontier 中心，方便對準接口
               {
                 const fronts = frontierSlots(boardRef.current);
                 if (fronts.length) {
-                  // 偏好「尚未被佔、離已放地塊外緣」的槽：取平均
                   let sx = 0, sy = 0;
-                  for (const f of fronts) {
-                    sx += (f.tc + 0.5) * TILE * CELL;
-                    sy += (f.tr + 0.5) * TILE * CELL;
+                  for (const fr of fronts) {
+                    sx += (fr.tc + 0.5) * TILE * CELL;
+                    sy += (fr.tr + 0.5) * TILE * CELL;
                   }
                   const z = s.cam.zoom || 1;
                   s.cam.x = sx / fronts.length - VIEWW / (2 * z);
@@ -1661,10 +1663,7 @@ export function FoxTD() {
                   clampCam(s.cam);
                 }
               }
-              const nValid = first ? validPlacements(boardRef.current, first).length : 0;
-              setHover(
-                `第 ${s.wave} 波結束 · 疆域擴張 · 已選「${TEMPLATE_BY_ID[first!]?.name || first}」· 綠格可接 · 接口 ${nValid} 處`,
-              );
+              setHover(`第 ${s.wave} 波結束 · 疆域擴張 · 請選模板後再放到地圖綠格`);
               s.between = 0;
             } else {
               const gap = endlessRef.current ? (s.wave % 5 === 0 ? 5.5 : 4.2) : 7;
@@ -2742,104 +2741,43 @@ export function FoxTD() {
           const rnd2 = terrainHash(c + 17, r + 31);
 
           if (!onBoard) {
-            // —— 未解鎖疆域：連片深海（高不透明，蓋住任何底圖網點）——
-            const depth = 0.82 + rnd * 0.12;
-            ctx.fillStyle = `rgba(${6 + rnd * 10 | 0}, ${22 + rnd * 18 | 0}, ${38 + rnd * 20 | 0}, ${depth})`;
-            ctx.fillRect(x - 0.25, y - 0.25, CELL + 0.5, CELL + 0.5);
-
-            // 鄰近已解鎖區的「岸邊」用較淺水色，做出邊界過渡
-            let nearOpen = false;
-            for (const [dc, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
-              if (isCellOnBoard(boardRef.current, c + dc, r + dr) && !s.blocked.has(cellKey(c + dc, r + dr))) {
-                nearOpen = true;
+            // —— 未解鎖：虛空迷霧（不畫礁石障礙）+ 緩動雲絮 ——
+            const pulse = 0.5 + 0.5 * Math.sin(t * 0.7 + c * 0.15 + r * 0.11);
+            const depth = 0.88 + rnd * 0.08;
+            ctx.fillStyle = `rgba(${3 + rnd * 6 | 0}, ${8 + rnd * 12 | 0}, ${16 + rnd * 18 | 0}, ${depth})`;
+            ctx.fillRect(x - 0.5, y - 0.5, CELL + 1, CELL + 1);
+            // 深層漸隱網格感
+            if (rnd > 0.72) {
+              ctx.fillStyle = `rgba(20, 40, 70, ${0.12 + pulse * 0.08})`;
+              ctx.beginPath();
+              ctx.arc(x + CELL * rnd, y + CELL * rnd2, CELL * (0.15 + rnd * 0.2), 0, Math.PI * 2);
+              ctx.fill();
+            }
+            // 漂浮雲／霧團（稀疏）
+            if (rnd < 0.14) {
+              const cx = x + CELL * (0.2 + rnd * 0.6) + Math.sin(t * 0.35 + r) * 3;
+              const cy = y + CELL * (0.3 + rnd2 * 0.4) + Math.cos(t * 0.28 + c) * 2;
+              const gr = ctx.createRadialGradient(cx, cy, 2, cx, cy, CELL * 0.7);
+              gr.addColorStop(0, `rgba(160, 190, 220, ${0.1 + pulse * 0.08})`);
+              gr.addColorStop(1, "rgba(160, 190, 220, 0)");
+              ctx.fillStyle = gr;
+              ctx.beginPath();
+              ctx.ellipse(cx, cy, CELL * (0.45 + rnd * 0.25), CELL * (0.22 + rnd2 * 0.12), rnd * 0.8, 0, Math.PI * 2);
+              ctx.fill();
+            }
+            // 鄰近已解鎖：柔邊霧
+            let nearBoard = false;
+            for (const [dc, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1]] as const) {
+              if (isCellOnBoard(boardRef.current, c + dc, r + dr)) {
+                nearBoard = true;
                 break;
               }
             }
-            if (nearOpen) {
-              ctx.fillStyle = "rgba(40, 90, 110, 0.35)";
+            if (nearBoard) {
+              ctx.fillStyle = `rgba(30, 70, 100, ${0.22 + pulse * 0.06})`;
               ctx.fillRect(x, y, CELL, CELL);
             }
-
-            // 依 hash 疊加一種地貌（礁岩 / 斷崖 / 珊瑚 / 藻林 / 廢柱）
-            const kind = Math.floor(rnd * 5);
-            if (kind === 0) {
-              // 礁岩堆
-              ctx.fillStyle = `rgba(${50 + rnd2 * 40 | 0}, ${70 + rnd2 * 30 | 0}, ${80 + rnd2 * 40 | 0}, 0.85)`;
-              ctx.beginPath();
-              ctx.ellipse(x + CELL * (0.3 + rnd * 0.4), y + CELL * (0.45 + rnd2 * 0.3), CELL * 0.28, CELL * 0.2, 0, 0, Math.PI * 2);
-              ctx.fill();
-              ctx.beginPath();
-              ctx.ellipse(x + CELL * 0.65, y + CELL * 0.55, CELL * 0.2, CELL * 0.15, 0, 0, Math.PI * 2);
-              ctx.fill();
-            } else if (kind === 1) {
-              // 斷崖／石壁
-              ctx.fillStyle = "rgba(35, 48, 62, 0.9)";
-              ctx.fillRect(x + 2, y + 4, CELL - 4, CELL - 6);
-              ctx.strokeStyle = "rgba(90, 120, 140, 0.45)";
-              ctx.lineWidth = 1;
-              ctx.beginPath();
-              ctx.moveTo(x + 6, y + 10);
-              ctx.lineTo(x + CELL - 6, y + 14);
-              ctx.moveTo(x + 8, y + 20);
-              ctx.lineTo(x + CELL - 8, y + 22);
-              ctx.stroke();
-              // 崖頂高光
-              ctx.fillStyle = "rgba(120, 160, 180, 0.25)";
-              ctx.fillRect(x + 2, y + 4, CELL - 4, 5);
-            } else if (kind === 2) {
-              // 珊瑚叢（可貼圖）
-              const coral = s.scene.coral;
-              if (coral && coral.complete && coral.naturalWidth > 8 && rnd < 0.55) {
-                ctx.globalAlpha = 0.35 + rnd * 0.2;
-                const sc = 0.85 + rnd2 * 0.25;
-                blit(ctx, coral, x + 2, y + 2, CELL * sc, CELL * sc);
-                ctx.globalAlpha = 1;
-              } else {
-                ctx.fillStyle = `rgba(${180 + rnd * 40 | 0}, ${80 + rnd2 * 40 | 0}, ${110 + rnd * 30 | 0}, 0.55)`;
-                for (let k = 0; k < 3; k++) {
-                  const cx = x + 8 + k * 8 + rnd * 4;
-                  const cy = y + CELL - 6;
-                  ctx.beginPath();
-                  ctx.moveTo(cx, cy);
-                  ctx.quadraticCurveTo(cx + 4, cy - 16 - rnd2 * 10, cx + 2, cy - 22 - k * 3);
-                  ctx.strokeStyle = ctx.fillStyle;
-                  ctx.lineWidth = 3;
-                  ctx.stroke();
-                }
-              }
-            } else if (kind === 3) {
-              // 海藻／樹林感（向上飄的絲帶）
-              ctx.strokeStyle = `rgba(${40 + rnd * 30 | 0}, ${140 + rnd2 * 50 | 0}, ${100 + rnd * 40 | 0}, 0.7)`;
-              ctx.lineWidth = 2;
-              for (let k = 0; k < 3; k++) {
-                const bx = x + 8 + k * 9;
-                ctx.beginPath();
-                ctx.moveTo(bx, y + CELL - 2);
-                ctx.bezierCurveTo(bx + Math.sin(t + k) * 4, y + 18, bx - 3, y + 10, bx + Math.cos(t * 0.7 + k) * 3, y + 4);
-                ctx.stroke();
-              }
-            } else {
-              // 沉沒石柱殘段
-              const pillar = s.scene.pillar;
-              if (pillar && pillar.complete && pillar.naturalWidth && rnd > 0.4) {
-                ctx.globalAlpha = 0.45 + rnd2 * 0.25;
-                blit(ctx, pillar, x + 4, y - 4, CELL - 8, CELL + 4);
-                ctx.globalAlpha = 1;
-              } else {
-                ctx.fillStyle = "rgba(70, 85, 100, 0.75)";
-                ctx.fillRect(x + CELL * 0.35, y + 4, CELL * 0.3, CELL - 6);
-                ctx.fillStyle = "rgba(140, 160, 175, 0.35)";
-                ctx.fillRect(x + CELL * 0.32, y + 2, CELL * 0.36, 6);
-              }
-            }
-
-            // 輕微噪點，打破方格感（不要整排一樣）
-            if (rnd2 > 0.7) {
-              ctx.fillStyle = "rgba(160, 210, 230, 0.08)";
-              ctx.beginPath();
-              ctx.arc(x + rnd * CELL, y + rnd2 * CELL, 2, 0, Math.PI * 2);
-              ctx.fill();
-            }
+          
           } else {
             // —— 域內可走區上的路障：可拆除的廢墟／珊瑚障 ——
             ctx.fillStyle = "rgba(22, 28, 40, 0.55)";
@@ -3729,9 +3667,9 @@ export function FoxTD() {
       return;
     }
     if (!applyTileBoard(next)) {
-      // 路徑被切斷：不關閉選單，允許改放
       return;
     }
+    lastExpandWaveRef.current = Math.max(lastExpandWaveRef.current, sim.current.wave);
     setTileOffer(null);
     tileOfferRef.current = null;
     setPickTemplate(null);
@@ -3774,6 +3712,7 @@ export function FoxTD() {
   }
 
   function skipTileOffer() {
+    lastExpandWaveRef.current = Math.max(lastExpandWaveRef.current, sim.current.wave);
     setTileOffer(null);
     tileOfferRef.current = null;
     setPickTemplate(null);
@@ -3781,6 +3720,12 @@ export function FoxTD() {
     pausedRef.current = false;
     setPaused(false);
     setHover("已略過拼接，下一波即將開始");
+  }
+
+  function clearTilePick() {
+    setPickTemplate(null);
+    pickTemplateRef.current = null;
+    setHover("返回選塊");
   }
 
   function canPlace(gx: number, gy: number) {
@@ -4760,6 +4705,7 @@ export function FoxTD() {
                 明潮砂 <b className="text-[#ffe08a]">{mingSand}</b>
                 <span className="text-[#8eb6d4]">（塑界潮息凝成的細砂；重骰一格消耗 {MING_SAND_REROLL_COST}）</span>
               </p>
+              {!pickTemplate && (
               <div className="mb-2 flex flex-wrap justify-center gap-3">
                 {tileOffer.map((id, index) => {
                   const nPlace = validPlacements(boardRef.current, id).length;
@@ -4818,19 +4764,25 @@ export function FoxTD() {
                   );
                 })}
               </div>
+              )}
               {pickTemplate && (
                 <div className="mb-2 flex flex-wrap justify-center gap-2">
                   <button className="btn ghost" onClick={rotatePickTile}>
                     旋轉 {pickRot * 90}°
                   </button>
+                  <button className="btn ghost" onClick={clearTilePick}>
+                    返回選塊
+                  </button>
                   <span className="self-center text-xs text-[#9ad7ff]">
-                    可放 {validPlacements(boardRef.current, pickTemplate).filter((x) => x.rot === pickRot).length} 格 · 移入地圖預覽道路後點放
+                    可放 {validPlacements(boardRef.current, pickTemplate).length} 格 · 點綠格放置
                   </span>
                 </div>
               )}
-              <button className="btn ghost" onClick={skipTileOffer}>
-                略過，繼續戰鬥
-              </button>
+              <div className="mt-1 flex flex-wrap justify-center gap-2">
+                <button className="btn ghost" onClick={skipTileOffer}>
+                  略過，繼續戰鬥
+                </button>
+              </div>
               </div>
             </div>
           )}
