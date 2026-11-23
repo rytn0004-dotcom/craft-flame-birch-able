@@ -2279,7 +2279,7 @@ export function FoxTD() {
                 }
               }
               float(p.x, p.y - 48, "潮鳴", "#9ad7ff");
-              s.rings.push({ x: p.x, y: p.y, age: 0, color: "#9ad7ff" });
+              s.rings.push({ x: p.x, y: p.y, r: 12, max: 150, life: 0.45, color: "#9ad7ff" });
             }
             float(p.x, p.y, `+${g}`, combo.n >= 3 ? "#ffe08a" : "#ffd27a");
             if (combo.n >= 3) bumpFlavor();
