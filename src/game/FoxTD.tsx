@@ -143,12 +143,14 @@ type Escort = {
   hp: number;
   maxHp: number;
   route: number;
-  /** 沿路徑的距離（迎擊：從靠近出口處往入口方向減小 dist） */
+  /** 沿路徑距離：自聖地往入口遞減；可為負表示穿過入口進入迷霧 */
   dist: number;
   speed: number;
   contactT: number;
   shootCd: number;
   healCd: number;
+  /** 1=正常，降至 0 後移除（迷霧消散） */
+  fade: number;
 };
 
 const HQ_PATH_META: Record<HqPathId, { name: string; tag: string; color: string }> = {
@@ -2406,6 +2408,7 @@ export function FoxTD() {
                       contactT: 0,
                       shootCd: 0.25 * i,
                       healCd: 1.0,
+                      fade: 1,
                     });
                   });
                 }
@@ -2428,6 +2431,30 @@ export function FoxTD() {
           u.contactT -= dt;
           u.shootCd -= dt;
           u.healCd -= dt;
+          // 已進入入口外迷霧：不再攔截，避免堵口
+          if ((u.dist ?? 0) < 0) {
+            u.dist = u.dist - u.speed * dt;
+            const mistPast = CELL * 3;
+            if (u.dist < -mistPast) {
+              u.fade = Math.max(0, (u.fade ?? 1) - dt / 1.4);
+              u.dist = -mistPast;
+            }
+            const live = routes[u.route];
+            if (live && live.pts.length >= 2) {
+              const a = live.pts[0];
+              const b = live.pts[Math.min(1, live.pts.length - 1)];
+              const dx = a.x - b.x;
+              const dy = a.y - b.y;
+              const len = Math.hypot(dx, dy) || 1;
+              const beyond = -u.dist;
+              u.x = a.x + (dx / len) * beyond;
+              u.y = a.y + (dy / len) * beyond;
+            }
+            if ((u.fade ?? 1) <= 0) {
+              s.escorts.splice(i, 1);
+            }
+            continue;
+          }
 
           let engage: Enemy | null = null;
           let engageGap = 1e9;
@@ -2479,11 +2506,35 @@ export function FoxTD() {
               }
             }
           } else {
-            // 向入口推進（dist 遞減），移速 100
-            u.dist = Math.max(8, u.dist - u.speed * dt);
-            const pos = posAt(u.dist, u.route);
-            u.x = pos.x;
-            u.y = pos.y;
+            // 向入口推進；穿過入口再往外約 3 格後迷霧消散（不堵怪口）
+            const mistPast = CELL * 3;
+            u.dist = u.dist - u.speed * dt;
+            if (u.dist < -mistPast) {
+              u.fade = Math.max(0, (u.fade ?? 1) - dt / 1.4);
+              u.dist = -mistPast;
+            }
+            // 入口附近仍用路徑點；超出入口用入口方向外推
+            if (u.dist >= 0) {
+              const pos = posAt(u.dist, u.route);
+              u.x = pos.x;
+              u.y = pos.y;
+            } else {
+              const live = routes[u.route];
+              if (live && live.pts.length >= 2) {
+                const a = live.pts[0];
+                const b = live.pts[Math.min(1, live.pts.length - 1)];
+                const dx = a.x - b.x;
+                const dy = a.y - b.y;
+                const len = Math.hypot(dx, dy) || 1;
+                const beyond = -u.dist;
+                u.x = a.x + (dx / len) * beyond;
+                u.y = a.y + (dy / len) * beyond;
+              }
+            }
+          }
+          if ((u.fade ?? 1) <= 0) {
+            s.escorts.splice(i, 1);
+            continue;
           }
 
           // 遠程額外遠射（接觸外也能輸出）
@@ -2888,15 +2939,56 @@ export function FoxTD() {
           ctx.strokeStyle = canHere ? "rgba(200, 255, 230, 0.98)" : "rgba(255, 140, 140, 0.9)";
           ctx.lineWidth = 3;
           ctx.strokeRect(ox + 1, oy + 1, TILE * CELL - 2, TILE * CELL - 2);
+          // 預覽道路骨架 + 外緣路口（新怪物路線可讀性）
+          {
+            ctx.save();
+            ctx.lineCap = "round";
+            ctx.strokeStyle = canHere ? "rgba(120, 220, 255, 0.95)" : "rgba(255, 120, 120, 0.55)";
+            ctx.lineWidth = 10;
+            for (let r = 0; r < TILE; r++) {
+              for (let c = 0; c < TILE; c++) {
+                if (rt.blocked[r][c]) continue;
+                const cx = ox + c * CELL + CELL / 2;
+                const cy = oy + r * CELL + CELL / 2;
+                if (c + 1 < TILE && !rt.blocked[r][c + 1]) {
+                  ctx.beginPath();
+                  ctx.moveTo(cx, cy);
+                  ctx.lineTo(cx + CELL, cy);
+                  ctx.stroke();
+                }
+                if (r + 1 < TILE && !rt.blocked[r + 1][c]) {
+                  ctx.beginPath();
+                  ctx.moveTo(cx, cy);
+                  ctx.lineTo(cx, cy + CELL);
+                  ctx.stroke();
+                }
+              }
+            }
+            for (let r = 0; r < TILE; r++) {
+              for (let c = 0; c < TILE; c++) {
+                if (rt.blocked[r][c]) continue;
+                if (!(r === 0 || c === 0 || r === TILE - 1 || c === TILE - 1)) continue;
+                const cx = ox + c * CELL + CELL / 2;
+                const cy = oy + r * CELL + CELL / 2;
+                ctx.fillStyle = canHere ? "rgba(255, 210, 120, 0.95)" : "rgba(255, 100, 100, 0.7)";
+                ctx.beginPath();
+                ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+                ctx.fill();
+              }
+            }
+            ctx.restore();
+          }
           ctx.fillStyle = canHere ? "#c8ffe0" : "#ffb0b0";
           ctx.font = "bold 13px sans-serif";
           const tip = !canHere
-            ? "無法銜接 · 換一塊或換邊"
+            ? "無法銜接 · 按 R 旋轉或換邊"
             : useRot !== rot
-              ? `可放置 · 將自動轉 ${useRot * 90}°`
-              : "可放置 · 點一下確認";
+              ? `可放置 · 自動 ${useRot * 90}° · [R]旋轉`
+              : `可放置 · 點確認 · [R]旋轉 ${useRot * 90}°`;
           ctx.fillText(tip, ox + 12, oy + 22);
-          // 寫回：若滑鼠停在可放槽且旋轉不同，同步旋轉狀態方便點擊
+          ctx.font = "11px sans-serif";
+          ctx.fillStyle = "rgba(200, 230, 255, 0.9)";
+          ctx.fillText("亮線=新道路 · 黃點=外緣路口（可能進怪）", ox + 12, oy + 40);
           if (canHere && useRot !== rot) {
             pickRotRef.current = useRot;
           }
@@ -3210,10 +3302,11 @@ export function FoxTD() {
         // 護衛單位
         for (const u of s.escorts) {
           const col = u.kind === "melee" ? "#ffb4a8" : u.kind === "ranged" ? "#a8e0ff" : "#b8f0c8";
+          const fa = Math.max(0, Math.min(1, u.fade ?? 1));
           ctx.beginPath();
           ctx.arc(u.x, u.y, u.kind === "melee" ? 9 : 7, 0, Math.PI * 2);
           ctx.fillStyle = col;
-          ctx.globalAlpha = 0.9;
+          ctx.globalAlpha = 0.9 * fa;
           ctx.fill();
           ctx.globalAlpha = 1;
           ctx.strokeStyle = "rgba(0,0,0,0.35)";
@@ -4827,6 +4920,7 @@ export function FoxTD() {
         contactT: 0,
         shootCd: 0.25 * i,
         healCd: 1.0,
+        fade: 1,
       });
     });
     setHover(
@@ -4941,6 +5035,13 @@ export function FoxTD() {
       if (key === "g" || key === "G") {
         // 手動動員護衛
         if (phaseRef.current === "play") deployEscortSquad(true);
+        return;
+      }
+      if (key === "r" || key === "R") {
+        if (tileOfferRef.current && pickTemplateRef.current) {
+          rotatePickTile();
+          ev.preventDefault();
+        }
         return;
       }
       // 1-9,0,-,= → 塔 0..11
@@ -5211,7 +5312,7 @@ export function FoxTD() {
                   <span className="text-sm text-[#e7f6ff]">
                     放置：<b className="text-[#ffe7f1]">{TEMPLATE_BY_ID[pickTemplate]?.name || pickTemplate}</b>
                   </span>
-                  <button className="btn ghost" style={{ padding: "6px 10px", fontSize: 12 }} onClick={rotatePickTile}>
+                  <button className="btn ghost" style={{ padding: "6px 10px", fontSize: 12 }} onClick={rotatePickTile} title="快捷鍵 R">
                     旋轉 {pickRot * 90}°
                   </button>
                   <button className="btn ghost" style={{ padding: "6px 10px", fontSize: 12 }} onClick={clearTilePick}>
