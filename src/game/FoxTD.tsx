@@ -1312,10 +1312,10 @@ export function FoxTD() {
       coral: "/scene/coral.png?v=4",
       pillar: "/scene/pillar.png?v=4",
       ground: "/scene/ground.png",
-      height0: "/scene/height0.png?v=2",
-      height1: "/scene/height1.png?v=2",
-      height2: "/scene/height2.png?v=2",
-      height3: "/scene/height3.png?v=2",
+      height0: "/scene/height0.png?v=5",
+      height1: "/scene/height1.png?v=5",
+      height2: "/scene/height2.png?v=5",
+      height3: "/scene/height3.png?v=5",
       entrance: "/scene/entrance.png",
       exit: "/scene/exit.png",
       sanctuary_base: "/scene/sanctuary_base.png?v=3",
@@ -3901,6 +3901,16 @@ export function FoxTD() {
           setHover(`接口 (${tc},${tr}) 與目前圖塊／旋轉無法銜接 · 按旋轉或換一塊`);
         }
       }
+
+      // 選塔放置：游標下格即時提示可否建造
+      if (pickRef.current !== null && phaseRef.current === "play" && !tileOfferRef.current) {
+        const gx = Math.floor(world.x / CELL);
+        const gy = Math.floor(world.y / CELL);
+        const why = canPlaceReason(gx, gy);
+        const hh = cellHeight(sim.current.heights, gx, gy);
+        if (!why) setHover(`可放置 · 高地 Lv${hh} · 射程 +${hh * 30}`);
+        else setHover(`不可放：${why}`);
+      }
     };
     const onUp = () => {
       sim.current.drag.on = false;
@@ -4044,15 +4054,19 @@ export function FoxTD() {
         setHover("路障已放（可被近戰拆毀）· 妖潮改道");
         return;
       }
-      for (let i = 0; i < s.towers.length; i++) {
-        const tw = s.towers[i];
-        const py = tw.y - cellHeight(s.heights, tw.gx, tw.gy) * 5;
-        if (Math.hypot(tw.x - p.x, py - p.y) < 28 / (s.cam.zoom || 1)) {
-          selRef.current = i;
-          setSel(i);
-          pickRef.current = null;
-          setPick(null);
-          return;
+      // 已選塔要放置時，優先放塔，不搶選既有建築（避免點高地卻被聖地／鄰塔吃掉）
+      if (pickRef.current === null && !stakeRef.current && !shrinePlaceRef.current) {
+        for (let i = 0; i < s.towers.length; i++) {
+          const tw = s.towers[i];
+          const py = tw.y - cellHeight(s.heights, tw.gx, tw.gy) * 5;
+          const hitR = tw.sanctuary ? 36 : 28;
+          if (Math.hypot(tw.x - p.x, py - p.y) < hitR / (s.cam.zoom || 1)) {
+            selRef.current = i;
+            setSel(i);
+            pickRef.current = null;
+            setPick(null);
+            return;
+          }
         }
       }
       // 潮紋祭壇放置模式：任意高地
@@ -4305,12 +4319,14 @@ export function FoxTD() {
 
   function isSanctuaryFootprint(gx: number, gy: number) {
     const hq = sim.current.towers.find((t) => t.sanctuary);
-    if (hq && Math.max(Math.abs(hq.gx - gx), Math.abs(hq.gy - gy)) <= 2) return true;
+    // 僅本體周圍 1 格（切比雪夫），避免大半張 HQ 地塊不能放塔
+    if (hq && Math.max(Math.abs(hq.gx - gx), Math.abs(hq.gy - gy)) <= 1) return true;
     for (const p of boardRef.current.placed) {
       if (p.templateId !== "hq") continue;
       const lc = gx - p.tc * TILE;
       const lr = gy - p.tr * TILE;
-      if (lc >= 7 && lc <= 12 && lr >= 7 && lr <= 12) return true;
+      // 核心約 4×4
+      if (lc >= 8 && lc <= 11 && lr >= 8 && lr <= 11) return true;
     }
     return false;
   }
