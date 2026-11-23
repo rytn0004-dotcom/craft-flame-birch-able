@@ -97,15 +97,15 @@ const HQ_LEAK_HIT_CAP = 100;
 const HQ_LEAK_BOSS_MUL = 1.35;
 const HQ_HP_PER_CORE_LV = 100; // 主砲升級附帶建築耐久
 /** 接觸結算間隔（越短換血越快） */
-const HQ_CONTACT_TICK = 0.12;
+const HQ_CONTACT_TICK = 0.10;
 /** 護衛對怪傷害 ≈ 自身當前生命 × 此權重（每 tick） */
-const HQ_ATK_W = 0.28;
+const HQ_ATK_W = 0.34;
 /** 怪對護衛反傷權重 */
-const HQ_REFLECT_W = 0.1;
+const HQ_REFLECT_W = 0.12;
 /** 沿路徑判定接觸的距離（格距像素感） */
-const HQ_CONTACT_PATH = 32;
+const HQ_CONTACT_PATH = 36;
 /** 像素距離備援 */
-const HQ_CONTACT_PX = 40;
+const HQ_CONTACT_PX = 44;
 
 type HqPathId = "blade" | "bow" | "tide";
 type EscortKind = "melee" | "ranged" | "healer";
