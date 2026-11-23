@@ -1461,14 +1461,20 @@ export function FoxTD() {
         if (e.rootT > 0) amount *= r.mul;
       }
 
-      if (e.armor) amount *= 0.72;
+      // 護甲：一般攻擊 0.72；燃燒／破甲塔更有效
+      if (e.armor) {
+        if (special === "burn" || special === "ultimate") amount *= 0.88;
+        else if (special === "break") amount *= 0.95;
+        else amount *= 0.72;
+      }
       if (e.shield > 0) {
         const used = Math.min(e.shield, amount);
         e.shield -= used;
         amount -= used;
       }
       e.hp -= amount;
-      float(px, py - 16, String(Math.round(amount)), "#fff");
+      float(px, py - 16, String(Math.round(amount)), special === "break" && e.armor ? "#ffe08a" : "#fff");
+      if (special === "break" && e.armor && Math.random() < 0.35) float(px, py - 28, "破甲", "#ffe08a");
       applyStatus(e, special, dmg);
 
       // 減速 / 定身 / 燃燒 / 易傷 / 印記
@@ -1997,7 +2003,9 @@ export function FoxTD() {
         if (e.vulnT > 0) e.vulnT -= dt;
         if (e.burnT > 0) {
           e.burnT -= dt;
-          e.hp -= e.burn * dt;
+          // 燃燒 DoT 略無視護甲（厚甲仍痛）
+          const burnMul = e.armor ? 0.9 : 1;
+          e.hp -= e.burn * dt * burnMul;
           if (Math.random() < 0.35) {
             const p = posAt(e.dist, e.route);
             burst(p.x, p.y, "#ff6a2a", 1, 0.8);
@@ -2536,16 +2544,22 @@ export function FoxTD() {
             engage.slow = Math.min(engage.slow, u.kind === "melee" ? 0.18 : 0.45);
             engage.slowT = Math.max(engage.slowT, u.kind === "melee" ? 0.35 : 0.2);
             if (u.contactT <= 0) {
-              const kindMul = u.kind === "melee" ? 1 : u.kind === "ranged" ? 0.72 : 0.55;
-              const dmg = Math.max(5, u.hp * p.atkW * mistMul * kindMul);
-              // 反傷有硬頂，避免 Boss 高血秒殺整排護衛
+              // 治療兵少換血；輸出用「最大血+當前血」混合，殘血仍有貢獻
+              const kindMul = u.kind === "melee" ? 1 : u.kind === "ranged" ? 0.72 : 0.28;
+              const power = u.maxHp * 0.55 + u.hp * 0.45;
+              let dmg = Math.max(5, power * p.atkW * mistMul * kindMul);
+              if (engage.armor) dmg *= 0.9; // 護衛略吃甲，留給聖輝破甲定位
+              const isBoss = !!engage.boss;
+              const reflectCap = isBoss ? 10 : 14;
               const reflect = Math.max(
                 2,
-                Math.min(14, u.maxHp * 0.16, Math.max(0, engage.hp) * HQ_REFLECT_W + dmg * 0.2),
+                Math.min(reflectCap, u.maxHp * 0.14, Math.max(0, engage.hp) * HQ_REFLECT_W + dmg * 0.18),
               );
+              // 治療兵接觸：主要減速，反傷減半
+              const refl = u.kind === "healer" ? reflect * 0.4 : reflect;
               engage.hp -= dmg;
-              u.hp -= reflect;
-              u.contactT = HQ_CONTACT_TICK;
+              if (u.kind !== "healer" || Math.random() < 0.5) u.hp -= refl;
+              u.contactT = isBoss ? HQ_CONTACT_TICK * 1.25 : HQ_CONTACT_TICK;
               const ep = posAt(engage.dist, engage.route);
               if (Math.random() < 0.4) {
                 float(ep.x, ep.y - 16, `−${Math.round(dmg)}`, u.kind === "melee" ? "#ffb4a8" : u.kind === "ranged" ? "#a8e0ff" : "#b8f0c8");
