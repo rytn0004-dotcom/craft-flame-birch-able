@@ -375,20 +375,46 @@ export function buildBlocked(board: TileBoard): Set<string> {
   return blocked;
 }
 
+/**
+ * 高地：所有「非道路」格程序化生成高度 0～3（穩定雜湊，同局可重現）
+ * 道路與未解鎖格為 0 且不可建塔。
+ */
 export function buildHeights(board: TileBoard): number[] {
   const heights = Array.from({ length: COLS * ROWS }, () => 0);
+  const hash01 = (c: number, r: number, salt: number) => {
+    let h = (c * 73856093) ^ (r * 19349663) ^ (salt * 83492791);
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    return (h >>> 0) / 4294967296;
+  };
+  // 用已放置槽位座標當鹽，每塊地略有不同傾向
   for (const p of board.placed) {
     const tpl = TEMPLATE_BY_ID[p.templateId];
     if (!tpl) continue;
-    const { blocked, heights: hs } = rotatedTemplate(tpl, p.rot);
+    const { blocked } = rotatedTemplate(tpl, p.rot);
     const origin = worldOrigin(p.tc, p.tr);
-    for (const h of hs) {
-      const lc = h.c, lr = h.r;
-      if (lc < 0 || lr < 0 || lc >= TILE || lr >= TILE) continue;
-      // 高地只在「非道路」格，避免路中央突起
-      if (!blocked[lr][lc]) continue;
-      const c = origin.c + lc, r = origin.r + lr;
-      if (c >= 0 && r >= 0 && c < COLS && r < ROWS) heights[r * COLS + c] = h.h;
+    const salt = (p.tc * 31 + p.tr * 17 + p.rot * 7 + (p.templateId.length * 13)) | 0;
+    const isHq = p.templateId === "hq";
+    for (let lr = 0; lr < TILE; lr++) {
+      for (let lc = 0; lc < TILE; lc++) {
+        // 道路（可走）不設高地
+        if (!blocked[lr][lc]) continue;
+        const c = origin.c + lc;
+        const r = origin.r + lr;
+        if (c < 0 || r < 0 || c >= COLS || r >= ROWS) continue;
+        // 聖地中心建築占位：不設可建高地（高度 0）
+        if (isHq && lc >= 7 && lc <= 12 && lr >= 7 && lr <= 12) {
+          heights[r * COLS + c] = 0;
+          continue;
+        }
+        const u = hash01(c, r, salt);
+        // 權重：0 與 1 稍多，3 較少
+        let h = 0;
+        if (u < 0.28) h = 0;
+        else if (u < 0.58) h = 1;
+        else if (u < 0.85) h = 2;
+        else h = 3;
+        heights[r * COLS + c] = h;
+      }
     }
   }
   return heights;

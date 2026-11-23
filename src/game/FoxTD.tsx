@@ -1390,9 +1390,10 @@ export function FoxTD() {
       coral: "/scene/coral.png?v=4",
       pillar: "/scene/pillar.png?v=4",
       ground: "/scene/ground.png",
-      height1: "/scene/height1.png",
-      height2: "/scene/height2.png",
-      height3: "/scene/height3.png",
+      height0: "/scene/height0.png?v=2",
+      height1: "/scene/height1.png?v=2",
+      height2: "/scene/height2.png?v=2",
+      height3: "/scene/height3.png?v=2",
       entrance: "/scene/entrance.png",
       exit: "/scene/exit.png",
     })) {
@@ -3144,45 +3145,7 @@ export function FoxTD() {
         }
       }
 
-      ctx.textAlign = "center";
-      const heightImgs = [null, s.scene.height1, s.scene.height2, s.scene.height3];
-      for (let r = y0; r <= y1; r++) {
-        for (let c = x0; c <= x1; c++) {
-          const h = cellHeight(s.heights, c, r);
-          if (h <= 0) continue;
-          const x = c * CELL;
-          const y = r * CELL;
-          const lift = h * 6;
-          const himg = heightImgs[Math.min(3, h)];
-          if (himg && himg.complete && himg.naturalWidth) {
-            ctx.globalAlpha = 0.92;
-            ctx.drawImage(himg, x - 4, y - 10 - lift, CELL + 8, CELL + 12);
-            ctx.globalAlpha = 1;
-          } else {
-            // 後備：圓角礁岩台
-            const cols = [
-              null,
-              ["rgba(40,90,105,0.7)", "rgba(100,180,195,0.75)"],
-              ["rgba(50,110,125,0.75)", "rgba(130,205,220,0.8)"],
-              ["rgba(120,90,40,0.75)", "rgba(255,220,140,0.85)"],
-            ] as const;
-            const pair = cols[h]!;
-            ctx.fillStyle = pair[0];
-            ctx.beginPath();
-            ctx.ellipse(x + CELL / 2, y + CELL / 2 + 4 - lift * 0.3, CELL * 0.42, CELL * 0.28, 0, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.fillStyle = pair[1];
-            ctx.beginPath();
-            ctx.ellipse(x + CELL / 2, y + CELL / 2 - 6 - lift * 0.5, CELL * 0.38, CELL * 0.26, 0, 0, Math.PI * 2);
-            ctx.fill();
-          }
-          if (workshopRef.current) {
-            ctx.fillStyle = h === 3 ? "#fff4d2" : "#e9fbff";
-            ctx.font = "bold 11px sans-serif";
-            ctx.fillText(String(h), x + CELL / 2, y + 14 - lift);
-          }
-        }
-      }
+      // 高地模塊已在 blocked 層繪製（height0～3）
       ctx.textAlign = "left";
 
       // 自然地形遮擋：域外 = 深海／礁岩／斷崖／藻林；域內路障 = 廢墟牆／珊瑚障
@@ -3241,42 +3204,36 @@ export function FoxTD() {
             }
           
           } else {
-            // —— 域內可走區上的路障：可拆除的廢墟／珊瑚障 ——
-            ctx.fillStyle = "rgba(22, 28, 40, 0.55)";
-            ctx.fillRect(x + 3, y + 3, CELL - 6, CELL - 6);
-
-            if (rnd < 0.45) {
-              // 崩塌石牆
-              ctx.fillStyle = "rgba(55, 62, 78, 0.92)";
-              ctx.fillRect(x + 5, y + 6, CELL - 10, CELL - 10);
-              ctx.strokeStyle = "rgba(160, 190, 210, 0.35)";
-              ctx.strokeRect(x + 5, y + 6, CELL - 10, CELL - 10);
-              ctx.fillStyle = "rgba(255, 200, 160, 0.15)";
-              ctx.fillRect(x + 5, y + 6, CELL - 10, 4);
-            } else if (rnd < 0.75) {
-              // 活珊瑚障
-              const coral = s.scene.coral;
-              if (coral && coral.complete && coral.naturalWidth) {
-                ctx.globalAlpha = 0.85;
-                blit(ctx, coral, x + 2, y + 2, CELL - 4, CELL - 4);
+            // —— 域內高地模塊（0～3），一眼可辨高度；取代舊珊瑚／石柱障礙 ——
+            {
+              const hh = cellHeight(s.heights, c, r);
+              const lift = hh * 5;
+              const keys = ["height0", "height1", "height2", "height3"] as const;
+              const himg = s.scene[keys[Math.max(0, Math.min(3, hh))]];
+              // 側影抬升
+              if (hh > 0) {
+                ctx.fillStyle = "rgba(20, 35, 55, 0.35)";
+                ctx.fillRect(x + 2, y + CELL - 4, CELL - 4, 3 + lift * 0.15);
+              }
+              if (himg && himg.complete && himg.naturalWidth) {
+                ctx.globalAlpha = hh === 0 ? 0.82 : 0.92;
+                const pad = hh === 0 ? 2 : 0;
+                ctx.drawImage(himg, x - 2 + pad, y - 6 - lift + pad, CELL + 4 - pad * 2, CELL + 8 - pad * 2);
                 ctx.globalAlpha = 1;
               } else {
-                ctx.fillStyle = "rgba(200, 90, 120, 0.7)";
-                ctx.beginPath();
-                ctx.arc(x + CELL / 2, y + CELL / 2, CELL * 0.32, 0, Math.PI * 2);
-                ctx.fill();
+                // 後備：色階平台
+                const cols = ["#5a6b7c", "#6a8a9e", "#7aa0b0", "#8ec4c0"];
+                ctx.fillStyle = cols[hh] || cols[0];
+                ctx.fillRect(x + 3, y + 3 - lift * 0.3, CELL - 6, CELL - 6);
+                ctx.strokeStyle = "rgba(255, 220, 150, 0.35)";
+                ctx.strokeRect(x + 3, y + 3 - lift * 0.3, CELL - 6, CELL - 6);
               }
-            } else {
-              // 短石柱
-              const pillar = s.scene.pillar;
-              if (pillar && pillar.complete && pillar.naturalWidth) {
-                ctx.globalAlpha = 0.9;
-                blit(ctx, pillar, x + 6, y + 2, CELL - 12, CELL - 4);
-                ctx.globalAlpha = 1;
-              } else {
-                ctx.fillStyle = "rgba(90, 100, 120, 0.9)";
-                ctx.fillRect(x + CELL * 0.3, y + 4, CELL * 0.4, CELL - 8);
-              }
+              // 角標高度數字（小、不搶戲）
+              ctx.font = "bold 9px sans-serif";
+              ctx.textAlign = "right";
+              ctx.fillStyle = hh >= 2 ? "rgba(255, 230, 160, 0.9)" : "rgba(180, 220, 240, 0.75)";
+              ctx.fillText("+" + hh, x + CELL - 3, y + 11 - lift * 0.2);
+              ctx.textAlign = "left";
             }
           }
         }
@@ -3951,7 +3908,7 @@ export function FoxTD() {
       const cost = Math.max(1, Math.round(base.cost * (diff.towerCostMul ?? 1)));
       const dmg = base.damage * (diff.towerDmgMul ?? 1);
       if (!canPlace(gx, gy)) {
-        setHover("這格不能放塔");
+        setHover("只能放在高地上（道路／聖地不可建）");
         return;
       }
       if (goldRef.current < cost) {
@@ -4170,13 +4127,27 @@ export function FoxTD() {
     setHover("返回選塊 · 請再選模板");
   }
 
+  function isSanctuaryFootprint(gx: number, gy: number) {
+    const hq = sim.current.towers.find((t) => t.sanctuary);
+    if (hq && Math.max(Math.abs(hq.gx - gx), Math.abs(hq.gy - gy)) <= 2) return true;
+    for (const p of boardRef.current.placed) {
+      if (p.templateId !== "hq") continue;
+      const lc = gx - p.tc * TILE;
+      const lr = gy - p.tr * TILE;
+      if (lc >= 7 && lc <= 12 && lr >= 7 && lr <= 12) return true;
+    }
+    return false;
+  }
+
+  /** 塔只能放在高地（非道路、非聖地）；高度 0～3 皆可建 */
   function canPlace(gx: number, gy: number) {
     if (!Number.isInteger(gx) || !Number.isInteger(gy)) return false;
     if (gx < 0 || gy < 0 || gx >= COLS || gy >= ROWS) return false;
     if (!isCellOnBoard(boardRef.current, gx, gy)) return false;
     if (gateHere(gx, gy)) return false;
+    if (isSanctuaryFootprint(gx, gy)) return false;
     const key = cellKey(gx, gy);
-    if (sim.current.blocked.has(key)) return false;
+    if (!sim.current.blocked.has(key)) return false; // 道路不可建
     if (sim.current.towers.some((t) => t.gx === gx && t.gy === gy)) return false;
     return true;
   }
