@@ -1608,9 +1608,9 @@ export function FoxTD() {
             s.bossBanner = {
               name: et.name || "潮潮巨敵",
               skills: labeled,
-              life: 2.4,
+              life: 3.2,
             };
-            s.bossFreezeT = Math.max(s.bossFreezeT, 0.55);
+            s.bossFreezeT = Math.max(s.bossFreezeT, 0.85);
             const hq = s.towers.find((t) => t.sanctuary);
             if (hq) hq.shake = Math.max(hq.shake, 0.55);
             float(hq?.x ?? 0, (hq?.y ?? 0) - 40, `Boss · ${et.name}`, "#ffd27a");
@@ -1826,7 +1826,10 @@ export function FoxTD() {
         e.aiAction = bb.lastAction;
         if (s.bossFreezeT <= 0 && e.rootT <= 0 && e.aiSpeed > 0.05) {
           const slow = e.noslow ? 1 : e.slowT > 0 ? e.slow : 1;
-          e.dist += e.speed * 0.88 * slow * e.aiSpeed * e.hasteMul * (e.rage ? 1.12 : 1) * dt;
+          {
+          const laneSoft = 1 - Math.min(0.18, Math.max(0, routes.length - 1) * 0.045);
+          e.dist += e.speed * 0.88 * laneSoft * slow * e.aiSpeed * e.hasteMul * (e.rage ? 1.12 : 1) * dt;
+        }
         }
         if (e.dist >= routeLen(e.route)) {
           const hq = s.towers.find((t) => t.sanctuary);
@@ -2123,7 +2126,7 @@ export function FoxTD() {
                       maxHp,
                       route,
                       dist,
-                      speed: kind === "melee" ? 42 : kind === "ranged" ? 38 : 36,
+                      speed: kind === "melee" ? 48 : kind === "ranged" ? 44 : 40,
                       contactT: 0,
                       shootCd: 0.35 * i,
                       healCd: 1.0,
@@ -2217,10 +2220,13 @@ export function FoxTD() {
               }
             }
             if (target) {
-              target.hp -= p.rangedDmg * 1.15;
-              u.shootCd = 0.7;
+              const rd = p.rangedDmg * 1.25;
+              target.hp -= rd;
+              u.shootCd = 0.62;
+              const tp = posAt(target.dist, target.route);
+              if (Math.random() < 0.35) float(tp.x, tp.y - 16, `−${Math.round(rd)}`, "#a8e0ff");
               if (target.hp <= 0) {
-                goldRef.current += Math.max(1, Math.round((target.gold || 4) * 0.85));
+                goldRef.current += Math.max(1, Math.round((target.gold || 4) * 0.9));
                 setGold(goldRef.current);
               }
             } else u.shootCd = 0.15;
@@ -2471,6 +2477,22 @@ export function FoxTD() {
         ctx.stroke();
       }
 
+
+      // 高壓戰線路徑淡紅描邊
+      {
+        const hr = s.hotRoute;
+        const pts = routes[hr]?.pts;
+        if (pts && pts.length > 1 && ((s as { routePressure?: number[] }).routePressure?.[hr] ?? 0) > 0.2) {
+          ctx.beginPath();
+          ctx.strokeStyle = "rgba(255, 100, 90, 0.38)";
+          ctx.lineWidth = 7;
+          ctx.lineJoin = "round";
+          ctx.moveTo(pts[0].x, pts[0].y);
+          for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+          ctx.stroke();
+        }
+      }
+
       // 可走潮坪：貼圖平鋪 + 柔和底色
       const groundImg = s.scene.ground;
       const groundReady = !!(groundImg && groundImg.complete && groundImg.naturalWidth);
@@ -2495,6 +2517,43 @@ export function FoxTD() {
         }
       }
 
+
+      // 選塔放置時：鄰格狐緣預覽（可組成霜焰／璃貫／影裁）
+      if (pickRef.current != null && phaseRef.current === "play") {
+        const def = towerBookRef.current[pickRef.current] ?? TOWERS[pickRef.current];
+        const sp = def?.special;
+        const gx = Math.floor(s.pointer.x / CELL);
+        const gy = Math.floor(s.pointer.y / CELL);
+        if (sp && gx >= 0 && gy >= 0 && gx < COLS && gy < ROWS) {
+          const partners: Record<string, string> = {
+            slow: "burn", burn: "slow", chain: "pierce", pierce: "chain", root: "execute", execute: "root",
+          };
+          const need = partners[sp];
+          const bondName = FOX_BONDS.find((b) => (b.a === sp && b.b === need) || (b.b === sp && b.a === need))?.name;
+          if (need) {
+            for (const tw of s.towers) {
+              if (tw.stake || tw.sanctuary) continue;
+              const osp = tw.special || towerBookRef.current[tw.def]?.special;
+              if (osp !== need) continue;
+              if (Math.max(Math.abs(tw.gx - gx), Math.abs(tw.gy - gy)) > 1) continue;
+              // 高亮夥伴塔與預放格
+              ctx.strokeStyle = "rgba(255, 200, 120, 0.95)";
+              ctx.lineWidth = 2.5;
+              ctx.strokeRect(tw.gx * CELL + 2, tw.gy * CELL + 2, CELL - 4, CELL - 4);
+              ctx.strokeRect(gx * CELL + 2, gy * CELL + 2, CELL - 4, CELL - 4);
+              ctx.fillStyle = "rgba(255, 210, 140, 0.2)";
+              ctx.fillRect(gx * CELL, gy * CELL, CELL, CELL);
+              if (bondName) {
+                ctx.fillStyle = "#ffe08a";
+                ctx.font = "bold 11px sans-serif";
+                ctx.textAlign = "center";
+                ctx.fillText(`狐緣·${bondName}`, gx * CELL + CELL / 2, gy * CELL - 6);
+                ctx.textAlign = "left";
+              }
+            }
+          }
+        }
+      }
 
       if (tileOfferRef.current && pickTemplateRef.current) {
         const tid = pickTemplateRef.current;
@@ -4487,7 +4546,7 @@ export function FoxTD() {
         maxHp,
         route,
         dist,
-        speed: kind === "melee" ? 42 : kind === "ranged" ? 38 : 36,
+        speed: kind === "melee" ? 48 : kind === "ranged" ? 44 : 40,
         contactT: 0,
         shootCd: 0.4 * i,
         healCd: 1.2,
@@ -4586,6 +4645,25 @@ export function FoxTD() {
         if (selRef.current !== null) upgrade("rate");
         return;
       }
+      if (key === "h" || key === "H") {
+        if (phaseRef.current === "play") {
+          focusCameraOnSanctuary();
+          setHover("視角已對準聖地 [H]");
+        }
+        return;
+      }
+      if (key === " " || key === "Enter") {
+        if (phaseRef.current === "play" && !pausedRef.current) {
+          ev.preventDefault();
+          callWave();
+        }
+        return;
+      }
+      if (key === "g" || key === "G") {
+        // 手動動員護衛
+        if (phaseRef.current === "play") deployEscortSquad(true);
+        return;
+      }
       // 1-9,0,-,= → 塔 0..11
       const map: Record<string, number> = {
         "1": 0, "2": 1, "3": 2, "4": 3, "5": 4, "6": 5, "7": 6, "8": 7, "9": 8, "0": 9, "-": 10, "=": 11,
@@ -4622,7 +4700,7 @@ export function FoxTD() {
           <h1 className="font-['Cormorant_Garamond'] text-4xl leading-none text-[#ffe7f1]">狐仙塔防</h1>
         </div>
         <p className="hidden text-sm text-[#9ec4de] sm:block">
-          滾輪縮放 · [D/F]升級 · 狐緣：霜+火／鏈+貫／縛+斬（鄰格）· 紅線=高壓戰線
+          滾輪縮放 · [空格]下一波 · [H]對準聖地 · [G]護衛 · [D/F]升級 · 狐緣鄰格 · 紅線=高壓
         </p>
       </header>
       <div className="td-layout">
