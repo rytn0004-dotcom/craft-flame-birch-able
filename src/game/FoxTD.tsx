@@ -894,262 +894,271 @@ function drawSanctuaryCastle(
   },
   t: number,
   pathName: string,
-  art?: HTMLImageElement | null,
+  _art?: HTMLImageElement | null,
 ) {
+  // 與潮汐／珊瑚場景同色系的 2.5D 聖城（不用突兀寫實貼圖）
   const fire = tw.hqFireLv ?? 0;
   const fort = tw.hqFortifyLv ?? 0;
-  const pulse = 0.88 + Math.sin(t * 1.8) * 0.06;
-  const R = CELL * 2.55;
-  const sh = (tw.shake ?? 0) > 0 ? (Math.random() - 0.5) * 4 : 0;
+  const pulse = 0.9 + Math.sin(t * 1.7) * 0.05;
+  const bob = Math.sin(t * 1.4) * 1.2;
+  const R = CELL * 2.15; // 約 4 格寬，貼合 5×5 聖地
+  const sh = (tw.shake ?? 0) > 0 ? (Math.random() - 0.5) * 3 : 0;
   const flash = Math.max(0, tw.hqBuildFlash ?? 0);
+  const aim = tw.aim ?? -Math.PI / 2;
 
   ctx.save();
-  ctx.translate(tw.x + sh, tw.y + sh);
+  ctx.translate(tw.x + sh, tw.y + sh + bob);
 
-  // —— 神聖光暈 ——
-  const g0 = ctx.createRadialGradient(0, 0, R * 0.2, 0, 0, R * 1.45);
-  g0.addColorStop(0, `rgba(255, 236, 180, ${0.28 * pulse})`);
-  g0.addColorStop(0.45, `rgba(120, 180, 255, ${0.14 * pulse})`);
-  g0.addColorStop(1, "rgba(40, 60, 120, 0)");
-  ctx.fillStyle = g0;
+  // 腳底陰影（與塔一致的橢圓）
   ctx.beginPath();
-  ctx.arc(0, 0, R * 1.45, 0, Math.PI * 2);
+  ctx.ellipse(0, R * 0.72, R * 0.95, R * 0.28, 0, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(0, 10, 30, 0.35)";
   ctx.fill();
 
-  // —— 3D 聖城貼圖（優先）——
-  if (art && art.complete && art.naturalWidth > 8) {
-    const iw = R * 2.35;
-    const ih = R * 1.85;
-    ctx.globalAlpha = 0.98;
-    ctx.drawImage(art, -iw / 2, -ih / 2 - R * 0.12, iw, ih);
-    ctx.globalAlpha = 1;
-    // 升級閃光
-    if (flash > 0) {
-      ctx.globalAlpha = flash * 0.45;
-      ctx.fillStyle = "#ffe08a";
-      ctx.beginPath();
-      ctx.arc(0, 0, R * 0.9, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.globalAlpha = 1;
-    }
-    // 火力等級角樓／聖砲開火特效仍疊在貼圖上
-    // （下方共用角樓動畫區塊）
-  } else {
-  // —— 護城石基（無貼圖後備）——
-  const wallTop = -R * 0.92;
-  const wallBot = R * 0.95;
-  const wallL = -R * 0.95;
-  const wallR = R * 0.95;
-  // 外牆陰影
-  ctx.fillStyle = "rgba(8, 14, 28, 0.55)";
-  ctx.fillRect(wallL + 6, wallTop + 8, wallR - wallL, wallBot - wallTop);
-
-  // 主牆體（石色，加固越深越厚）
-  const wallInset = Math.max(0, 4 - fort);
-  ctx.fillStyle = fort >= 2 ? "#3a4558" : fort >= 1 ? "#434e62" : "#4a5568";
-  ctx.strokeStyle = flash > 0 ? `rgba(255,230,160,${0.5 + flash})` : "rgba(220, 200, 150, 0.65)";
-  ctx.lineWidth = 2.5 + Math.min(2, fort);
+  // 潮池／聖域地盤（融入潮坪）
+  const pad = ctx.createRadialGradient(0, R * 0.15, R * 0.2, 0, 0, R * 1.1);
+  pad.addColorStop(0, `rgba(120, 200, 230, ${0.2 * pulse})`);
+  pad.addColorStop(0.55, `rgba(40, 90, 130, 0.25)`);
+  pad.addColorStop(1, "rgba(10, 30, 50, 0)");
+  ctx.fillStyle = pad;
   ctx.beginPath();
-  ctx.rect(wallL + wallInset, wallTop + wallInset, wallR - wallL - wallInset * 2, wallBot - wallTop - wallInset * 2);
+  ctx.ellipse(0, R * 0.1, R * 1.05, R * 0.55, 0, 0, Math.PI * 2);
   ctx.fill();
+
+  // 神聖淡光（不搶戲）
+  const halo = ctx.createRadialGradient(0, -R * 0.2, 4, 0, 0, R * 1.2);
+  halo.addColorStop(0, `rgba(255, 230, 170, ${0.18 * pulse})`);
+  halo.addColorStop(0.5, `rgba(140, 190, 255, ${0.08 * pulse})`);
+  halo.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = halo;
+  ctx.beginPath();
+  ctx.arc(0, -R * 0.1, R * 1.15, 0, Math.PI * 2);
+  ctx.fill();
+
+  // —— 主牆：圓角石堡，色調贴近場景灰藍 ——
+  const wallW = R * 1.55;
+  const wallH = R * 1.15;
+  const wallX = -wallW / 2;
+  const wallY = -wallH * 0.55;
+  const stone = fort >= 2 ? "#4a5a6e" : fort >= 1 ? "#516278" : "#5a6b82";
+  const stoneHi = fort >= 1 ? "#7a8fa8" : "#6e8299";
+  // 側牆（2.5D）
+  ctx.fillStyle = "#3a4658";
+  ctx.beginPath();
+  ctx.moveTo(wallX + wallW, wallY + 8);
+  ctx.lineTo(wallX + wallW + 10, wallY + 16);
+  ctx.lineTo(wallX + wallW + 10, wallY + wallH + 6);
+  ctx.lineTo(wallX + wallW, wallY + wallH - 2);
+  ctx.closePath();
+  ctx.fill();
+  // 正面
+  const wg = ctx.createLinearGradient(0, wallY, 0, wallY + wallH);
+  wg.addColorStop(0, stoneHi);
+  wg.addColorStop(1, stone);
+  ctx.fillStyle = wg;
+  roundRect(ctx, wallX, wallY, wallW, wallH, 10);
+  ctx.fill();
+  ctx.strokeStyle = flash > 0 ? `rgba(255,220,150,${0.4 + flash * 0.5})` : "rgba(180, 210, 230, 0.35)";
+  ctx.lineWidth = 1.5 + Math.min(1.5, fort * 0.5);
   ctx.stroke();
-
-  // 磚縫
-  ctx.strokeStyle = "rgba(20, 28, 40, 0.35)";
+  // 磚縫（淡）
+  ctx.strokeStyle = "rgba(20, 30, 45, 0.22)";
   ctx.lineWidth = 1;
-  for (let y = wallTop + 14; y < wallBot - 8; y += 14) {
+  for (let y = wallY + 14; y < wallY + wallH - 10; y += 12) {
     ctx.beginPath();
-    ctx.moveTo(wallL + 8, y);
-    ctx.lineTo(wallR - 8, y);
+    ctx.moveTo(wallX + 8, y);
+    ctx.lineTo(wallX + wallW - 8, y);
     ctx.stroke();
   }
-
-  // 雉堞（城垛）
-  ctx.fillStyle = "#5a6578";
-  const merlonW = 14;
-  for (let x = wallL + 6; x < wallR - 6; x += merlonW + 6) {
-    ctx.fillRect(x, wallTop - 10, merlonW, 12);
-  }
-  for (let y = wallTop + 10; y < wallBot - 10; y += merlonW + 6) {
-    ctx.fillRect(wallL - 8, y, 10, merlonW);
-    ctx.fillRect(wallR - 2, y, 10, merlonW);
+  // 雉堞
+  ctx.fillStyle = stoneHi;
+  const mw = 11;
+  for (let x = wallX + 6; x < wallX + wallW - 6; x += mw + 5) {
+    ctx.fillRect(x, wallY - 8, mw, 10);
   }
 
-  // —— 內殿／聖堂主樓 ——
-  ctx.fillStyle = "#2a3348";
-  ctx.fillRect(-R * 0.42, -R * 0.55, R * 0.84, R * 0.85);
-  ctx.strokeStyle = "rgba(255, 220, 160, 0.4)";
-  ctx.strokeRect(-R * 0.42, -R * 0.55, R * 0.84, R * 0.85);
-
-  // 尖頂屋頂
+  // 正門拱
+  ctx.fillStyle = "#1a2433";
   ctx.beginPath();
-  ctx.moveTo(-R * 0.48, -R * 0.52);
-  ctx.lineTo(0, -R * 1.05);
-  ctx.lineTo(R * 0.48, -R * 0.52);
-  ctx.closePath();
-  ctx.fillStyle = "#6b3a4a";
+  ctx.moveTo(-11, wallY + wallH - 4);
+  ctx.lineTo(-11, wallY + wallH - 28);
+  ctx.quadraticCurveTo(0, wallY + wallH - 40, 11, wallY + wallH - 28);
+  ctx.lineTo(11, wallY + wallH - 4);
   ctx.fill();
-  ctx.strokeStyle = "rgba(255, 200, 140, 0.5)";
+  ctx.strokeStyle = "rgba(200, 220, 255, 0.25)";
   ctx.stroke();
 
-  // 聖光窗
-  ctx.fillStyle = `rgba(255, 230, 160, ${0.35 + 0.2 * pulse})`;
-  ctx.beginPath();
-  ctx.arc(0, -R * 0.15, 10, 0, Math.PI * 2);
+  // —— 中央聖堂小樓 ——
+  const keepW = R * 0.72;
+  const keepH = R * 0.7;
+  const keepX = -keepW / 2;
+  const keepY = wallY - keepH * 0.55;
+  const kg = ctx.createLinearGradient(0, keepY, 0, keepY + keepH);
+  kg.addColorStop(0, "#6a7d96");
+  kg.addColorStop(1, "#45566c");
+  ctx.fillStyle = kg;
+  roundRect(ctx, keepX, keepY, keepW, keepH, 8);
   ctx.fill();
-  ctx.fillStyle = `rgba(180, 220, 255, ${0.25 * pulse})`;
-  ctx.fillRect(-6, R * 0.05, 12, 22);
-
-  // 正門
-  ctx.fillStyle = "#1a2030";
+  ctx.strokeStyle = "rgba(255, 220, 160, 0.28)";
+  ctx.stroke();
+  // 屋頂（軟三角，潮金）
   ctx.beginPath();
-  ctx.moveTo(-12, wallBot - 8);
-  ctx.lineTo(-12, wallBot - 36);
-  ctx.quadraticCurveTo(0, wallBot - 48, 12, wallBot - 36);
-  ctx.lineTo(12, wallBot - 8);
+  ctx.moveTo(keepX - 4, keepY + 4);
+  ctx.lineTo(0, keepY - R * 0.38);
+  ctx.lineTo(keepX + keepW + 4, keepY + 4);
+  ctx.closePath();
+  const roof = ctx.createLinearGradient(0, keepY - R * 0.38, 0, keepY + 8);
+  roof.addColorStop(0, "#e8c878");
+  roof.addColorStop(1, "#a87840");
+  ctx.fillStyle = roof;
   ctx.fill();
+  ctx.strokeStyle = "rgba(255, 240, 200, 0.35)";
+  ctx.stroke();
+  // 聖窗光
+  ctx.fillStyle = `rgba(160, 220, 255, ${0.35 + 0.2 * pulse})`;
+  ctx.beginPath();
+  ctx.arc(0, keepY + keepH * 0.45, 7, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = `rgba(255, 230, 160, ${0.25 * pulse})`;
+  ctx.fillRect(-4, keepY + keepH * 0.55, 8, 14);
 
-  // 旗幟
-  const flagX = R * 0.35;
-  const flagY = -R * 1.0;
+  // 頂旗（輕動）
+  const fx = R * 0.22;
+  const fy = keepY - R * 0.32;
   ctx.strokeStyle = "#c9b896";
-  ctx.lineWidth = 2;
+  ctx.lineWidth = 1.5;
   ctx.beginPath();
-  ctx.moveTo(flagX, flagY);
-  ctx.lineTo(flagX, flagY + 28);
+  ctx.moveTo(fx, fy);
+  ctx.lineTo(fx, fy + 20);
   ctx.stroke();
-  const fw = 16 + Math.sin(t * 3) * 2;
-  ctx.fillStyle = "#e8c070";
+  const fw = 12 + Math.sin(t * 2.8) * 2;
+  ctx.fillStyle = "rgba(255, 220, 140, 0.9)";
   ctx.beginPath();
-  ctx.moveTo(flagX, flagY);
-  ctx.lineTo(flagX + fw, flagY + 6);
-  ctx.lineTo(flagX, flagY + 12);
+  ctx.moveTo(fx, fy);
+  ctx.lineTo(fx + fw, fy + 5);
+  ctx.lineTo(fx, fy + 10);
   ctx.closePath();
   ctx.fill();
 
-  // HP 條
-  const ratio = Math.max(0, tw.hp / Math.max(1, tw.maxHp));
-  ctx.fillStyle = "rgba(0,0,0,0.5)";
-  ctx.fillRect(-R * 0.5, R * 1.05, R, 5);
-  ctx.fillStyle = ratio > 0.35 ? "#7ec8ff" : "#ff8aa0";
-  ctx.fillRect(-R * 0.5, R * 1.05, R * ratio, 5);
-
-  // 標籤
-  ctx.textAlign = "center";
-  ctx.font = "bold 11px sans-serif";
-  ctx.fillStyle = "#ffe7c2";
-  ctx.fillText("聖地", 0, R * 0.55);
-  ctx.font = "9px sans-serif";
-  ctx.fillStyle = "#9ad7ff";
-  ctx.fillText(pathName, 0, R * 0.7);
-  } // end procedural else
-
-  // 貼圖／後備共用：HP
-  {
-    const ratio = Math.max(0, tw.hp / Math.max(1, tw.maxHp));
-    ctx.fillStyle = "rgba(0,0,0,0.5)";
-    ctx.fillRect(-R * 0.5, R * 1.02, R, 5);
-    ctx.fillStyle = ratio > 0.35 ? "#7ec8ff" : "#ff8aa0";
-    ctx.fillRect(-R * 0.5, R * 1.02, R * ratio, 5);
-    ctx.textAlign = "center";
-    ctx.font = "bold 10px sans-serif";
-    ctx.fillStyle = "#ffe7c2";
-    ctx.fillText("聖地", 0, R * 0.92);
-    ctx.font = "9px sans-serif";
-    ctx.fillStyle = "#9ad7ff";
-    ctx.fillText(pathName, 0, R * 1.18);
-  }
-
-  // —— 四角砲台（火力 ≥1）——
+  // —— 四角砲台（火力≥1）：同風格小塔 + 砲管 ——
   const corners = [
-    { x: wallL + 8, y: wallTop + 8 },
-    { x: wallR - 8, y: wallTop + 8 },
-    { x: wallL + 8, y: wallBot - 8 },
-    { x: wallR - 8, y: wallBot - 8 },
+    { x: wallX + 6, y: wallY + 6 },
+    { x: wallX + wallW - 6, y: wallY + 6 },
+    { x: wallX + 6, y: wallY + wallH - 6 },
+    { x: wallX + wallW - 6, y: wallY + wallH - 6 },
   ];
   if (fire >= 1) {
     const atkArr = tw.hqTurretAtk ?? [0, 0, 0, 0];
     corners.forEach((c, i) => {
       const atk = Math.max(0, Math.min(1, atkArr[i] ?? 0));
-      const kick = Math.sin(atk * Math.PI) * 4;
-      const ang = tw.aim ?? -Math.PI / 2;
+      const kick = Math.sin(atk * Math.PI) * 3;
       ctx.save();
       ctx.translate(c.x, c.y);
-      // 角樓基座
-      ctx.fillStyle = "#5c4a3a";
-      ctx.fillRect(-9, -9, 18, 18);
-      ctx.strokeStyle = "rgba(255, 210, 140, 0.55)";
-      ctx.strokeRect(-9, -9, 18, 18);
-      // 砲管
-      ctx.rotate(ang);
-      ctx.fillStyle = atk > 0.05 ? "#e8d0a0" : "#8a7a60";
-      ctx.fillRect(4 - kick, -3, 16 + kick, 6);
-      ctx.fillStyle = "#2a2018";
+      // 小圓塔
+      ctx.fillStyle = "#5c6d82";
       ctx.beginPath();
-      ctx.arc(4, 0, 5, 0, Math.PI * 2);
+      ctx.arc(0, 0, 11, 0, Math.PI * 2);
       ctx.fill();
-      // 開火閃光
+      ctx.strokeStyle = "rgba(200, 220, 240, 0.4)";
+      ctx.stroke();
+      ctx.fillStyle = "#4a5a6e";
+      ctx.beginPath();
+      ctx.arc(0, -8, 7, 0, Math.PI * 2);
+      ctx.fill();
+      // 砲管對準
+      ctx.rotate(aim);
+      ctx.fillStyle = atk > 0.08 ? "#e8d4a8" : "#7a6a50";
+      ctx.fillRect(6 - kick * 0.4, -2.5, 14 + kick, 5);
       if (atk > 0.15 && atk < 0.85) {
-        const g = ctx.createRadialGradient(18, 0, 1, 18, 0, 14);
-        g.addColorStop(0, "rgba(255, 240, 180, 0.9)");
-        g.addColorStop(0.4, "rgba(255, 160, 60, 0.45)");
-        g.addColorStop(1, "rgba(255, 80, 20, 0)");
+        const g = ctx.createRadialGradient(18, 0, 1, 18, 0, 12);
+        g.addColorStop(0, "rgba(255, 240, 180, 0.85)");
+        g.addColorStop(0.5, "rgba(255, 150, 60, 0.35)");
+        g.addColorStop(1, "rgba(255,80,20,0)");
         ctx.fillStyle = g;
         ctx.beginPath();
-        ctx.arc(18, 0, 14, 0, Math.PI * 2);
+        ctx.arc(18, 0, 12, 0, Math.PI * 2);
         ctx.fill();
       }
       ctx.restore();
     });
   }
 
-  // —— 屋頂聖砲（火力 ≥2）——
+  // —— 屋頂聖砲（火力≥2）——
   if (fire >= 2) {
     const catk = Math.max(0, Math.min(1, tw.hqCannonAtk ?? 0));
-    const kick = Math.sin(catk * Math.PI) * 6;
+    const kick = Math.sin(catk * Math.PI) * 5;
     ctx.save();
-    ctx.translate(0, -R * 0.72);
-    // 砲座
-    ctx.fillStyle = "#4a3a2a";
+    ctx.translate(0, keepY - R * 0.08);
+    ctx.fillStyle = "#4a3e30";
     ctx.beginPath();
-    ctx.ellipse(0, 6, 16, 8, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, 4, 12, 6, 0, 0, Math.PI * 2);
     ctx.fill();
-    ctx.rotate(tw.aim ?? -Math.PI / 2);
-    // 砲身
-    ctx.fillStyle = catk > 0.05 ? "#d4c090" : "#6a5a40";
-    ctx.fillRect(0 - kick * 0.3, -7, 28 + kick, 14);
+    ctx.rotate(aim);
+    ctx.fillStyle = catk > 0.08 ? "#e8d4a0" : "#6a5a42";
+    ctx.fillRect(-2 - kick * 0.2, -5, 22 + kick, 10);
     ctx.fillStyle = "#1a1510";
-    ctx.fillRect(24 + kick, -4, 8, 8);
-    // 聖紋
-    ctx.strokeStyle = "rgba(255, 220, 140, 0.7)";
-    ctx.strokeRect(4, -5, 12, 10);
+    ctx.fillRect(18 + kick, -3, 6, 6);
     if (catk > 0.12 && catk < 0.9) {
-      const g = ctx.createRadialGradient(32, 0, 2, 32, 0, 22);
-      g.addColorStop(0, "rgba(255, 250, 200, 1)");
-      g.addColorStop(0.35, "rgba(255, 180, 80, 0.55)");
-      g.addColorStop(1, "rgba(255, 100, 40, 0)");
+      const g = ctx.createRadialGradient(26, 0, 1, 26, 0, 18);
+      g.addColorStop(0, "rgba(255,250,200,0.95)");
+      g.addColorStop(0.4, "rgba(255,180,80,0.4)");
+      g.addColorStop(1, "rgba(255,100,40,0)");
       ctx.fillStyle = g;
       ctx.beginPath();
-      ctx.arc(32, 0, 22, 0, Math.PI * 2);
+      ctx.arc(26, 0, 18, 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.restore();
-  } else if (fire >= 1) {
-    // 火力1：屋頂先放簡單聖燈
-    ctx.fillStyle = `rgba(255, 230, 160, ${0.5 * pulse})`;
+  } else {
+    // 未裝聖砲：頂部聖焰小點
+    ctx.fillStyle = `rgba(255, 230, 160, ${0.45 * pulse})`;
     ctx.beginPath();
-    ctx.arc(0, -R * 0.72, 6, 0, Math.PI * 2);
+    ctx.arc(0, keepY - R * 0.28, 4, 0, Math.PI * 2);
     ctx.fill();
   }
 
-  // 射程環（淡）
+  // HP 條與標籤（小、不遮建築）
+  const ratio = Math.max(0, tw.hp / Math.max(1, tw.maxHp));
+  ctx.fillStyle = "rgba(0,0,0,0.45)";
+  ctx.fillRect(-R * 0.45, R * 0.88, R * 0.9, 4);
+  ctx.fillStyle = ratio > 0.35 ? "#7ec8ff" : "#ff8aa0";
+  ctx.fillRect(-R * 0.45, R * 0.88, R * 0.9 * ratio, 4);
+  ctx.textAlign = "center";
+  ctx.font = "bold 10px sans-serif";
+  ctx.fillStyle = "rgba(255, 236, 200, 0.9)";
+  ctx.fillText("聖地", 0, R * 0.78);
+  ctx.font = "8px sans-serif";
+  ctx.fillStyle = "rgba(160, 210, 240, 0.85)";
+  ctx.fillText(pathName, 0, R * 1.02);
+  ctx.fillStyle = "rgba(200, 180, 140, 0.75)";
+  ctx.fillText(`火${fire}/固${fort}`, 0, R * 1.14);
+
+  // 淡射程環
   ctx.beginPath();
   ctx.arc(0, 0, tw.range, 0, Math.PI * 2);
-  ctx.strokeStyle = "rgba(255, 210, 150, 0.12)";
-  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = "rgba(255, 210, 150, 0.1)";
+  ctx.lineWidth = 1.2;
   ctx.stroke();
 
   ctx.restore();
+}
+
+function roundRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number,
+) {
+  const rr = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + rr, y);
+  ctx.arcTo(x + w, y, x + w, y + h, rr);
+  ctx.arcTo(x + w, y + h, x, y + h, rr);
+  ctx.arcTo(x, y + h, x, y, rr);
+  ctx.arcTo(x, y, x + w, y, rr);
+  ctx.closePath();
 }
 
 
@@ -1386,7 +1395,6 @@ export function FoxTD() {
       height3: "/scene/height3.png",
       entrance: "/scene/entrance.png",
       exit: "/scene/exit.png",
-      sanctuary: "/scene/sanctuary.png?v=1",
     })) {
       const img = new Image();
       img.src = src;
