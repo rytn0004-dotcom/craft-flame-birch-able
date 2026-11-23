@@ -462,6 +462,12 @@ export function buildBlocked(board: TileBoard): Set<string> {
  * 高地：所有「非道路」格程序化生成高度 0～3（穩定雜湊，同局可重現）
  * 道路與未解鎖格為 0 且不可建塔。
  */
+/**
+ * 程序化高地（value noise + 道路鄰近衰減 + 模板覆蓋）
+ * - 道路永遠高度 0
+ * - 近路偏低、遠路可抬高 → 戰術可讀、成片台地
+ * - 中島／台地等模板 heights 覆寫
+ */
 export function buildHeights(board: TileBoard): number[] {
   const heights = Array.from({ length: COLS * ROWS }, () => 0);
   const hash01 = (c: number, r: number, salt: number) => {
@@ -469,32 +475,80 @@ export function buildHeights(board: TileBoard): number[] {
     h = Math.imul(h ^ (h >>> 13), 1274126177);
     return (h >>> 0) / 4294967296;
   };
-  // 用已放置槽位座標當鹽，每塊地略有不同傾向
+  // 雙線性 value noise（格點隨機 → 平滑插值）
+  const fade = (t: number) => t * t * (3 - 2 * t);
+  const valueNoise = (x: number, y: number, salt: number, scale: number) => {
+    const xs = x / scale;
+    const ys = y / scale;
+    const x0 = Math.floor(xs);
+    const y0 = Math.floor(ys);
+    const fx = fade(xs - x0);
+    const fy = fade(ys - y0);
+    const v00 = hash01(x0, y0, salt);
+    const v10 = hash01(x0 + 1, y0, salt);
+    const v01 = hash01(x0, y0 + 1, salt);
+    const v11 = hash01(x0 + 1, y0 + 1, salt);
+    const a = v00 * (1 - fx) + v10 * fx;
+    const b = v01 * (1 - fx) + v11 * fx;
+    return a * (1 - fy) + b * fy;
+  };
+  // 兩層八度：大形台地 + 細碎起伏
+  const fbm = (c: number, r: number, salt: number) => {
+    const n1 = valueNoise(c, r, salt, 6.5);
+    const n2 = valueNoise(c + 40, r - 17, salt ^ 0x9e3779b9, 3.2);
+    return n1 * 0.72 + n2 * 0.28;
+  };
+
+  const roadDist = new Map<string, number>(); // 可建格到最近道路的粗距
   for (const p of board.placed) {
     const tpl = TEMPLATE_BY_ID[p.templateId];
     if (!tpl) continue;
     const { blocked } = rotatedTemplate(tpl, p.rot);
     const origin = worldOrigin(p.tc, p.tr);
-    const salt = (p.tc * 31 + p.tr * 17 + p.rot * 7 + (p.templateId.length * 13)) | 0;
+    const salt = (p.tc * 31 + p.tr * 17 + p.rot * 7 + p.templateId.length * 13) | 0;
     const isHq = p.templateId === "hq";
+
+    // 先標記道路鄰居距離（切比雪夫 0～3）
     for (let lr = 0; lr < TILE; lr++) {
       for (let lc = 0; lc < TILE; lc++) {
-        // 道路（可走）不設高地
+        if (blocked[lr][lc]) continue;
+        for (let dr = -3; dr <= 3; dr++) {
+          for (let dc = -3; dc <= 3; dc++) {
+            const nlr = lr + dr, nlc = lc + dc;
+            if (nlr < 0 || nlc < 0 || nlr >= TILE || nlc >= TILE) continue;
+            if (!blocked[nlr][nlc]) continue;
+            const k = cellKey(origin.c + nlc, origin.r + nlr);
+            const d = Math.max(Math.abs(dc), Math.abs(dr));
+            const prev = roadDist.get(k);
+            if (prev === undefined || d < prev) roadDist.set(k, d);
+          }
+        }
+      }
+    }
+
+    for (let lr = 0; lr < TILE; lr++) {
+      for (let lc = 0; lc < TILE; lc++) {
         if (!blocked[lr][lc]) continue;
         const c = origin.c + lc;
         const r = origin.r + lr;
         if (c < 0 || r < 0 || c >= COLS || r >= ROWS) continue;
-        // 聖地中心建築占位：不設可建高地（高度 0）
-        if (isHq && lc >= 7 && lc <= 12 && lr >= 7 && lr <= 12) {
+        if (isHq && lc >= 8 && lc <= 11 && lr >= 8 && lr <= 11) {
           heights[r * COLS + c] = 0;
           continue;
         }
-        const u = hash01(c, r, salt);
-        // 權重：0 與 1 稍多，3 較少
+        let n = fbm(c, r, salt);
+        // 靠路：壓低，形成「路邊緩坡 → 後方台地」
+        const rd = roadDist.get(cellKey(c, r));
+        if (rd !== undefined) {
+          if (rd <= 1) n *= 0.35;
+          else if (rd === 2) n *= 0.65;
+          else n *= 0.85;
+        }
+        // 量化到 0～3（低層偏多）
         let h = 0;
-        if (u < 0.28) h = 0;
-        else if (u < 0.58) h = 1;
-        else if (u < 0.85) h = 2;
+        if (n < 0.32) h = 0;
+        else if (n < 0.55) h = 1;
+        else if (n < 0.78) h = 2;
         else h = 3;
         heights[r * COLS + c] = h;
       }
@@ -505,12 +559,35 @@ export function buildHeights(board: TileBoard): number[] {
       const c = origin.c + fh.c;
       const r = origin.r + fh.r;
       if (c < 0 || r < 0 || c >= COLS || r >= ROWS) continue;
-      // 道路格不覆蓋
       if (!blocked[fh.r]?.[fh.c]) continue;
       heights[r * COLS + c] = Math.max(0, Math.min(3, fh.h | 0));
     }
   }
-  return heights;
+
+  // 輕量平滑：與四鄰眾數／平均靠攏，減少一格跳變
+  const smoothed = heights.slice();
+  for (const p of board.placed) {
+    const origin = worldOrigin(p.tc, p.tr);
+    for (let lr = 1; lr < TILE - 1; lr++) {
+      for (let lc = 1; lc < TILE - 1; lc++) {
+        const c = origin.c + lc;
+        const r = origin.r + lr;
+        if (c < 1 || r < 1 || c >= COLS - 1 || r >= ROWS - 1) continue;
+        const i = r * COLS + c;
+        if (heights[i] === 0) continue;
+        // 跳過道路
+        let sum = heights[i];
+        let n = 1;
+        for (const [dc, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+          const j = (r + dr) * COLS + (c + dc);
+          sum += heights[j];
+          n++;
+        }
+        smoothed[i] = Math.max(0, Math.min(3, Math.round(sum / n)));
+      }
+    }
+  }
+  return smoothed;
 }
 
 function opposite(e: Edge): Edge {
