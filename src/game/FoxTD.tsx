@@ -1083,6 +1083,13 @@ export function FoxTD() {
   const tideRef = useRef<TideEvent | null>(null);
   const freeEscortRef = useRef(0);
   const lastStandRef = useRef(false);
+  const tacticalRef = useRef({
+    inspireCd: 0,
+    barrierCd: 0,
+    rallyCd: 0,
+    inspireT: 0,
+    barrierAbsorb: 0,
+  });
   const [, setFlavorTick] = useState(0);
   const bumpFlavor = () => setFlavorTick((x) => x + 1);
   const [lives, setLives] = useState(20);
@@ -1246,6 +1253,7 @@ export function FoxTD() {
     /** Boss 進場橫幅 */
     bossBanner: null as null | { name: string; skills: string[]; life: number },
     bossFreezeT: 0,
+    bossMark: null as null | { x: number; y: number; life: number; name: string },
     /** 壓力最高的戰線 */
     hotRoute: 0,
     clock: 0,
@@ -1908,7 +1916,7 @@ export function FoxTD() {
             hasteT: 0,
             hasteMul: 1,
           });
-          // Boss 儀式：進場橫幅 + 短凍結 + 聖地震動
+          // Boss 儀式：橫幅 + 全場短暫停 + 鏡頭對準 + 位置標示
           if (et.boss) {
             const sk = (et.skills as string[] | undefined) || [];
             const labeled = sk.length
@@ -1918,13 +1926,21 @@ export function FoxTD() {
             s.bossBanner = {
               name: et.name || "潮潮巨敵",
               skills: labeled,
-              life: 3.2,
+              life: 3.6,
             };
-            s.bossFreezeT = Math.max(s.bossFreezeT, 0.85);
+            s.bossFreezeT = Math.max(s.bossFreezeT, 1.75);
+            const bp = posAt(0, job.route ?? 0);
+            s.bossMark = { x: bp.x, y: bp.y, life: 4.5, name: et.name || "Boss" };
+            {
+              const z = s.cam.zoom || 1;
+              s.cam.x = bp.x - VIEWW / (2 * z);
+              s.cam.y = bp.y - VIEWH / (2 * z);
+              clampCam(s.cam);
+            }
             const hq = s.towers.find((t) => t.sanctuary);
-            if (hq) hq.shake = Math.max(hq.shake, 0.55);
-            float(hq?.x ?? 0, (hq?.y ?? 0) - 40, `Boss · ${et.name}`, "#ffd27a");
-            setHover(`Boss 來襲：${et.name}（${skillHint}）`);
+            if (hq) hq.shake = Math.max(hq.shake, 0.7);
+            float(bp.x, bp.y - 48, `⚠ Boss · ${et.name}`, "#ffd27a");
+            setHover(`Boss 來襲：${et.name}（${skillHint}）· 戰況暫停`);
             setBossBannerUi({ name: s.bossBanner.name, skills: s.bossBanner.skills });
           }
         }
@@ -2146,12 +2162,21 @@ export function FoxTD() {
         if (e.dist >= routeLen(e.route)) {
           const hq = s.towers.find((t) => t.sanctuary);
           const resist = hq ? sanctuaryStats(hq, hqBuffRef.current.picks).leakResist : 0;
-          const leakDmg = sanctuaryLeakDamage(e, resist);
+          let leakDmg = sanctuaryLeakDamage(e, resist);
           const pLeak = posAt(e.dist, e.route);
           if (hq) {
-            hq.hp = Math.max(0, hq.hp - leakDmg);
-            hq.shake = Math.max(hq.shake, 0.25);
-            float(pLeak.x, pLeak.y - 10, e.boss ? `Boss 破陣 −${leakDmg}` : `聖地 −${leakDmg}`, e.boss ? "#ff6a80" : "#ff8aa0");
+            const tac = tacticalRef.current;
+            if (tac.barrierAbsorb > 0 && leakDmg > 0) {
+              const ab = Math.min(tac.barrierAbsorb, leakDmg);
+              tac.barrierAbsorb -= ab;
+              leakDmg -= ab;
+              if (ab > 0) float(pLeak.x, pLeak.y - 22, `潮障擋 −${Math.round(ab)}`, "#9ad7ff");
+            }
+            if (leakDmg > 0) {
+              hq.hp = Math.max(0, hq.hp - leakDmg);
+              hq.shake = Math.max(hq.shake, 0.25);
+              float(pLeak.x, pLeak.y - 10, e.boss ? `Boss 破陣 −${Math.round(leakDmg)}` : `聖地 −${Math.round(leakDmg)}`, e.boss ? "#ff6a80" : "#ff8aa0");
+            }
             if (e.boss) {
               const hq2 = s.towers.find((t) => t.sanctuary);
               if (hq2) hq2.shake = Math.max(hq2.shake, 0.4);
@@ -2356,6 +2381,10 @@ export function FoxTD() {
           tw.terrorT -= dt;
           if (tw.terrorT <= 0) tw.rateMul = 1;
         } else if (tw.rateMul === undefined) tw.rateMul = 1;
+        // Boss 進場儀式：短暫停射
+        if (s.bossFreezeT > 0) {
+          continue;
+        }
         tw.cd -= dt;
         const twDef = towerBookRef.current[tw.def] ?? TOWERS[tw.def];
         const best = tw.stake
@@ -2486,6 +2515,7 @@ export function FoxTD() {
             s.escorts.splice(i, 1);
             continue;
           }
+          if (s.bossFreezeT > 0) continue; // 進場儀式護衛也停
           u.contactT -= dt;
           u.shootCd -= dt;
           u.healCd -= dt;
@@ -2514,6 +2544,8 @@ export function FoxTD() {
             continue;
           }
 
+          // 行為樹目標選擇：同線 > 殘血 > Boss；近戰殘血傾向 hold
+          const hpRatio = u.hp / Math.max(1, u.maxHp);
           let engage: Enemy | null = null;
           let engageGap = 1e9;
           for (const e of s.enemies) {
@@ -2522,19 +2554,31 @@ export function FoxTD() {
             const same = e.route === u.route;
             const pathGap = same ? Math.abs(e.dist - u.dist) : 1e9;
             const pxGap = Math.hypot(ep.x - u.x, ep.y - u.y);
-            const hit = (same && pathGap <= HQ_CONTACT_PATH) || pxGap <= HQ_CONTACT_PX;
+            const reach = u.kind === "ranged" ? HQ_CONTACT_PX * 1.15 : HQ_CONTACT_PX;
+            const hit = (same && pathGap <= HQ_CONTACT_PATH) || pxGap <= reach;
             if (!hit) continue;
-            const score = same ? pathGap : pxGap + 80;
+            let score = same ? pathGap : pxGap + 80;
+            if (e.boss) score -= 12;
+            if (e.hp / Math.max(1, e.maxHp) < 0.35) score -= 8;
             if (score < engageGap) {
               engageGap = score;
               engage = e;
             }
           }
+          if (u.kind === "melee" && hpRatio < 0.28 && engage && !engage.boss) {
+            // 非 Boss 交戰中過殘 → 後撤一點再打
+            u.ai = "hold";
+          } else if (engage) {
+            u.ai = "intercept";
+          } else if (u.kind === "healer") {
+            u.ai = "support";
+          } else {
+            u.ai = "march";
+          }
 
-          if (engage) {
+          if (engage && u.ai !== "hold") {
             // 全兵種接觸交戰：停在怪前方，互耗血（不瞬移到怪身上）
             if (engage.route === u.route) {
-              // 維持在怪「靠入口一側」外側，避免貼臉閃現
               const side = engage.dist + (u.kind === "melee" ? 14 : 22);
               u.dist = Math.max(8, Math.min(routeLen(u.route) - 4, side));
             }
@@ -2596,6 +2640,7 @@ export function FoxTD() {
                 u.y = a.y + (dy / len) * beyond;
               }
             }
+            } // end non-hold march
           }
           if ((u.fade ?? 1) <= 0) {
             s.escorts.splice(i, 1);
@@ -3132,20 +3177,62 @@ export function FoxTD() {
         ctx.restore();
       }
 
-      // 戰線壓力數值（中段）
+      // 戰線壓力條（中段）
       {
         const pressure = (s as { routePressure?: number[] }).routePressure || [];
+        const maxP = Math.max(1, ...pressure, 1);
         ctx.save();
         ctx.font = "600 11px system-ui,sans-serif";
         ctx.textAlign = "center";
         routes.forEach((live, idx) => {
-          if (!live.pts.length || !pressure[idx]) return;
+          if (!live.pts.length) return;
+          const val = pressure[idx] || 0;
+          if (val <= 0) return;
           const mid = live.pts[Math.floor(live.pts.length * 0.55)] || live.pts[0];
           const isHot = idx === s.hotRoute;
-          const val = pressure[idx];
-          ctx.fillStyle = isHot ? "rgba(255,120,120,0.95)" : "rgba(180,220,255,0.75)";
-          ctx.fillText(isHot ? `⚠ 壓力 ${val.toFixed(0)}` : `壓力 ${val.toFixed(0)}`, mid.x, mid.y - 10);
+          const bw = 52;
+          const ratio = Math.min(1, val / maxP);
+          ctx.fillStyle = "rgba(0,0,0,0.45)";
+          ctx.fillRect(mid.x - bw / 2, mid.y - 22, bw, 7);
+          ctx.fillStyle = isHot ? "rgba(255,90,100,0.95)" : "rgba(120,190,255,0.85)";
+          ctx.fillRect(mid.x - bw / 2, mid.y - 22, bw * ratio, 7);
+          ctx.strokeStyle = isHot ? "rgba(255,200,180,0.9)" : "rgba(180,220,255,0.5)";
+          ctx.strokeRect(mid.x - bw / 2, mid.y - 22, bw, 7);
+          ctx.fillStyle = isHot ? "rgba(255,200,180,0.98)" : "rgba(200,230,255,0.85)";
+          ctx.fillText(isHot ? `⚠ 壓力 ${val.toFixed(0)}` : `壓力 ${val.toFixed(0)}`, mid.x, mid.y - 26);
         });
+        ctx.restore();
+      }
+
+      // Boss 進場位置標示
+      if (s.bossMark && s.bossMark.life > 0) {
+        const m = s.bossMark;
+        const pulse = 0.6 + 0.4 * Math.sin(t * 6);
+        ctx.save();
+        ctx.strokeStyle = `rgba(255, 180, 80, ${0.5 + 0.5 * pulse})`;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(m.x, m.y, 28 + pulse * 10, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(m.x, m.y, 12, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(255, 100, 100, ${0.7 * pulse})`;
+        ctx.stroke();
+        // 箭頭指向
+        ctx.fillStyle = "rgba(255, 210, 120, 0.95)";
+        ctx.beginPath();
+        ctx.moveTo(m.x, m.y - 48);
+        ctx.lineTo(m.x - 10, m.y - 32);
+        ctx.lineTo(m.x + 10, m.y - 32);
+        ctx.closePath();
+        ctx.fill();
+        ctx.font = "bold 13px system-ui,sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillStyle = "#ffe08a";
+        ctx.fillText(m.name, m.x, m.y - 54);
+        ctx.font = "10px system-ui,sans-serif";
+        ctx.fillStyle = "rgba(255,200,180,0.9)";
+        ctx.fillText("BOSS", m.x, m.y + 44);
         ctx.restore();
       }
 
