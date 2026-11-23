@@ -97,10 +97,10 @@ export function rotatedTemplate(t: TileTemplate, rot: Rot) {
 
 function makeStraight(): TileTemplate {
   const blocked = emptyBlocked(true);
-  carveH(blocked, 9, 10);
+  carveH(blocked, 10, 10);
   return {
     id: "straight", name: "直道", blocked,
-    ports: [port("W", 9), port("W", 10), port("E", 9), port("E", 10)],
+    ports: [port("W", 10), port("E", 10)],
     heights: [
       { c: 3, r: 6, h: 1 }, { c: 4, r: 6, h: 2 }, { c: 8, r: 6, h: 1 },
       { c: 12, r: 13, h: 1 }, { c: 15, r: 13, h: 2 }, { c: 16, r: 13, h: 1 },
@@ -109,11 +109,11 @@ function makeStraight(): TileTemplate {
 }
 function makeCorner(): TileTemplate {
   const blocked = emptyBlocked(true);
-  carveH(blocked, 9, 10, 0, 10);
-  carveV(blocked, 9, 10, 9, TILE - 1);
+  carveH(blocked, 10, 10, 0, 10);
+  carveV(blocked, 10, 10, 10, TILE - 1);
   return {
     id: "corner", name: "轉角", blocked,
-    ports: [port("W", 9), port("W", 10), port("S", 9), port("S", 10)],
+    ports: [port("W", 10), port("S", 10)],
     heights: [
       { c: 3, r: 6, h: 1 }, { c: 4, r: 7, h: 2 },
       { c: 13, r: 13, h: 2 }, { c: 14, r: 14, h: 1 },
@@ -122,11 +122,11 @@ function makeCorner(): TileTemplate {
 }
 function makeTee(): TileTemplate {
   const blocked = emptyBlocked(true);
-  carveH(blocked, 9, 10);
-  carveV(blocked, 9, 10, 0, 10);
+  carveH(blocked, 10, 10);
+  carveV(blocked, 10, 10, 0, 10);
   return {
     id: "tee", name: "三叉", blocked,
-    ports: [port("W", 9), port("W", 10), port("E", 9), port("E", 10), port("N", 9), port("N", 10)],
+    ports: [port("W", 10), port("E", 10), port("N", 10)],
     heights: [
       { c: 4, r: 13, h: 2 }, { c: 5, r: 14, h: 1 },
       { c: 14, r: 13, h: 2 }, { c: 15, r: 4, h: 1 },
@@ -135,11 +135,11 @@ function makeTee(): TileTemplate {
 }
 function makeCross(): TileTemplate {
   const blocked = emptyBlocked(true);
-  carveH(blocked, 9, 10);
-  carveV(blocked, 9, 10);
+  carveH(blocked, 10, 10);
+  carveV(blocked, 10, 10);
   return {
     id: "cross", name: "十字", blocked,
-    ports: [port("N", 9), port("N", 10), port("E", 9), port("E", 10), port("S", 9), port("S", 10), port("W", 9), port("W", 10)],
+    ports: [port("N", 10), port("E", 10), port("S", 10), port("W", 10)],
     heights: [
       { c: 5, r: 5, h: 2 }, { c: 14, r: 5, h: 2 },
       { c: 5, r: 14, h: 1 }, { c: 14, r: 14, h: 2 },
@@ -148,15 +148,16 @@ function makeCross(): TileTemplate {
 }
 function makeOpen(): TileTemplate {
   const blocked = emptyBlocked(true);
-  carveH(blocked, 8, 11);
-  carveV(blocked, 8, 11);
+  carveH(blocked, 10, 10);
+  carveV(blocked, 10, 10);
+  // 角落空地仍可走一小塊，但不加寬主道
   for (let r = 3; r <= 5; r++) for (let c = 3; c <= 5; c++) blocked[r][c] = false;
   for (let r = 3; r <= 5; r++) for (let c = 14; c <= 16; c++) blocked[r][c] = false;
   for (let r = 14; r <= 16; r++) for (let c = 3; c <= 5; c++) blocked[r][c] = false;
   for (let r = 14; r <= 16; r++) for (let c = 14; c <= 16; c++) blocked[r][c] = false;
   return {
     id: "open", name: "開闊", blocked,
-    ports: [port("N", 9), port("N", 10), port("E", 9), port("E", 10), port("S", 9), port("S", 10), port("W", 9), port("W", 10)],
+    ports: [port("N", 10), port("E", 10), port("S", 10), port("W", 10)],
     heights: [
       { c: 5, r: 5, h: 2 }, { c: 14, r: 5, h: 2 }, { c: 5, r: 14, h: 2 }, { c: 14, r: 14, h: 2 },
       { c: 6, r: 7, h: 1 }, { c: 13, r: 7, h: 1 }, { c: 7, r: 13, h: 1 }, { c: 12, r: 13, h: 1 },
@@ -165,10 +166,10 @@ function makeOpen(): TileTemplate {
 }
 function makeChoke(): TileTemplate {
   const blocked = emptyBlocked(true);
-  carveH(blocked, 9, 10);
+  carveH(blocked, 10, 10);
   return {
     id: "choke", name: "瓶頸", blocked,
-    ports: [port("W", 9), port("W", 10), port("E", 9), port("E", 10)],
+    ports: [port("W", 10), port("E", 10)],
     heights: [
       { c: 4, r: 6, h: 2 }, { c: 5, r: 6, h: 2 }, { c: 4, r: 7, h: 1 },
       { c: 14, r: 12, h: 2 }, { c: 15, r: 12, h: 2 }, { c: 15, r: 13, h: 1 },
@@ -178,15 +179,15 @@ function makeChoke(): TileTemplate {
 }
 function makeSpawn(): TileTemplate {
   const blocked = emptyBlocked(true);
-  carveH(blocked, 9, 10);
-  carveV(blocked, 9, 10);
+  carveH(blocked, 10, 10);
+  carveV(blocked, 10, 10);
   return {
     id: "spawn", name: "裂口", blocked,
     ports: [
-      port("W", 9, "entrance"), port("W", 10, "entrance"),
-      port("N", 9, "entrance"), port("N", 10, "entrance"),
-      port("E", 9), port("E", 10),
-      port("S", 9), port("S", 10),
+      port("W", 10, "entrance"),
+      port("N", 10, "entrance"),
+      port("E", 10),
+      port("S", 10),
     ],
     heights: [
       { c: 4, r: 4, h: 2 }, { c: 5, r: 4, h: 1 },
@@ -197,19 +198,21 @@ function makeSpawn(): TileTemplate {
 }
 function makeHq(): TileTemplate {
   const blocked = emptyBlocked(true);
-  for (let r = 0; r < TILE; r++) for (let c = 9; c <= 10; c++) blocked[r][c] = false;
-  for (let c = 0; c < TILE; c++) for (let r = 9; r <= 10; r++) blocked[r][c] = false;
-  for (const [c, r] of [[8, 8], [12, 8], [8, 12], [12, 12]] as const) blocked[r][c] = true;
-  for (const [c, r] of [[8, 11], [11, 8], [12, 11], [11, 12]] as const) blocked[r][c] = true;
+  // 四向各一條單格道路匯入聖地中心
+  for (let r = 0; r < TILE; r++) blocked[r][10] = false;
+  for (let c = 0; c < TILE; c++) blocked[10][c] = false;
+  // 聖地核心周邊高地（不可走）
+  for (const [c, r] of [[8, 8], [12, 8], [8, 12], [12, 12], [9, 9], [11, 9], [9, 11], [11, 11]] as const)
+    blocked[r][c] = true;
   return {
     id: "hq",
     name: "聖地",
     blocked,
     ports: [
-      port("W", 9), port("W", 10),
-      port("E", 9), port("E", 10),
-      port("N", 9), port("N", 10),
-      port("S", 9), port("S", 10),
+      port("W", 10),
+      port("E", 10),
+      port("N", 10),
+      port("S", 10),
     ],
     heights: [
       { c: 8, r: 8, h: 3 }, { c: 12, r: 8, h: 3 }, { c: 8, r: 12, h: 3 }, { c: 12, r: 12, h: 3 },
@@ -219,10 +222,10 @@ function makeHq(): TileTemplate {
 }
 function makeBridge(): TileTemplate {
   const blocked = emptyBlocked(true);
-  carveH(blocked, 7, 12);
+  carveH(blocked, 10, 10);
   return {
     id: "bridge", name: "長橋", blocked,
-    ports: [port("W", 8), port("W", 9), port("W", 10), port("W", 11), port("E", 8), port("E", 9), port("E", 10), port("E", 11)],
+    ports: [port("W", 10), port("E", 10)],
   };
 }
 
@@ -448,7 +451,8 @@ export function collectGates(board: TileBoard): { entrances: Cell[]; exits: Cell
   const hq = board.placed.find((x) => x.templateId === "hq");
   if (hq) {
     const origin = worldOrigin(hq.tc, hq.tr);
-    for (const dc of [9, 10]) for (const dr of [9, 10]) pushX(origin.c + dc, origin.r + dr);
+    // 單線十字中心為聖地終點
+    pushX(origin.c + 10, origin.r + 10);
   }
   // 模板上標記的 exit 仍收（少用）
   for (const p of board.placed) {
