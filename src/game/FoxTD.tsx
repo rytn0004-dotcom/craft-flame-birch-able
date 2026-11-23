@@ -5670,33 +5670,39 @@ export function FoxTD() {
             </div>
           )}
           {phase !== "play" && !workshop && (
-            <div className="overlay" style={{ maxHeight: "100%", overflowY: "auto" }}>
-              <h2>{phase === "win" ? "潮退，聖地仍在" : phase === "lose" ? "結界破碎" : "狐仙結界"}</h2>
-              <p className="mb-3 max-w-xl text-sm leading-6 text-[#d8eefc]">
-                {phase === "ready"
-                  ? "先選開局與難度，再按開始守城。自訂地圖／難度可刪除；難度數值修改會自動儲存。"
-                  : phase === "win"
-                    ? "十二波妖潮已被擋下。"
-                    : "生命歸零。重新布置結界再試一次。"}
-              </p>
+            <div className="overlay menu-overlay">
+              <div className="menu-shell">
+              <div className="menu-hero">
+                <p className="menu-kicker">UNDERWATER WARD</p>
+                <h2 className="menu-title">{phase === "win" ? "潮退，聖地仍在" : phase === "lose" ? "結界破碎" : "狐仙結界"}</h2>
+                <p className="menu-lead">
+                  {phase === "ready"
+                    ? "選擇開局與難度，守護潮中聖地。自訂內容可刪除並自動儲存。"
+                    : phase === "win"
+                      ? "十二波妖潮已被擋下，結界依然完整。"
+                      : "生命歸零。重整佈署，再試一次。"}
+                </p>
+              </div>
               {phase === "ready" && (
-                <div className="mb-4 w-full max-w-xl text-left">
-                  <p className="mb-1 text-xs tracking-wide text-[#8ec8ee]">選擇開局</p>
-                  <div className="mb-2 flex flex-wrap gap-2">
+                <div className="menu-grid">
+                <section className="menu-card">
+                  <h3 className="menu-card-title">選擇開局</h3>
+                  <p className="menu-card-hint">從小地圖擴張，或挑戰完整關卡</p>
+                  <div className="menu-btn-row">
                     <button
-                      className={"btn" + (selectedLevelId === "mode-expand" ? "" : " ghost")}
+                      className={"btn menu-pill" + (selectedLevelId === "mode-expand" ? " on" : " ghost")}
                       onClick={() => selectLevel("mode-expand", "expand")}
                       title="從小地圖開始，每 3 波拼接新地塊"
                     >
-                      潮汐擴張（推薦）
+                      潮汐擴張 <span className="menu-pill-tag">推薦</span>
                     </button>
                   </div>
-                  <p className="mb-1 mt-2 text-xs tracking-wide text-[#8ec8ee]">預設關卡</p>
-                  <div className="mb-2 flex flex-wrap gap-2">
+                  <h4 className="menu-sub">預設關卡</h4>
+                  <div className="menu-btn-row">
                     {presetMaps().map((m) => (
                       <button
                         key={m.id}
-                        className={"btn" + (selectedLevelId === m.id ? "" : " ghost")}
+                        className={"btn menu-pill" + (selectedLevelId === m.id ? " on" : " ghost")}
                         onClick={() => selectLevel(m.id, "layout")}
                       >
                         {m.name.replace(/^關卡[·・]?/, "")}
@@ -5705,8 +5711,8 @@ export function FoxTD() {
                   </div>
                   {savedMaps.length > 0 && (
                     <>
-                      <p className="mb-1 mt-2 text-xs tracking-wide text-[#8ec8ee]">自訂地圖</p>
-                      <div className="mb-2 flex flex-col gap-1.5">
+                      <h4 className="menu-sub">自訂地圖</h4>
+                      <div className="menu-stack">
                         {savedMaps.map((m) => (
                           <div key={m.id} className="flex items-center gap-1">
                             <button
@@ -5735,12 +5741,15 @@ export function FoxTD() {
                     目前：<span className="text-[#ffe7f1]">{activeMap}</span>
                     {mapMode === "expand" ? " · 地塊拼接模式" : " · 完整地圖"}
                   </p>
-                  <p className="mb-1 mt-3 text-xs tracking-wide text-[#8ec8ee]">難度</p>
+                  </section>
+                  <section className="menu-card">
+                  <h3 className="menu-card-title">難度</h3>
+                  <p className="menu-card-hint">調整數值會自動存成自訂難度</p>
                   <div className="mb-2 flex flex-col gap-1.5">
                     {diffList.map((d) => (
                       <div key={d.id} className="flex items-center gap-1">
                         <button
-                          className={"btn flex-1" + (difficultyId === d.id ? "" : " ghost")}
+                          className={"btn menu-pill flex-1" + (difficultyId === d.id ? " on" : " ghost")}
                           onClick={() => {
                             setDifficultyId(d.id);
                             difficultyRef.current = d;
@@ -5767,7 +5776,7 @@ export function FoxTD() {
                     ))}
                   </div>
                   {/* 倍率即時改、自訂自動存 */}
-                  <div className="mb-2 grid grid-cols-2 gap-x-3 gap-y-1 rounded-lg border border-[#9ad7ff33] bg-[#0a1828cc] p-2 text-[11px] text-[#c5dff2]">
+                  <div className="menu-diff-grid">
                     {(
                       [
                         ["enemyHpMul", "怪血", 0.4, 3, 0.05],
@@ -5779,10 +5788,9 @@ export function FoxTD() {
                         ["waveHpScale", "波次成長", 0.02, 0.25, 0.01],
                       ] as const
                     ).map(([key, label, min, max, step]) => (
-                      <label key={key} className="flex items-center justify-between gap-1">
-                        <span className="text-[#9ec4de]">{label}</span>
+                      <label key={key} className="menu-diff-field">
+                        <span>{label}</span>
                         <input
-                          className="w-[4.5rem] rounded bg-[#08131f] px-1 text-right text-[#e7f6ff]"
                           type="number"
                           min={min}
                           max={max}
@@ -5797,24 +5805,28 @@ export function FoxTD() {
                       </label>
                     ))}
                   </div>
-                  <p className="text-xs text-[#9ec4de]">
-                    改動會自動存成自訂難度 · 怪血 ×{getDifficulty(difficultyId).enemyHpMul} · 開局 {getDifficulty(difficultyId).startGold}
+                  <p className="menu-status">
+                    怪血 ×{getDifficulty(difficultyId).enemyHpMul} · 開局金 {getDifficulty(difficultyId).startGold}
                   </p>
+                  </section>
                 </div>
               )}
-              <button className="btn" onClick={start}>
+              <div className="menu-actions">
+              <button className="btn menu-start" onClick={start}>
                 {phase === "ready" ? (endless ? "開始無盡" : "開始守城") : "重新開始"}
               </button>
               {phase === "ready" && (
-                <div className="mt-3 flex flex-wrap justify-center gap-2">
-                  <button className="btn ghost" onClick={() => setEndless((v) => !v)}>
+                <div className="menu-actions-sub">
+                  <button className={"btn ghost menu-pill" + (endless ? " on" : "")} onClick={() => setEndless((v) => !v)}>
                     {endless ? "無盡：開" : "無盡：關"}
                   </button>
-                  <button className="btn ghost" onClick={openWorkshop}>
+                  <button className="btn ghost menu-pill" onClick={openWorkshop}>
                     地圖工房
                   </button>
                 </div>
               )}
+              </div>
+              </div>
             </div>
           )}
           {workshop && phase !== "play" && (

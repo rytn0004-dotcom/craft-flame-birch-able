@@ -402,3 +402,210 @@ html, body, #root, #app {
   border-color: rgba(126, 200, 255, 0.45);
   box-shadow: 0 0 0 2px rgba(80, 140, 200, 0.2);
 }
+
+
+/* ===== 主選單 / 結界開局 ===== */
+.menu-overlay {
+  justify-content: center;
+  padding: 24px 16px 32px;
+  background:
+    radial-gradient(ellipse 70% 45% at 50% 0%, rgba(40, 90, 140, 0.35), transparent 55%),
+    radial-gradient(ellipse 50% 40% at 70% 100%, rgba(20, 50, 80, 0.4), transparent 50%),
+    rgba(3, 10, 18, 0.88);
+  backdrop-filter: blur(12px);
+}
+
+.menu-shell {
+  width: min(720px, 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 18px;
+}
+
+.menu-hero {
+  text-align: center;
+  padding: 4px 8px 2px;
+}
+
+.menu-kicker {
+  margin: 0 0 6px;
+  font-size: 11px;
+  letter-spacing: 0.28em;
+  color: #7eb8e0;
+  font-weight: 600;
+}
+
+.menu-title {
+  margin: 0 0 8px !important;
+  font-size: clamp(1.55rem, 3.2vw, 2rem) !important;
+  font-weight: 600;
+  color: #ffe7f1 !important;
+  text-shadow: 0 2px 20px rgba(120, 180, 255, 0.25);
+  letter-spacing: 0.06em;
+}
+
+.menu-lead {
+  margin: 0 auto !important;
+  max-width: 26rem;
+  font-size: 13.5px !important;
+  line-height: 1.55 !important;
+  color: #b8d4ea !important;
+}
+
+.menu-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  text-align: left;
+}
+
+@media (max-width: 640px) {
+  .menu-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.menu-card {
+  background: rgba(8, 20, 36, 0.82);
+  border: 1px solid rgba(120, 180, 255, 0.16);
+  border-radius: 16px;
+  padding: 14px 16px 16px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
+}
+
+.menu-card-title {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #d4ecff;
+  letter-spacing: 0.04em;
+}
+
+.menu-card-hint {
+  margin: 0 0 12px;
+  font-size: 11.5px;
+  color: #8eb0cc;
+  line-height: 1.4;
+}
+
+.menu-sub {
+  margin: 12px 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: #8ec8ee;
+  text-transform: none;
+}
+
+.menu-btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.menu-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.menu-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.menu-pill {
+  font-size: 12.5px !important;
+  padding: 8px 12px !important;
+  border-radius: 999px !important;
+  position: relative;
+}
+
+.menu-pill-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  background: rgba(126, 200, 255, 0.2);
+  color: #c5e8ff;
+  vertical-align: middle;
+}
+
+.menu-icon-btn {
+  padding: 7px 10px !important;
+  color: #ffb0b0 !important;
+  flex-shrink: 0;
+}
+
+.menu-status {
+  margin: 10px 0 0;
+  font-size: 11.5px;
+  color: #9ec4de;
+  line-height: 1.4;
+}
+
+.menu-diff-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 12px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(154, 215, 255, 0.14);
+  background: rgba(6, 16, 28, 0.55);
+  font-size: 11.5px;
+  color: #c5dff2;
+}
+
+.menu-diff-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #9ec4de;
+}
+
+.menu-diff-field input {
+  width: 4.6rem;
+  text-align: right;
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(120, 180, 255, 0.18);
+  background: rgba(6, 14, 24, 0.9);
+  color: #e7f6ff;
+  font-size: 12px;
+}
+
+.menu-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding-top: 4px;
+}
+
+.menu-start {
+  min-width: 200px;
+  padding: 12px 28px !important;
+  font-size: 15px !important;
+  border-radius: 12px !important;
+  letter-spacing: 0.06em;
+  box-shadow: 0 6px 24px rgba(40, 120, 180, 0.35);
+  background: linear-gradient(180deg, #3a8fd0, #1e5f96) !important;
+}
+
+.menu-start:hover {
+  filter: brightness(1.08);
+  box-shadow: 0 8px 28px rgba(50, 140, 200, 0.45);
+}
+
+.menu-actions-sub {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
