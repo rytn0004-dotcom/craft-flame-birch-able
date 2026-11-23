@@ -3348,45 +3348,28 @@ export function FoxTD() {
             }
           
           } else {
-            // —— 高地：嚴格 1 格佔地 + 側壁立體（高度 0～3）——
+            // —— 高地：貼齊格子繪製（避免抬高造成點擊錯位）；層級靠貼圖／色階辨識 ——
             {
               const hh = cellHeight(s.heights, c, r);
-              const sideH = 4 + hh * 7; // 側壁像素高度，層級可辨
-              const topY = y - sideH;
-              // 右側立面
-              ctx.fillStyle = hh >= 2 ? "rgba(40, 70, 95, 0.95)" : "rgba(35, 55, 75, 0.9)";
-              ctx.beginPath();
-              ctx.moveTo(x + CELL, topY + 4);
-              ctx.lineTo(x + CELL + 5, topY + 8);
-              ctx.lineTo(x + CELL + 5, y + CELL);
-              ctx.lineTo(x + CELL, y + CELL);
-              ctx.closePath();
-              ctx.fill();
-              // 前側立面（更暗）
-              ctx.fillStyle = hh >= 2 ? "rgba(28, 48, 68, 0.95)" : "rgba(24, 40, 58, 0.92)";
-              ctx.fillRect(x, y + CELL - 2, CELL, 4 + hh * 0.35);
-              ctx.fillRect(x, topY + CELL * 0.55, CELL, y + CELL - (topY + CELL * 0.55));
-              // 頂面：貼圖縮入格內
               const keys = ["height0", "height1", "height2", "height3"] as const;
               const himg = s.scene[keys[Math.max(0, Math.min(3, hh))]];
-              const inset = 1;
-              if (himg && himg.complete && himg.naturalWidth) {
-                ctx.drawImage(himg, x + inset, topY + inset, CELL - inset * 2, CELL - inset * 2);
-              } else {
-                const cols = ["#5a6b7c", "#6a8a9e", "#7aa0b0", "#9ad4c8"];
-                ctx.fillStyle = cols[hh] || cols[0];
-                ctx.fillRect(x + inset, topY + inset, CELL - inset * 2, CELL - inset * 2);
+              // 輕微底部陰影暗示高度，不偏移點擊區域
+              if (hh > 0) {
+                ctx.fillStyle = `rgba(0, 0, 0, ${0.12 + hh * 0.06})`;
+                ctx.fillRect(x + 2, y + CELL - 3, CELL - 4, 3);
               }
-              // 頂面亮邊（立體感）
-              ctx.strokeStyle = "rgba(200, 230, 255, 0.35)";
-              ctx.lineWidth = 1;
-              ctx.strokeRect(x + inset + 0.5, topY + inset + 0.5, CELL - inset * 2 - 1, CELL - inset * 2 - 1);
-              // 高度角標
-              ctx.font = "bold 9px sans-serif";
-              ctx.textAlign = "right";
-              ctx.fillStyle = hh >= 2 ? "rgba(255, 230, 160, 0.95)" : "rgba(180, 220, 240, 0.8)";
-              ctx.fillText("+" + hh, x + CELL - 2, topY + 11);
-              ctx.textAlign = "left";
+              if (himg && himg.complete && himg.naturalWidth) {
+                ctx.drawImage(himg, x, y, CELL, CELL);
+              } else {
+                const cols = ["#4a5a6a", "#5a7a8e", "#6a96a8", "#8ac4b8"];
+                ctx.fillStyle = cols[hh] || cols[0];
+                ctx.fillRect(x, y, CELL, CELL);
+              }
+              // 高層略亮一點，方便純視覺分辨
+              if (hh >= 2) {
+                ctx.fillStyle = "rgba(200, 230, 255, 0.06)";
+                ctx.fillRect(x, y, CELL, CELL);
+              }
             }
           }
         }
@@ -4332,40 +4315,25 @@ export function FoxTD() {
     return false;
   }
 
-  /** 塔只能放在高地（非道路、非聖地）；高度 0～3 皆可建 */
+  /** 塔只能放在高地格（非道路、非聖地）；高度 0～3 皆可建 */
   function canPlace(gx: number, gy: number) {
-    const c = Math.floor(Number(gx));
-    const r = Math.floor(Number(gy));
-    if (!Number.isFinite(c) || !Number.isFinite(r)) return false;
-    if (c < 0 || r < 0 || c >= COLS || r >= ROWS) return false;
-    if (!isCellOnBoard(boardRef.current, c, r)) return false;
-    if (gateHere(c, r)) return false;
-    if (isSanctuaryFootprint(c, r)) return false;
-    const key = cellKey(c, r);
-    // blocked = 非道路（高地／平地可建）；道路不在集合內
-    const walls = sim.current.blocked;
-    const mapWalls = mapRef.current;
-    const isWall =
-      (walls && walls.has(key)) ||
-      (mapWalls instanceof Set && mapWalls.has(key)) ||
-      (Array.isArray(mapWalls) && (mapWalls as string[]).includes(key));
-    if (!isWall) return false;
-    if (sim.current.towers.some((t) => t.gx === c && t.gy === r)) return false;
+    if (gx < 0 || gy < 0 || gx >= COLS || gy >= ROWS) return false;
+    if (!isCellOnBoard(boardRef.current, gx, gy)) return false;
+    if (gateHere(gx, gy)) return false;
+    if (isSanctuaryFootprint(gx, gy)) return false;
+    // blocked 集合 = 非道路可建格
+    if (!sim.current.blocked.has(cellKey(gx, gy))) return false;
+    if (sim.current.towers.some((t) => t.gx === gx && t.gy === gy)) return false;
     return true;
   }
 
   function canPlaceReason(gx: number, gy: number): string | null {
-    const c = Math.floor(Number(gx));
-    const r = Math.floor(Number(gy));
-    if (!Number.isFinite(c) || !Number.isFinite(r) || c < 0 || r < 0 || c >= COLS || r >= ROWS)
-      return "超出地圖";
-    if (!isCellOnBoard(boardRef.current, c, r)) return "未解鎖地塊";
-    if (gateHere(c, r)) return "出入口不可建";
-    if (isSanctuaryFootprint(c, r)) return "聖地範圍不可建";
-    const key = cellKey(c, r);
-    if (!sim.current.blocked.has(key) && !(mapRef.current instanceof Set && mapRef.current.has(key)))
-      return "道路不可建，請點高地／平地";
-    if (sim.current.towers.some((t) => t.gx === c && t.gy === r)) return "此格已有建築";
+    if (gx < 0 || gy < 0 || gx >= COLS || gy >= ROWS) return "超出地圖";
+    if (!isCellOnBoard(boardRef.current, gx, gy)) return "未解鎖地塊";
+    if (gateHere(gx, gy)) return "出入口不可建";
+    if (isSanctuaryFootprint(gx, gy)) return "聖地範圍不可建";
+    if (!sim.current.blocked.has(cellKey(gx, gy))) return "道路不可建，請點高地";
+    if (sim.current.towers.some((t) => t.gx === gx && t.gy === gy)) return "此格已有建築";
     return null;
   }
 
@@ -4452,24 +4420,8 @@ export function FoxTD() {
     setWorkshop(false);
     setPaused(false);
     pausedRef.current = false;
-    // 強制重建碰撞／高地，避免 blocked 與畫面脫節導致無法放塔
-    if (boardRef.current.placed.length > 0) {
-      const walls = buildBlocked(boardRef.current);
-      const heights = buildHeights(boardRef.current);
-      heightsRef.current = heights;
-      sim.current.heights = heights;
-      mapRef.current = walls;
-      sim.current.blocked = walls;
-      const commit = (canvasRef.current as HTMLCanvasElement & { __commit?: (n: Set<string>) => boolean }).__commit;
-      if (!commit?.(new Set(walls))) {
-        // 路徑失敗時仍保留 walls，至少可建塔
-        sim.current.blocked = walls;
-        mapRef.current = walls;
-      }
-    } else {
-      const commit = (canvasRef.current as HTMLCanvasElement & { __commit?: (n: Set<string>) => boolean }).__commit;
-      commit?.(new Set(mapRef.current));
-    }
+    const commit = (canvasRef.current as HTMLCanvasElement & { __commit?: (n: Set<string>) => boolean }).__commit;
+    commit?.(new Set(mapRef.current));
     // 開局備戰：先放塔，不自動出怪；按「開始第 1 波」才开战
     sim.current.wave = 0;
     sim.current.queue = [];
