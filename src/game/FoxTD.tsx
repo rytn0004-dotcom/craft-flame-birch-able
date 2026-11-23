@@ -186,26 +186,27 @@ type HqBuffProgress = {
   tier: number;
   picks: HqBuffId[];
   blueprints: number;
-  shrineBuilt: boolean;
+  shrineCount: number;
   freePerWave: number;
 };
 function defaultHqBuff(): HqBuffProgress {
-  return { tier: 0, picks: [], blueprints: 0, shrineBuilt: false, freePerWave: 0 };
+  return { tier: 0, picks: [], blueprints: 0, shrineCount: 0, freePerWave: 0 };
 }
-function hqBuffChoices(tier: number): { id: HqBuffId; name: string; desc: string }[] {
+function hqBuffChoices(tier: number): { id: HqBuffId; name: string; desc: string; cost: number }[] {
+  // 越後期越強、越貴
   if (tier === 1)
     return [
-      { id: "dmg", name: "聖焰加持", desc: "聖地傷害 +18%" },
-      { id: "resist", name: "潮盾", desc: "漏怪傷害再 −12%" },
+      { id: "dmg", name: "聖焰加持", desc: "聖地傷害 +15%", cost: 55 },
+      { id: "resist", name: "潮盾", desc: "漏怪傷害再 −10%", cost: 55 },
     ];
   if (tier === 2)
     return [
-      { id: "escort_cd", name: "急動員", desc: "護衛投放間隔 −2.5s" },
-      { id: "escort_hp", name: "護潮甲", desc: "護衛生命 +25%" },
+      { id: "escort_cd", name: "急動員", desc: "護衛投放間隔 −3s", cost: 95 },
+      { id: "escort_hp", name: "護潮甲", desc: "護衛生命 +32%", cost: 95 },
     ];
   return [
-    { id: "range", name: "遠望聖域", desc: "聖地射程 +24" },
-    { id: "free_escort", name: "潮汐預備", desc: "+2 免費名額，之後每波 +1" },
+    { id: "range", name: "遠望聖域", desc: "聖地射程 +36", cost: 150 },
+    { id: "free_escort", name: "潮汐預備", desc: "+3 免費名額，之後每波 +1", cost: 150 },
   ];
 }
 
@@ -551,9 +552,9 @@ function sanctuaryStats(
   const maxHp = HQ_BUILDING_HP + fort * 150 + fire * 35;
   let leakResist = Math.min(0.45, fort * 0.09);
   for (const id of buffPicks) {
-    if (id === "dmg") damage *= 1.18;
-    if (id === "resist") leakResist = Math.min(0.55, leakResist + 0.12);
-    if (id === "range") range += 24;
+    if (id === "dmg") damage *= 1.15;
+    if (id === "resist") leakResist = Math.min(0.55, leakResist + 0.1);
+    if (id === "range") range += 36;
   }
   return { damage, range, cooldown, maxHp, leakResist };
 }
@@ -3946,6 +3947,10 @@ export function FoxTD() {
           return;
         }
       }
+      // 潮紋祭壇放置模式：任意高地
+      if (shrinePlaceRef.current && phaseRef.current === "play") {
+        if (tryPlaceShrineAt(gx0, gy0)) return;
+      }
       const id = pickRef.current;
       const gx = gx0;
       const gy = gy0;
@@ -5019,10 +5024,6 @@ export function FoxTD() {
 
   function placeTideShrine() {
     const b = hqBuffRef.current;
-    if (b.shrineBuilt) {
-      setHover("潮紋祭壇已建（一場限一座）");
-      return;
-    }
     if (b.blueprints < 1) {
       setHover("需要潮紋圖紙（Boss 必掉／精英約 22%）");
       return;
@@ -5031,26 +5032,33 @@ export function FoxTD() {
       setHover(`需要 ${SHRINE_PLACE_GOLD} 金`);
       return;
     }
-    const hq = sim.current.towers.find((t) => t.sanctuary);
-    if (!hq) return;
-    const candidates: { gx: number; gy: number }[] = [];
-    for (let dy = -4; dy <= 4; dy++) {
-      for (let dx = -4; dx <= 4; dx++) {
-        if (!dx && !dy) continue;
-        const gx = hq.gx + dx, gy = hq.gy + dy;
-        if (canPlace(gx, gy)) candidates.push({ gx, gy });
-      }
+    shrinePlaceRef.current = true;
+    pickRef.current = null;
+    setPick(null);
+    stakeRef.current = false;
+    setHover(`潮紋祭壇：點任意高地放置（圖紙×1 + ${SHRINE_PLACE_GOLD}金）· 可建多座 · Esc 取消`);
+  }
+
+  function tryPlaceShrineAt(gx: number, gy: number): boolean {
+    if (!shrinePlaceRef.current) return false;
+    const b = hqBuffRef.current;
+    if (b.blueprints < 1) {
+      setHover("圖紙不足");
+      shrinePlaceRef.current = false;
+      return true;
     }
-    if (!candidates.length) {
-      setHover("聖地旁無可用高地");
-      return;
+    if (goldRef.current < SHRINE_PLACE_GOLD) {
+      setHover(`需要 ${SHRINE_PLACE_GOLD} 金`);
+      return true;
     }
-    candidates.sort((a, c) => Math.abs(a.gx - hq.gx) + Math.abs(a.gy - hq.gy) - (Math.abs(c.gx - hq.gx) + Math.abs(c.gy - hq.gy)));
-    const { gx, gy } = candidates[0];
+    if (!canPlace(gx, gy)) {
+      setHover("只能放在空高地（非道路／聖地）");
+      return true;
+    }
     goldRef.current -= SHRINE_PLACE_GOLD;
     setGold(goldRef.current);
     b.blueprints -= 1;
-    b.shrineBuilt = true;
+    b.shrineCount += 1;
     bumpHqBuff();
     sim.current.towers.push({
       def: 0,
@@ -5077,13 +5085,15 @@ export function FoxTD() {
       sanctuary: false,
       tideShrine: true,
     } as Tower & { tideShrine?: boolean });
-    setHover("潮紋祭壇已建 · 開啟 3 階二選一加持");
+    shrinePlaceRef.current = false;
+    setHover(`潮紋祭壇 #${b.shrineCount} 已建 · 加持階越後越貴越強`);
+    return true;
   }
 
   function pickHqBuff(id: HqBuffId) {
     const b = hqBuffRef.current;
-    if (!b.shrineBuilt) {
-      setHover("請先建造潮紋祭壇");
+    if (b.shrineCount < 1) {
+      setHover("請先至少建造一座潮紋祭壇");
       return;
     }
     if (b.tier >= 3) {
@@ -5092,14 +5102,21 @@ export function FoxTD() {
     }
     const need = b.tier + 1;
     const opts = hqBuffChoices(need);
-    if (!opts.some((o) => o.id === id)) return;
+    const opt = opts.find((o) => o.id === id);
+    if (!opt) return;
+    if (goldRef.current < opt.cost) {
+      setHover(`第 ${need} 階加持需要 ${opt.cost} 金`);
+      return;
+    }
+    goldRef.current -= opt.cost;
+    setGold(goldRef.current);
     b.picks.push(id);
     b.tier = need;
     const p = hqProgRef.current;
-    if (id === "escort_cd") p.deployCd = Math.max(5, p.deployCd - 2.5);
-    if (id === "escort_hp") p.meleeHp = Math.round(p.meleeHp * 1.25);
+    if (id === "escort_cd") p.deployCd = Math.max(5, p.deployCd - 3);
+    if (id === "escort_hp") p.meleeHp = Math.round(p.meleeHp * 1.32);
     if (id === "free_escort") {
-      freeEscortRef.current += 2;
+      freeEscortRef.current += 3;
       b.freePerWave += 1;
     }
     const hq = sim.current.towers.find((t) => t.sanctuary);
@@ -5113,7 +5130,7 @@ export function FoxTD() {
       hq.hp = Math.min(st.maxHp, Math.max(1, Math.round(st.maxHp * ratio)));
     }
     bumpHqBuff();
-    setHover(`加持「${opts.find((o) => o.id === id)?.name}」· ${b.tier}/3`);
+    setHover(`加持「${opt.name}」· ${b.tier}/3 · −${opt.cost} 金`);
   }
 
   function lockHqPath(path: HqPathId) {
@@ -5183,6 +5200,7 @@ export function FoxTD() {
         setSel(null);
         selRef.current = null;
         stakeRef.current = false;
+        shrinePlaceRef.current = false;
         setHover("已取消選取");
         return;
       }
@@ -6092,38 +6110,41 @@ export function FoxTD() {
               </p>
               <div className="mt-2 rounded border border-[#3a6080] bg-[#0a1828cc] p-2 text-[11px]">
                 <div className="mb-1 flex items-center justify-between text-[#9ad7ff]">
-                  <span>潮紋祭壇 · 圖紙 {hqBuffRef.current.blueprints}</span>
+                  <span>祭壇 {hqBuffRef.current.shrineCount} · 圖紙 {hqBuffRef.current.blueprints}</span>
                   <span>加持 {hqBuffRef.current.tier}/3</span>
                 </div>
                 <button
                   type="button"
                   className="btn ghost"
                   style={{ width: "100%", fontSize: 11, marginBottom: 6 }}
-                  disabled={hqBuffRef.current.shrineBuilt || hqBuffRef.current.blueprints < 1 || gold < SHRINE_PLACE_GOLD}
+                  disabled={hqBuffRef.current.blueprints < 1 || gold < SHRINE_PLACE_GOLD}
                   onClick={() => placeTideShrine()}
                 >
-                  {hqBuffRef.current.shrineBuilt
-                    ? "祭壇已建置"
-                    : `建祭壇（圖紙×1 + ${SHRINE_PLACE_GOLD}金）`}
+                  建祭壇（圖紙×1 + {SHRINE_PLACE_GOLD}金 · 點地圖高地 · 可多座）
                 </button>
-                {hqBuffRef.current.shrineBuilt && hqBuffRef.current.tier < 3 && (
+                {hqBuffRef.current.shrineCount < 1 && (
+                  <p className="text-[10px] text-[#9ec4de]">至少一座祭壇後可選加持路線</p>
+                )}
+                {hqBuffRef.current.shrineCount >= 1 && hqBuffRef.current.tier < 3 && (
                   <div className="flex flex-col gap-1">
+                    <p className="text-[10px] text-[#9ec4de]">第 {hqBuffRef.current.tier + 1} 階更強也更貴 · 二選一</p>
                     {hqBuffChoices(hqBuffRef.current.tier + 1).map((opt) => (
                       <button
                         key={opt.id}
                         type="button"
                         className="btn ghost"
                         style={{ fontSize: 11, textAlign: "left" }}
+                        disabled={gold < opt.cost}
                         onClick={() => pickHqBuff(opt.id)}
                       >
-                        <strong>{opt.name}</strong>
+                        <strong>{opt.name}</strong> · {opt.cost}金
                         <span className="block text-[10px] text-[#9ec4de]">{opt.desc}</span>
                       </button>
                     ))}
                   </div>
                 )}
                 {hqBuffRef.current.tier >= 3 && (
-                  <p className="text-[10px] text-[#b8f0c8]">加持路線完成</p>
+                  <p className="text-[10px] text-[#b8f0c8]">加持路線完成（3/3）</p>
                 )}
               </div>
               {!hqProgRef.current.path ? (
