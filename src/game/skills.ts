@@ -79,16 +79,16 @@ export function resolveSkill(
         shouts,
         towerHits: opts.towersInRange.filter((t) => t.dist <= 70).map((t) => ({
           index: t.index,
-          damage: opts.boss ? 36 : 22,
+          damage: opts.boss ? 28 : 16,
         })),
         rings: [{ r: 70, color: "rgba(255,180,120,0.7)" }],
       };
     case "howl":
       return { shouts, hasteT: 3.2, hasteMul: opts.boss ? 1.45 : 1.3, rings: [{ r: 40, color: "rgba(200,160,255,0.6)" }] };
     case "mend":
-      return { shouts, heal: opts.maxHp * (opts.boss ? 0.18 : 0.14), rings: [{ r: 36, color: "rgba(120,255,180,0.65)" }] };
+      return { shouts, heal: opts.maxHp * (opts.boss ? 0.12 : 0.09), rings: [{ r: 36, color: "rgba(120,255,180,0.65)" }] };
     case "barrier":
-      return { shouts, shield: opts.maxHp * (opts.boss ? 0.22 : 0.16), rings: [{ r: 42, color: "rgba(150,200,255,0.7)" }] };
+      return { shouts, shield: opts.maxHp * (opts.boss ? 0.15 : 0.12), rings: [{ r: 42, color: "rgba(150,200,255,0.7)" }] };
     case "charge":
       return { shouts, dash: opts.boss ? 90 : 70, hasteT: 0.8, hasteMul: 1.6, rings: [{ r: 28, color: "rgba(255,220,140,0.55)" }] };
     case "terror":
@@ -96,15 +96,15 @@ export function resolveSkill(
         shouts,
         terror: {
           indices: opts.towersInRange.filter((t) => t.dist <= 120).map((t) => t.index),
-          duration: 3.5,
-          rateMul: 0.55,
+          duration: 2.8,
+          rateMul: 0.68,
         },
         rings: [{ r: 120, color: "rgba(180,100,255,0.5)" }],
       };
     case "nova":
       return {
         shouts,
-        towerHits: opts.towersInRange.filter((t) => t.dist <= 100).map((t) => ({ index: t.index, damage: 48 })),
+        towerHits: opts.towersInRange.filter((t) => t.dist <= 100).map((t) => ({ index: t.index, damage: 34 })),
         hasteT: 2.5,
         hasteMul: 1.35,
         heal: opts.maxHp * 0.08,

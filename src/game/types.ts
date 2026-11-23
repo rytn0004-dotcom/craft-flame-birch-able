@@ -72,14 +72,14 @@ export function stockBestiary(): EnemyDef[] {
   return [
     { name: "潮芽", hp: 48, speed: 150, gold: 14, color: "#7ec8c8", r: 11, traits: [], skills: ["howl"], sprite: "imp", lore: "珊瑚間冒出的幼靈。" },
     { name: "浪崽", hp: 95, speed: 140, gold: 22, color: "#9ad7ff", r: 13, traits: [], skills: ["charge", "howl"], sprite: "imp", lore: "乘浪疾行的海獸幼體。" },
-    { name: "礁岩衛", hp: 220, speed: 105, gold: 36, color: "#8aa4b8", r: 16, traits: ["armor"], skills: ["slam", "howl"], sprite: "brute", lore: "沉沒神殿石像被潮聲喚醒。" },
-    { name: "炎潮", hp: 280, speed: 125, gold: 42, color: "#ff8a6a", r: 15, traits: ["regen"], skills: ["mend", "howl"], sprite: "brute", lore: "地熱與潮水交織的灼熱靈。" },
-    { name: "潮將軍", hp: 900, speed: 100, gold: 95, color: "#c9a0ff", r: 18, traits: ["armor", "noslow"], boss: true, skills: ["slam", "terror", "howl", "barrier"], sprite: "boss", lore: "率領潮陣的魔將，銀髮紅披。" },
-    { name: "深海王", hp: 1400, speed: 90, gold: 155, color: "#ff6fa8", r: 21, traits: ["shield"], boss: true, skills: ["nova", "barrier", "mend", "terror"], sprite: "king", lore: "舊日海域的君主。" },
-    { name: "潮刃", hp: 380, speed: 125, gold: 40, color: "#ffd2a8", r: 14, traits: ["melee"], skills: ["slam", "charge"], sprite: "brute", lore: "專拆塔的刃潮侍衛。" },
-    { name: "月影衛", hp: 520, speed: 105, gold: 52, color: "#b9dcff", r: 15, traits: ["armor", "shield"], skills: ["barrier", "slam"], sprite: "boss", lore: "月光甲衛，護盾如潮膜。" },
-    { name: "疾潮狐", hp: 110, speed: 210, gold: 28, color: "#d7b6ff", r: 12, traits: ["noslow"], skills: ["charge"], sprite: "imp", lore: "被污濁侵蝕的野狐靈。" },
-    { name: "潮后", hp: 2200, speed: 80, gold: 240, color: "#ffe08a", r: 22, traits: ["regen", "shield", "armor"], boss: true, skills: ["nova", "mend", "barrier", "howl", "terror"], sprite: "king", lore: "與狐仙同源而沉淪的潮后。" },
+    { name: "礁岩衛", hp: 200, speed: 105, gold: 36, color: "#8aa4b8", r: 16, traits: ["armor"], skills: ["slam", "howl"], sprite: "brute", lore: "沉沒神殿石像被潮聲喚醒。" },
+    { name: "炎潮", hp: 250, speed: 122, gold: 42, color: "#ff8a6a", r: 15, traits: ["regen"], skills: ["mend", "howl"], sprite: "brute", lore: "地熱與潮水交織的灼熱靈。" },
+    { name: "潮將軍", hp: 820, speed: 98, gold: 95, color: "#c9a0ff", r: 18, traits: ["armor", "noslow"], boss: true, skills: ["slam", "terror", "howl", "barrier"], sprite: "boss", lore: "率領潮陣的魔將，銀髮紅披。" },
+    { name: "深海王", hp: 1220, speed: 88, gold: 155, color: "#ff6fa8", r: 21, traits: ["shield"], boss: true, skills: ["nova", "barrier", "mend", "terror"], sprite: "king", lore: "舊日海域的君主。" },
+    { name: "潮刃", hp: 340, speed: 120, gold: 40, color: "#ffd2a8", r: 14, traits: ["melee"], skills: ["slam", "charge"], sprite: "brute", lore: "專拆塔的刃潮侍衛。" },
+    { name: "月影衛", hp: 460, speed: 102, gold: 52, color: "#b9dcff", r: 15, traits: ["armor", "shield"], skills: ["barrier", "slam"], sprite: "boss", lore: "月光甲衛，護盾如潮膜。" },
+    { name: "疾潮狐", hp: 100, speed: 188, gold: 28, color: "#d7b6ff", r: 12, traits: ["noslow"], skills: ["charge"], sprite: "imp", lore: "被污濁侵蝕的野狐靈。" },
+    { name: "潮后", hp: 1900, speed: 78, gold: 240, color: "#ffe08a", r: 22, traits: ["regen", "shield", "armor"], boss: true, skills: ["nova", "mend", "barrier", "howl", "terror"], sprite: "king", lore: "與狐仙同源而沉淪的潮后。" },
   ];
 }
 

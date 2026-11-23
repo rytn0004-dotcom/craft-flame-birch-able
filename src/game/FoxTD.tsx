@@ -99,9 +99,9 @@ const HQ_HP_PER_CORE_LV = 100; // 主砲升級附帶建築耐久
 /** 接觸結算間隔（越短換血越快） */
 const HQ_CONTACT_TICK = 0.10;
 /** 護衛對怪傷害 ≈ 自身當前生命 × 此權重（每 tick） */
-const HQ_ATK_W = 0.34;
+const HQ_ATK_W = 0.30;
 /** 怪對護衛反傷權重 */
-const HQ_REFLECT_W = 0.12;
+const HQ_REFLECT_W = 0.08;
 /** 沿路徑判定接觸的距離（格距像素感） */
 const HQ_CONTACT_PATH = 36;
 /** 像素距離備援 */
@@ -1461,7 +1461,7 @@ export function FoxTD() {
         if (e.rootT > 0) amount *= r.mul;
       }
 
-      if (e.armor) amount *= 0.65;
+      if (e.armor) amount *= 0.72;
       if (e.shield > 0) {
         const used = Math.min(e.shield, amount);
         e.shield -= used;
@@ -1886,9 +1886,9 @@ export function FoxTD() {
             atk: 0.4,
             route: job.route ?? 0,
             armor: et.traits.includes("armor"),
-            regen: et.traits.includes("regen") ? et.hp * 0.04 : 0,
+            regen: et.traits.includes("regen") ? et.hp * 0.025 : 0,
             noslow: et.traits.includes("noslow"),
-            shield: et.traits.includes("shield") ? et.hp * scale * 0.28 : 0,
+            shield: et.traits.includes("shield") ? et.hp * scale * 0.22 : 0,
             boss: !!et.boss,
             atkCd: 0,
             aiSpeed: 1,
@@ -2101,7 +2101,7 @@ export function FoxTD() {
             e.face = tw.x >= p.x ? 1 : -1;
             // 路障較耐打；聖地建築另有減傷（近戰拆建築不該秒掉）
             let mul = (e.rage ? 1.4 : 1) * (tw.stake ? 0.75 : 1);
-            if (tw.sanctuary) mul *= 0.55;
+            if (tw.sanctuary) mul *= 0.42;
             tw.hp -= damage * mul;
             tw.shake = 0.18;
             burst(tw.x, tw.y, e.rage ? "#ff6fa8" : "#ffb4c8", e.boss ? 10 : 6, 1.8);
@@ -2538,9 +2538,10 @@ export function FoxTD() {
             if (u.contactT <= 0) {
               const kindMul = u.kind === "melee" ? 1 : u.kind === "ranged" ? 0.72 : 0.55;
               const dmg = Math.max(5, u.hp * p.atkW * mistMul * kindMul);
+              // 反傷有硬頂，避免 Boss 高血秒殺整排護衛
               const reflect = Math.max(
                 2,
-                Math.min(u.maxHp * 0.28, Math.max(0, engage.hp) * HQ_REFLECT_W + dmg * 0.28),
+                Math.min(14, u.maxHp * 0.16, Math.max(0, engage.hp) * HQ_REFLECT_W + dmg * 0.2),
               );
               engage.hp -= dmg;
               u.hp -= reflect;
@@ -3999,8 +4000,8 @@ export function FoxTD() {
         recoil: 0,
         atkT: 0,
         atkDur: 0,
-        hp: 140,
-        maxHp: 140,
+        hp: 175,
+        maxHp: 175,
         shake: 0,
         stake: false,
         gx,
