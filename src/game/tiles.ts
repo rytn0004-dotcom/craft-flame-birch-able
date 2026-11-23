@@ -229,8 +229,85 @@ function makeBridge(): TileTemplate {
   };
 }
 
+/** 中島：中央 1×1 高地，道路上下繞行（東西向） */
+function makeIslet(): TileTemplate {
+  const blocked = emptyBlocked(true);
+  carveH(blocked, 10, 10);
+  // 中心高地堵住直路
+  blocked[10][10] = true;
+  // 北側繞行
+  for (const c of [9, 10, 11]) blocked[9][c] = false;
+  blocked[10][9] = false;
+  blocked[10][11] = false;
+  return {
+    id: "islet",
+    name: "中島",
+    blocked,
+    ports: [port("W", 10), port("E", 10)],
+    heights: [
+      { c: 10, r: 10, h: 3 },
+      { c: 8, r: 8, h: 1 }, { c: 12, r: 8, h: 1 },
+      { c: 8, r: 12, h: 2 }, { c: 12, r: 12, h: 1 },
+    ],
+  };
+}
+
+/** 台地：中央 2×2 高地，道路繞行兩側 */
+function makeMesa(): TileTemplate {
+  const blocked = emptyBlocked(true);
+  carveH(blocked, 10, 10);
+  // 2×2 高地（堵住中線）
+  for (const r of [9, 10]) for (const c of [9, 10]) blocked[r][c] = true;
+  // 北側繞行
+  for (const c of [8, 9, 10, 11]) blocked[8][c] = false;
+  blocked[9][8] = false;
+  blocked[9][11] = false;
+  // 南側繞行（雙線擇一仍算單道主脈，南側作備援）
+  for (const c of [8, 9, 10, 11]) blocked[11][c] = false;
+  blocked[10][8] = false;
+  blocked[10][11] = false;
+  return {
+    id: "mesa",
+    name: "台地",
+    blocked,
+    ports: [port("W", 10), port("E", 10)],
+    heights: [
+      { c: 9, r: 9, h: 3 }, { c: 10, r: 9, h: 3 },
+      { c: 9, r: 10, h: 2 }, { c: 10, r: 10, h: 3 },
+      { c: 7, r: 7, h: 1 }, { c: 12, r: 7, h: 1 },
+      { c: 7, r: 12, h: 1 }, { c: 12, r: 12, h: 2 },
+    ],
+  };
+}
+
+/** 彎島：轉角中間放 1×1 高地，道路外彎 */
+function makeCornerIslet(): TileTemplate {
+  const blocked = emptyBlocked(true);
+  carveH(blocked, 10, 10, 0, 10);
+  carveV(blocked, 10, 10, 10, TILE - 1);
+  blocked[10][10] = true;
+  // 外角繞行
+  blocked[9][9] = false;
+  blocked[9][10] = false;
+  blocked[10][9] = false;
+  blocked[11][10] = false;
+  blocked[11][11] = false;
+  blocked[10][11] = false;
+  return {
+    id: "corner_islet",
+    name: "角島",
+    blocked,
+    ports: [port("W", 10), port("S", 10)],
+    heights: [
+      { c: 10, r: 10, h: 3 },
+      { c: 7, r: 7, h: 1 }, { c: 13, r: 13, h: 2 },
+    ],
+  };
+}
+
 export const TILE_TEMPLATES: TileTemplate[] = [
   makeStraight(), makeCorner(), makeTee(), makeCross(), makeOpen(), makeChoke(), makeSpawn(), makeHq(), makeBridge(),
+  makeIslet(), makeMesa(), makeCornerIslet(),
 ];
 export const TEMPLATE_BY_ID: Record<string, TileTemplate> = Object.fromEntries(TILE_TEMPLATES.map((t) => [t.id, t]));
 export const OFFERABLE_IDS = TILE_TEMPLATES.filter((t) => t.id !== "hq").map((t) => t.id);
@@ -242,14 +319,17 @@ export type TileOfferBias = {
 };
 
 const DEFAULT_WEIGHTS: Record<string, number> = {
-  straight: 1.1,
-  corner: 1.15,
+  straight: 1.0,
+  corner: 1.05,
   tee: 1.0,
-  cross: 0.95,
-  open: 0.75,
-  choke: 1.2,
+  cross: 0.9,
+  open: 0.7,
+  choke: 1.1,
   spawn: 0.55,
-  bridge: 0.9,
+  bridge: 0.85,
+  islet: 1.25,
+  mesa: 1.15,
+  corner_islet: 1.1,
 };
 
 function mulberry32(seed: number) {
@@ -418,6 +498,16 @@ export function buildHeights(board: TileBoard): number[] {
         else h = 3;
         heights[r * COLS + c] = h;
       }
+    }
+    // 模板指定高度覆蓋（中島／台地等）
+    const { heights: fixed } = rotatedTemplate(tpl, p.rot);
+    for (const fh of fixed) {
+      const c = origin.c + fh.c;
+      const r = origin.r + fh.r;
+      if (c < 0 || r < 0 || c >= COLS || r >= ROWS) continue;
+      // 道路格不覆蓋
+      if (!blocked[fh.r]?.[fh.c]) continue;
+      heights[r * COLS + c] = Math.max(0, Math.min(3, fh.h | 0));
     }
   }
   return heights;
