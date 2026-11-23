@@ -5508,14 +5508,14 @@ export function FoxTD() {
                 <div
                   className="overlay"
                   style={{
-                    background: "rgba(4,12,22,0.72)",
+                    background: "rgba(6,14,24,0.78)",
                     justifyContent: "center",
                     paddingTop: 24,
                   }}
                 >
                   <div
                     style={{
-                      background: "rgba(8,20,36,0.96)",
+                      background: "rgba(8,18,32,0.94)",
                       borderRadius: 14,
                       padding: 18,
                       maxWidth: 460,

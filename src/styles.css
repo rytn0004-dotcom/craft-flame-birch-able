@@ -5,6 +5,8 @@ html, body, #root, #app {
   background: #071525;
   color: #e8f4ff;
   overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 .shell,
 .td-shell {
@@ -21,6 +23,8 @@ html, body, #root, #app {
     linear-gradient(180deg, #071525 0%, #0a1a2e 40%, #061018 100%);
   color: #e8f4ff;
   font-family: "Noto Sans TC", "Segoe UI", system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
 }
 
 .td-shell > header {
@@ -28,20 +32,23 @@ html, body, #root, #app {
   max-width: none !important;
   width: 100%;
   box-sizing: border-box;
-  padding: 8px 14px 6px !important;
+  padding: 10px 16px 8px !important;
+  border-bottom: 1px solid rgba(120, 180, 255, 0.08);
 }
 
 .td-shell > header h1 {
-  font-size: clamp(1.35rem, 2.2vw, 1.85rem) !important;
+  font-size: clamp(1.25rem, 2vw, 1.7rem) !important;
+  letter-spacing: 0.04em;
+  font-weight: 600;
 }
 
 .td-layout {
   flex: 1 1 auto;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
-  gap: 10px;
-  padding: 0 10px 10px;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 340px);
+  gap: 12px;
+  padding: 8px 12px 12px;
   max-width: none;
   width: 100%;
   margin: 0;
@@ -52,23 +59,24 @@ html, body, #root, #app {
 @media (max-width: 900px) {
   .td-layout {
     grid-template-columns: 1fr;
-    grid-template-rows: minmax(45vh, 1fr) auto;
+    grid-template-rows: minmax(42vh, 1fr) auto;
     overflow-y: auto;
+    gap: 8px;
   }
   .panel {
     max-height: none !important;
   }
 }
 
-/* 左側：吃滿剩餘高度／寬度 */
+/* 左側舞台 */
 .stage {
   position: relative;
-  border-radius: 12px;
+  border-radius: 14px;
   overflow: hidden;
   background: #040c16;
   box-shadow:
-    0 8px 32px rgba(0, 0, 0, 0.45),
-    inset 0 0 0 1px rgba(120, 180, 255, 0.12);
+    0 10px 36px rgba(0, 0, 0, 0.4),
+    inset 0 0 0 1px rgba(120, 180, 255, 0.1);
   width: 100%;
   height: 100%;
   min-height: 0;
@@ -90,28 +98,29 @@ html, body, #root, #app {
 
 .hud-float {
   position: absolute;
-  top: 10px;
-  left: 10px;
+  top: 12px;
+  left: 12px;
   z-index: 5;
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  max-width: calc(100% - 20px);
+  gap: 8px;
+  max-width: calc(100% - 24px);
   pointer-events: none;
 }
 
 .chip {
   pointer-events: auto;
-  padding: 4px 10px;
+  padding: 5px 12px;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 600;
   letter-spacing: 0.02em;
   color: #e8f4ff;
-  background: rgba(6, 18, 32, 0.82);
-  border: 1px solid rgba(126, 200, 255, 0.28);
-  backdrop-filter: blur(8px);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  background: rgba(6, 16, 28, 0.78);
+  border: 1px solid rgba(126, 200, 255, 0.22);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.28);
+  line-height: 1.35;
 }
 
 .overlay {
@@ -122,140 +131,188 @@ html, body, #root, #app {
   flex-direction: column;
   align-items: center;
   justify-content: flex-start;
-  padding: 18px 16px 24px;
+  padding: 20px 18px 28px;
   text-align: center;
-  background: rgba(4, 12, 22, 0.88);
-  backdrop-filter: blur(8px);
+  background: rgba(4, 10, 18, 0.82);
+  backdrop-filter: blur(10px);
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 }
 
 .overlay h2 {
-  margin: 4px 0 10px;
-  font-size: clamp(1.25rem, 2.5vw, 1.75rem);
+  margin: 6px 0 12px;
+  font-size: clamp(1.2rem, 2.4vw, 1.65rem);
   color: #ffe7f1;
-  text-shadow: 0 1px 8px rgba(0,0,0,0.5);
+  text-shadow: 0 1px 10px rgba(0,0,0,0.45);
+  font-weight: 600;
 }
 
 .overlay p {
-  margin: 0 0 12px;
-  color: #d2e8f8;
-  line-height: 1.5;
+  margin: 0 0 14px;
+  color: #c8e0f4;
+  line-height: 1.55;
   max-width: 36rem;
 }
 
 .overlay .btn {
   font-size: 13px;
-  padding: 8px 14px;
+  padding: 9px 16px;
 }
 
+/* 右側面板 */
 .panel {
-  background: rgba(8, 20, 36, 0.96);
-  border: 1px solid rgba(120, 180, 255, 0.18);
-  border-radius: 12px;
-  padding: 12px;
+  background: rgba(8, 18, 32, 0.94);
+  border: 1px solid rgba(120, 180, 255, 0.14);
+  border-radius: 14px;
+  padding: 14px 14px 16px;
   width: 100%;
   max-height: 100%;
   overflow-y: auto;
   font-size: 13px;
-  line-height: 1.45;
+  line-height: 1.5;
   box-sizing: border-box;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.25);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(100, 160, 210, 0.35) transparent;
+}
+.panel::-webkit-scrollbar {
+  width: 6px;
+}
+.panel::-webkit-scrollbar-thumb {
+  background: rgba(100, 160, 210, 0.35);
+  border-radius: 999px;
 }
 .panel .chip, .panel .text-xs { font-size: 12px; }
 
+.panel h3,
+.panel .panel-title {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #b8dcf5;
+  letter-spacing: 0.04em;
+}
+
+.panel section + section,
+.panel .section + .section {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(120, 180, 255, 0.1);
+}
+
 .panel .btn,
 .panel button.btn {
-  font-size: 12px;
-  padding: 7px 10px;
+  font-size: 12.5px;
+  padding: 8px 12px;
+  border-radius: 10px;
 }
 
 .btn {
   border: 0;
   border-radius: 10px;
-  padding: 9px 12px;
+  padding: 9px 14px;
   font-weight: 600;
   cursor: pointer;
-  background: linear-gradient(180deg, #2a6a9e, #1a4a72);
+  background: linear-gradient(180deg, #2f72a8, #1c527c);
   color: #e8f4ff;
-  border: 1px solid rgba(126, 200, 255, 0.25);
+  border: 1px solid rgba(126, 200, 255, 0.22);
+  transition: filter 0.12s, box-shadow 0.12s, transform 0.1s;
+  line-height: 1.35;
 }
 
 .btn:hover {
-  filter: brightness(1.08);
+  filter: brightness(1.1);
+  box-shadow: 0 2px 12px rgba(40, 120, 180, 0.25);
+}
+
+.btn:active {
+  transform: translateY(1px);
 }
 
 .btn:disabled {
-  opacity: 0.4;
+  opacity: 0.38;
   cursor: not-allowed;
   filter: none;
+  box-shadow: none;
 }
 
 .btn.ghost,
 .btn-ghost {
-  background: rgba(12, 28, 48, 0.65);
-  border: 1px solid rgba(120, 180, 255, 0.25);
+  background: rgba(12, 26, 44, 0.7);
+  border: 1px solid rgba(120, 180, 255, 0.22);
   color: #b7ddf5;
+}
+
+.btn.ghost:hover,
+.btn-ghost:hover {
+  background: rgba(18, 40, 64, 0.9);
+  border-color: rgba(140, 200, 255, 0.35);
 }
 
 .btn.on,
 .btn.ghost.on {
   border-color: #7ec8ff;
-  box-shadow: 0 0 0 1px rgba(126, 200, 255, 0.35);
-  background: rgba(30, 70, 110, 0.9);
+  box-shadow: 0 0 0 1px rgba(126, 200, 255, 0.3);
+  background: rgba(28, 68, 108, 0.92);
 }
 
 .tower-rail {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-height: 42vh;
+  max-height: 44vh;
   overflow-y: auto;
   padding-right: 4px;
-  margin-top: 8px;
+  margin-top: 10px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(100, 160, 210, 0.3) transparent;
 }
 
 .tower-card {
   display: flex;
-  gap: 8px;
+  gap: 10px;
   align-items: center;
   text-align: left;
-  padding: 8px;
+  padding: 9px 10px;
   border-radius: 12px;
-  border: 1px solid rgba(120, 180, 255, 0.18);
-  background: rgba(12, 28, 48, 0.85);
+  border: 1px solid rgba(120, 180, 255, 0.14);
+  background: rgba(10, 24, 42, 0.88);
   color: inherit;
   cursor: pointer;
-  transition: border-color 0.15s, background 0.15s, transform 0.12s;
+  transition: border-color 0.15s, background 0.15s, transform 0.12s, box-shadow 0.12s;
   width: 100%;
 }
 
 .tower-card:hover {
-  border-color: rgba(126, 200, 255, 0.45);
-  background: rgba(18, 40, 68, 0.95);
+  border-color: rgba(126, 200, 255, 0.4);
+  background: rgba(16, 36, 60, 0.95);
   transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
 }
 
 .tower-card.selected {
   border-color: #7ec8ff;
-  box-shadow: 0 0 0 1px rgba(126, 200, 255, 0.35);
+  box-shadow: 0 0 0 1px rgba(126, 200, 255, 0.32);
+  background: rgba(20, 48, 78, 0.95);
 }
 
 .tower-card.dim {
-  opacity: 0.45;
-  filter: grayscale(0.35);
+  opacity: 0.42;
+  filter: grayscale(0.3);
 }
 
 .tower-card.dim:hover {
-  opacity: 0.7;
+  opacity: 0.72;
 }
 
 .tower-card img,
 .tower-card video {
-  width: 52px;
-  height: 52px;
+  width: 50px;
+  height: 50px;
   object-fit: cover;
-  border-radius: 8px;
+  border-radius: 9px;
   flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
 .tower-card img.tower-idle,
@@ -270,13 +327,14 @@ html, body, #root, #app {
     transform: translateY(0) scale(1);
   }
   50% {
-    transform: translateY(-3px) scale(1.07);
+    transform: translateY(-2px) scale(1.05);
   }
 }
 
 .hint {
   color: #8eb8d8;
   font-size: 12px;
+  line-height: 1.45;
 }
 
 .hud {
@@ -286,7 +344,7 @@ html, body, #root, #app {
   align-items: center;
   padding: 10px 14px;
   background: rgba(8, 20, 36, 0.72);
-  border-bottom: 1px solid rgba(120, 180, 255, 0.15);
+  border-bottom: 1px solid rgba(120, 180, 255, 0.12);
 }
 
 .playfield {
@@ -303,4 +361,44 @@ html, body, #root, #app {
   border-radius: 14px;
   overflow: hidden;
   background: #040c16;
+}
+
+/* 舒適閱讀：右側選中資訊區 */
+.panel .sel-box,
+.panel .info-box {
+  border-radius: 12px;
+  border: 1px solid rgba(120, 180, 255, 0.12);
+  background: rgba(6, 16, 28, 0.55);
+  padding: 10px 12px;
+  margin-top: 10px;
+}
+
+.panel label {
+  color: #9ec4de;
+  font-size: 12px;
+}
+
+/* 減少刺眼對比 */
+.panel strong {
+  color: #eaf6ff;
+  font-weight: 600;
+}
+
+/* 輸入框更柔和 */
+.panel input,
+.panel select,
+.panel textarea {
+  background: rgba(6, 16, 28, 0.85);
+  border: 1px solid rgba(120, 180, 255, 0.2);
+  border-radius: 8px;
+  color: #e8f4ff;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+.panel input:focus,
+.panel select:focus,
+.panel textarea:focus {
+  outline: none;
+  border-color: rgba(126, 200, 255, 0.45);
+  box-shadow: 0 0 0 2px rgba(80, 140, 200, 0.2);
 }
