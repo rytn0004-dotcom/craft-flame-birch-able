@@ -1436,6 +1436,34 @@ export function FoxTD() {
       }
       if (bondTag) float(px, py - 42, bondTag, "#ffb4e0");
 
+      // 高地戰術：高度不進碰撞，只改這一發的手感
+      if (fromTower != null) {
+        const tw = sim.current.towers[fromTower];
+        if (tw && !tw.stake && !tw.sanctuary) {
+          const hh = cellHeight(sim.current.heights, tw.gx, tw.gy);
+          const nearRoad = ([[1, 0], [-1, 0], [0, 1], [0, -1]] as const).some(([dc, dr]) => {
+            const nc = tw.gx + dc;
+            const nr = tw.gy + dr;
+            if (nc < 0 || nr < 0 || nc >= COLS || nr >= ROWS) return false;
+            if (!isCellOnBoard(boardRef.current, nc, nr)) return false;
+            return !sim.current.blocked.has(cellKey(nc, nr));
+          });
+          if (hh >= 3 && Math.random() < 0.16) {
+            amount *= 1.65;
+            float(px, py - 34, "峭擊", "#ffe08a");
+          } else if (hh === 2 && Math.random() < 0.1) {
+            amount *= 1.4;
+            float(px, py - 34, "高擊", "#d7f0ff");
+          } else if (hh <= 1 && nearRoad) {
+            amount *= 1.12;
+          }
+          if (hh >= 3 && !e.noslow && Math.random() < 0.22) {
+            e.slow = Math.min(e.slow, 0.72);
+            e.slowT = Math.max(e.slowT, 0.45);
+          }
+        }
+      }
+
       // 暴擊
       for (const c of get("crit")) {
         if (Math.random() < c.chance) {
@@ -2240,6 +2268,19 @@ export function FoxTD() {
               float(p.x, p.y - 36, "潮紋圖紙 +1", "#9ad7ff");
             }
             if (combo.n >= 5 && combo.n % 5 === 0) float(p.x, p.y - 14, `連殺 ×${combo.n}`, "#ff9ecd");
+            // 連殺潮鳴：附近敵人短暫停頓，鼓勵把火力集中在一條線
+            if (combo.n === 8 || combo.n === 16) {
+              for (const o of s.enemies) {
+                const op = posAt(o.dist, o.route);
+                if (Math.hypot(op.x - p.x, op.y - p.y) > 150) continue;
+                if (!o.noslow) {
+                  o.slow = Math.min(o.slow, 0.45);
+                  o.slowT = Math.max(o.slowT, 1.1);
+                }
+              }
+              float(p.x, p.y - 48, "潮鳴", "#9ad7ff");
+              s.rings.push({ x: p.x, y: p.y, age: 0, color: "#9ad7ff" });
+            }
             float(p.x, p.y, `+${g}`, combo.n >= 3 ? "#ffe08a" : "#ffd27a");
             if (combo.n >= 3) bumpFlavor();
             else bumpFlavor();
@@ -4158,9 +4199,11 @@ export function FoxTD() {
         skillShots: 0,
         special: base.special,
       });
+      const hh = cellHeight(s.heights, pgx, pgy);
+      const niche = hh >= 3 ? " · 峭擊" : hh === 2 ? " · 高擊" : " · 路邊伏擊";
       setHover(
         (snappedAway ? "已改放到鄰近高地 · " : "") +
-          (bonus > 0 ? `已放置 ${base.name} · 高地射程 +${bonus}` : `已放置 ${base.name}`),
+          (bonus > 0 ? `已放置 ${base.name} · 高地射程 +${bonus}${niche}` : `已放置 ${base.name}${niche}`),
       );
     };
 
