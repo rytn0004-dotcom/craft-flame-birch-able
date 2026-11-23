@@ -161,7 +161,7 @@ function defaultHqProgress(): HqProgress {
   return {
     path: null,
     tier: 0,
-    squad: 2,
+    squad: 3,
     deployCd: HQ_ESCORT_BASE_CD,
     atkW: HQ_ATK_W,
     meleeHp: 62,
@@ -2353,7 +2353,7 @@ export function FoxTD() {
             const p = hqProgRef.current;
             if (goldRef.current >= HQ_ESCORT_COST || freeEscortRef.current > 0) {
               // 內聯一次部署避免閉包問題：重用部署邏輯的最小子集
-              tw.escortCd = p.deployCd * (tideRef.current?.id === "sanctuary_roar" ? 0.7 : 1);
+              tw.escortCd = Math.max(5, p.deployCd - Math.floor(Math.max(0, s.wave) / 5)) * (tideRef.current?.id === "sanctuary_roar" ? 0.7 : 1);
               // 優先高壓戰線（與壓力標紅同一語意），同線再取最接近終點
               let threat: Enemy | null = null;
               let bestScore = -1e15;
@@ -2379,11 +2379,16 @@ export function FoxTD() {
                     goldRef.current -= HQ_ESCORT_COST;
                     setGold(goldRef.current);
                   }
-                  const baseDist = Math.min(live.len - 20, Math.max(40, threat.dist + 40));
+                  // 自聖地端派出（高 dist），不閃現到怪臉上
+                  const hqAnchor = projectDist(tw.x, tw.y, route);
+                  const baseDist = Math.min(live.len - 12, Math.max(live.len * 0.7, hqAnchor + 8));
+                  const wave = Math.max(0, s.wave);
+                  const squadN = Math.min(18, p.squad + Math.floor(wave / 4));
+                  const hpMul = 1 + Math.min(1.25, wave * 0.045);
                   const kinds: EscortKind[] = [];
-                  let rangedLeft = p.ranged ? p.mixRanged : 0;
-                  let healLeft = p.healer ? p.mixHealer : 0;
-                  for (let k = 0; k < p.squad; k++) {
+                  let rangedLeft = p.ranged ? p.mixRanged + Math.floor(wave / 8) : 0;
+                  let healLeft = p.healer ? p.mixHealer + Math.floor(wave / 10) : 0;
+                  for (let k = 0; k < squadN; k++) {
                     if (rangedLeft > 0) {
                       kinds.push("ranged");
                       rangedLeft--;
@@ -2392,11 +2397,14 @@ export function FoxTD() {
                       healLeft--;
                     } else kinds.push("melee");
                   }
-                  kinds.forEach((kind, i) => {
-                    const dist = Math.min(live.len - 10, baseDist + i * 18);
+                  // 場上護衛上限，避免後期卡頓
+                  const room = Math.max(0, 28 - s.escorts.length);
+                  kinds.slice(0, room).forEach((kind, i) => {
+                    const dist = Math.max(20, baseDist - i * 12);
                     const pos = posAt(dist, route);
-                    const maxHp =
-                      kind === "melee" ? p.meleeHp : kind === "ranged" ? Math.round(p.meleeHp * 0.55) : Math.round(p.meleeHp * 0.65);
+                    const maxHp = Math.round(
+                      (kind === "melee" ? p.meleeHp : kind === "ranged" ? p.meleeHp * 0.55 : p.meleeHp * 0.65) * hpMul,
+                    );
                     s.escorts.push({
                       id: __escortSeq++,
                       kind,
@@ -2406,9 +2414,9 @@ export function FoxTD() {
                       maxHp,
                       route,
                       dist,
-                      speed: kind === "melee" ? 48 : kind === "ranged" ? 44 : 40,
+                      speed: 100,
                       contactT: 0,
-                      shootCd: 0.35 * i,
+                      shootCd: 0.25 * i,
                       healCd: 1.0,
                     });
                   });
@@ -2419,7 +2427,7 @@ export function FoxTD() {
         }
       }
 
-      // 護衛：迎擊、貼怪互消、不因到終點消失
+      // 護衛：自聖地沿路前進；接觸則全兵種互耗血；不因到頭消失
       {
         const p = hqProgRef.current;
         const mistMul = tideRef.current?.id === "mist" ? 1.25 : 1;
@@ -2433,7 +2441,6 @@ export function FoxTD() {
           u.shootCd -= dt;
           u.healCd -= dt;
 
-          // 找接觸／攔截目標：同路線優先，用路徑距離判斷（避免穿模）
           let engage: Enemy | null = null;
           let engageGap = 1e9;
           for (const e of s.enemies) {
@@ -2442,9 +2449,7 @@ export function FoxTD() {
             const same = e.route === u.route;
             const pathGap = same ? Math.abs(e.dist - u.dist) : 1e9;
             const pxGap = Math.hypot(ep.x - u.x, ep.y - u.y);
-            const hit =
-              (same && pathGap <= HQ_CONTACT_PATH) ||
-              pxGap <= HQ_CONTACT_PX;
+            const hit = (same && pathGap <= HQ_CONTACT_PATH) || pxGap <= HQ_CONTACT_PX;
             if (!hit) continue;
             const score = same ? pathGap : pxGap + 80;
             if (score < engageGap) {
@@ -2453,40 +2458,48 @@ export function FoxTD() {
             }
           }
 
-          // 有接觸：停下互砍；無接觸：沿路向入口推進，到頭就駐守
-          if (engage && u.kind === "melee") {
-            // 對齊到怪前方一點，避免視覺穿過去
+          if (engage) {
+            // 全兵種接觸交戰：停在怪前方，互耗血（不瞬移到怪身上）
             if (engage.route === u.route) {
-              u.dist = Math.max(8, engage.dist + 6);
+              // 維持在怪「靠入口一側」外側，避免貼臉閃現
+              const side = engage.dist + (u.kind === "melee" ? 14 : 22);
+              u.dist = Math.max(8, Math.min(routeLen(u.route) - 4, side));
             }
             const pos = posAt(u.dist, u.route);
             u.x = pos.x;
             u.y = pos.y;
-            // 怪被刃衛拖住
-            engage.slow = Math.min(engage.slow, 0.2);
-            engage.slowT = Math.max(engage.slowT, 0.2);
+            engage.slow = Math.min(engage.slow, u.kind === "melee" ? 0.18 : 0.45);
+            engage.slowT = Math.max(engage.slowT, u.kind === "melee" ? 0.35 : 0.2);
             if (u.contactT <= 0) {
-              const dmg = Math.max(4, u.hp * p.atkW * mistMul);
-              // 反傷與怪血量、護衛攻擊力掛鉤，雙方快速互消
-              const reflect = Math.max(3, Math.min(u.maxHp * 0.35, Math.max(0, engage.hp) * HQ_REFLECT_W + dmg * 0.35));
+              const kindMul = u.kind === "melee" ? 1 : u.kind === "ranged" ? 0.72 : 0.55;
+              const dmg = Math.max(5, u.hp * p.atkW * mistMul * kindMul);
+              const reflect = Math.max(
+                2,
+                Math.min(u.maxHp * 0.28, Math.max(0, engage.hp) * HQ_REFLECT_W + dmg * 0.28),
+              );
               engage.hp -= dmg;
               u.hp -= reflect;
               u.contactT = HQ_CONTACT_TICK;
+              const ep = posAt(engage.dist, engage.route);
+              if (Math.random() < 0.4) {
+                float(ep.x, ep.y - 16, `−${Math.round(dmg)}`, u.kind === "melee" ? "#ffb4a8" : u.kind === "ranged" ? "#a8e0ff" : "#b8f0c8");
+              }
               if (engage.hp <= 0) {
-                goldRef.current += Math.max(1, Math.round((engage.gold || 4) * 0.85));
+                goldRef.current += Math.max(1, Math.round((engage.gold || 4) * 0.9));
                 setGold(goldRef.current);
+                float(ep.x, ep.y - 28, "護衛擊破", "#ffe08a");
               }
             }
           } else {
-            // 無近戰鎖定：向入口推進，最低 dist 駐守（不刪除）
+            // 向入口推進（dist 遞減），移速 100
             u.dist = Math.max(8, u.dist - u.speed * dt);
             const pos = posAt(u.dist, u.route);
             u.x = pos.x;
             u.y = pos.y;
           }
 
-          // 遠程：同線優先，邊走邊射
-          if (u.kind === "ranged" && u.shootCd <= 0) {
+          // 遠程額外遠射（接觸外也能輸出）
+          if (u.kind === "ranged" && u.shootCd <= 0 && !engage) {
             let target: Enemy | null = null;
             let td = 1e9;
             for (const e of s.enemies) {
@@ -2494,32 +2507,29 @@ export function FoxTD() {
               const ep = posAt(e.dist, e.route);
               const d = Math.hypot(ep.x - u.x, ep.y - u.y);
               const bias = e.route === u.route ? 0 : 40;
-              if (d + bias < 130 && d + bias < td) {
+              if (d + bias < 150 && d + bias < td) {
                 td = d + bias;
                 target = e;
               }
             }
             if (target) {
-              const rd = p.rangedDmg * 1.25;
+              const rd = p.rangedDmg * (1.25 + Math.min(0.5, s.wave * 0.02));
               target.hp -= rd;
-              u.shootCd = 0.62;
-              const tp = posAt(target.dist, target.route);
-              if (Math.random() < 0.35) float(tp.x, tp.y - 16, `−${Math.round(rd)}`, "#a8e0ff");
-              if (target.hp <= 0) {
-                goldRef.current += Math.max(1, Math.round((target.gold || 4) * 0.9));
-                setGold(goldRef.current);
+              u.shootCd = 0.55;
+              if (Math.random() < 0.35) {
+                const tp = posAt(target.dist, target.route);
+                float(tp.x, tp.y - 16, `−${Math.round(rd)}`, "#a8e0ff");
               }
-            } else u.shootCd = 0.15;
+            } else u.shootCd = 0.12;
           }
 
-          // 治療
           if (u.kind === "healer" && u.healCd <= 0) {
             for (const o of s.escorts) {
               if (o.id === u.id || o.hp <= 0) continue;
-              if (Math.hypot(o.x - u.x, o.y - u.y) > 80) continue;
-              o.hp = Math.min(o.maxHp, o.hp + p.healAmt);
+              if (Math.hypot(o.x - u.x, o.y - u.y) > 90) continue;
+              o.hp = Math.min(o.maxHp, o.hp + p.healAmt * (1 + Math.min(0.4, s.wave * 0.015)));
             }
-            u.healCd = 2.0;
+            u.healCd = 1.8;
           }
           if (u.hp <= 0) s.escorts.splice(i, 1);
         }
@@ -4771,8 +4781,9 @@ export function FoxTD() {
     const route = threat.route;
     const live = routes[route] ?? routes[0];
     if (!live) return;
-    // 在威脅與出口之間偏本陣：取 threat.dist 再往出口方向一點
-    const baseDist = Math.min(live.len - 20, Math.max(40, threat.dist + 40));
+    // 從聖地錨點派出，沿路迎敵（不刷在怪臉上）
+    const hqAnchor = projectDist(hq.x, hq.y, route);
+    const baseDist = Math.min(live.len - 12, Math.max(live.len * 0.7, hqAnchor + 8));
     if (freeEscortRef.current > 0) {
       freeEscortRef.current -= 1;
       setHover("動用免費護衛名額");
@@ -4780,12 +4791,32 @@ export function FoxTD() {
       goldRef.current -= HQ_ESCORT_COST;
       setGold(goldRef.current);
     }
-    hq.escortCd = p.deployCd * (tideRef.current?.id === "sanctuary_roar" ? 0.7 : 1);
-    const kinds = compositionForSquad(p);
-    kinds.forEach((kind, i) => {
-      const dist = Math.min(live.len - 10, baseDist + i * 18);
+    const wave = Math.max(0, s.wave);
+    hq.escortCd = Math.max(5, p.deployCd - Math.floor(wave / 5)) * (tideRef.current?.id === "sanctuary_roar" ? 0.7 : 1);
+    const squadN = Math.min(18, p.squad + Math.floor(wave / 4));
+    const hpMul = 1 + Math.min(1.25, wave * 0.045);
+    // 擴充 composition：波次補遠程／治療名額
+    const kinds: EscortKind[] = [];
+    let rangedLeft = (p.ranged ? p.mixRanged : 0) + Math.floor(wave / 8);
+    let healLeft = (p.healer ? p.mixHealer : 0) + Math.floor(wave / 10);
+    if (!p.ranged) rangedLeft = 0;
+    if (!p.healer) healLeft = 0;
+    for (let i = 0; i < squadN; i++) {
+      if (rangedLeft > 0) {
+        kinds.push("ranged");
+        rangedLeft--;
+      } else if (healLeft > 0) {
+        kinds.push("healer");
+        healLeft--;
+      } else kinds.push("melee");
+    }
+    const room = Math.max(0, 28 - s.escorts.length);
+    kinds.slice(0, room).forEach((kind, i) => {
+      const dist = Math.max(20, baseDist - i * 12);
       const pos = posAt(dist, route);
-      const maxHp = kind === "melee" ? p.meleeHp : kind === "ranged" ? Math.round(p.meleeHp * 0.55) : Math.round(p.meleeHp * 0.65);
+      const maxHp = Math.round(
+        (kind === "melee" ? p.meleeHp : kind === "ranged" ? p.meleeHp * 0.55 : p.meleeHp * 0.65) * hpMul,
+      );
       s.escorts.push({
         id: __escortSeq++,
         kind,
@@ -4795,13 +4826,15 @@ export function FoxTD() {
         maxHp,
         route,
         dist,
-        speed: kind === "melee" ? 48 : kind === "ranged" ? 44 : 40,
+        speed: 100,
         contactT: 0,
-        shootCd: 0.4 * i,
-        healCd: 1.2,
+        shootCd: 0.25 * i,
+        healCd: 1.0,
       });
     });
-    setHover(`護衛出動 ×${kinds.length}（${HQ_PATH_META[p.path || "blade"]?.name || "未選路線"}）· −${HQ_ESCORT_COST} 金`);
+    setHover(
+      `護衛出動 ×${Math.min(kinds.length, room)}（波${wave} 編制加成 +${Math.floor(wave / 4)}）· 移速100 · −${HQ_ESCORT_COST} 金`,
+    );
   }
 
   function lockHqPath(path: HqPathId) {
