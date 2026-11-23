@@ -156,6 +156,7 @@ type Escort = {
   healCd: number;
   /** 1=正常，降至 0 後移除（迷霧消散） */
   fade: number;
+  ai?: "march" | "intercept" | "hold" | "support";
 };
 
 const HQ_PATH_META: Record<HqPathId, { name: string; tag: string; color: string }> = {
@@ -2496,6 +2497,7 @@ export function FoxTD() {
                       shootCd: 0.25 * i,
                       healCd: 1.0,
                       fade: 1,
+                      ai: "march" as const,
                     });
                   });
                 }
@@ -2640,7 +2642,6 @@ export function FoxTD() {
                 u.y = a.y + (dy / len) * beyond;
               }
             }
-            } // end non-hold march
           }
           if ((u.fade ?? 1) <= 0) {
             s.escorts.splice(i, 1);
@@ -3480,26 +3481,6 @@ export function FoxTD() {
           continue;
         }
 
-        // 護衛單位
-        for (const u of s.escorts) {
-          const col = u.kind === "melee" ? "#ffb4a8" : u.kind === "ranged" ? "#a8e0ff" : "#b8f0c8";
-          const fa = Math.max(0, Math.min(1, u.fade ?? 1));
-          ctx.beginPath();
-          ctx.arc(u.x, u.y, u.kind === "melee" ? 9 : 7, 0, Math.PI * 2);
-          ctx.fillStyle = col;
-          ctx.globalAlpha = 0.9 * fa;
-          ctx.fill();
-          ctx.globalAlpha = 1;
-          ctx.strokeStyle = "rgba(0,0,0,0.35)";
-          ctx.stroke();
-          // hp bar
-          const ratio = Math.max(0, u.hp / u.maxHp);
-          ctx.fillStyle = "rgba(0,0,0,0.45)";
-          ctx.fillRect(u.x - 10, u.y - 14, 20, 3);
-          ctx.fillStyle = col;
-          ctx.fillRect(u.x - 10, u.y - 14, 20 * ratio, 3);
-        }
-
         if (tw.stake) {
           const img = s.scene.pillar;
           const bob = Math.sin(t * 2 + i) * 2;
@@ -3616,6 +3597,37 @@ export function FoxTD() {
       }
 
       const ready = (img?: HTMLImageElement) => !!img && img.complete && img.naturalWidth > 0;
+      // 護衛（獨立繪製，不依賴場上普通塔數量）
+      for (const u of s.escorts) {
+        if (!Number.isFinite(u.x) || !Number.isFinite(u.y)) continue;
+        const col = u.kind === "melee" ? "#ffb4a8" : u.kind === "ranged" ? "#a8e0ff" : "#b8f0c8";
+        const fa = Math.max(0.25, Math.min(1, u.fade ?? 1));
+        const rad = u.kind === "melee" ? 11 : 9;
+        ctx.save();
+        ctx.globalAlpha = 0.95 * fa;
+        ctx.beginPath();
+        ctx.ellipse(u.x, u.y + rad * 0.7, rad * 0.85, rad * 0.35, 0, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(0,0,0,0.35)";
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(u.x, u.y, rad, 0, Math.PI * 2);
+        ctx.fillStyle = col;
+        ctx.fill();
+        ctx.strokeStyle = "rgba(255,255,255,0.55)";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.font = "bold 9px sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillStyle = "rgba(0,20,40,0.9)";
+        ctx.fillText(u.kind === "melee" ? "刃" : u.kind === "ranged" ? "羽" : "癒", u.x, u.y + 3);
+        const ratio = Math.max(0, u.hp / Math.max(1, u.maxHp));
+        ctx.fillStyle = "rgba(0,0,0,0.5)";
+        ctx.fillRect(u.x - 12, u.y - rad - 8, 24, 4);
+        ctx.fillStyle = col;
+        ctx.fillRect(u.x - 12, u.y - rad - 8, 24 * ratio, 4);
+        ctx.restore();
+      }
+
       for (const e of s.enemies) {
         const p = posAt(e.dist, e.route);
         const ahead = posAt(Math.min(routeLen(e.route), e.dist + 12), e.route);
@@ -6169,11 +6181,6 @@ export function FoxTD() {
                 漏抗 {Math.round(sanctuaryStats(selected).leakResist * 100)}% · 護衛CD{" "}
                 {Math.max(0, selected.escortCd ?? 0).toFixed(1)}s · 場上 {sim.current.escorts.length} · 編制{" "}
                 {hqProgRef.current.squad}
-              </div>
-              <div className="mt-2 flex gap-1">
-                <button className="btn ghost" style={{ flex: 1, fontSize: 11 }} onClick={() => deployEscortSquad(true)}>
-                  立即動員
-                </button>
               </div>
               <div className="mt-1 flex gap-1">
                 <button
