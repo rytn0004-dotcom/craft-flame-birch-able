@@ -1818,14 +1818,25 @@ export function FoxTD() {
       s.clock += dt;
 
       if (s.wave === 0) {
-        const mark = (s as { prepGoldAcc?: number }).prepGoldAcc ?? 0;
-        const next = mark + dt;
-        if (next >= 9) {
-          (s as { prepGoldAcc?: number }).prepGoldAcc = next - 9;
-          goldRef.current += 4;
-          setGold(goldRef.current);
-          s.floats.push({ x: VIEWW * 0.5, y: 48, text: "+4 潮息", life: 1.1, color: "#ffe08a" });
-        } else (s as { prepGoldAcc?: number }).prepGoldAcc = next;
+        // 備戰潮息：最多 3 次（+12），避免掛機刷金
+        const given = (s as { prepGoldGiven?: number }).prepGoldGiven ?? 0;
+        if (given < 3) {
+          const mark = (s as { prepGoldAcc?: number }).prepGoldAcc ?? 0;
+          const next = mark + dt;
+          if (next >= 12) {
+            (s as { prepGoldAcc?: number }).prepGoldAcc = next - 12;
+            (s as { prepGoldGiven?: number }).prepGoldGiven = given + 1;
+            goldRef.current += 4;
+            setGold(goldRef.current);
+            s.floats.push({
+              x: VIEWW * 0.5,
+              y: 48,
+              text: given + 1 >= 3 ? "+4 潮息（備戰補給結束）" : "+4 潮息",
+              life: 1.1,
+              color: "#ffe08a",
+            });
+          } else (s as { prepGoldAcc?: number }).prepGoldAcc = next;
+        }
       }
 
       // Boss 橫幅倒數
@@ -4090,7 +4101,7 @@ export function FoxTD() {
       const cost = Math.max(1, Math.round(base.cost * (diff.towerCostMul ?? 1)));
       const dmg = base.damage * (diff.towerDmgMul ?? 1);
       if (!canPlace(gx, gy)) {
-        setHover("只能放在高地上（道路／聖地不可建）");
+        setHover(canPlaceReason(gx, gy) || "此格不可建塔");
         return;
       }
       if (goldRef.current < cost) {
@@ -4323,15 +4334,39 @@ export function FoxTD() {
 
   /** 塔只能放在高地（非道路、非聖地）；高度 0～3 皆可建 */
   function canPlace(gx: number, gy: number) {
-    if (!Number.isInteger(gx) || !Number.isInteger(gy)) return false;
-    if (gx < 0 || gy < 0 || gx >= COLS || gy >= ROWS) return false;
-    if (!isCellOnBoard(boardRef.current, gx, gy)) return false;
-    if (gateHere(gx, gy)) return false;
-    if (isSanctuaryFootprint(gx, gy)) return false;
-    const key = cellKey(gx, gy);
-    if (!sim.current.blocked.has(key)) return false; // 道路不可建
-    if (sim.current.towers.some((t) => t.gx === gx && t.gy === gy)) return false;
+    const c = Math.floor(Number(gx));
+    const r = Math.floor(Number(gy));
+    if (!Number.isFinite(c) || !Number.isFinite(r)) return false;
+    if (c < 0 || r < 0 || c >= COLS || r >= ROWS) return false;
+    if (!isCellOnBoard(boardRef.current, c, r)) return false;
+    if (gateHere(c, r)) return false;
+    if (isSanctuaryFootprint(c, r)) return false;
+    const key = cellKey(c, r);
+    // blocked = 非道路（高地／平地可建）；道路不在集合內
+    const walls = sim.current.blocked;
+    const mapWalls = mapRef.current;
+    const isWall =
+      (walls && walls.has(key)) ||
+      (mapWalls instanceof Set && mapWalls.has(key)) ||
+      (Array.isArray(mapWalls) && (mapWalls as string[]).includes(key));
+    if (!isWall) return false;
+    if (sim.current.towers.some((t) => t.gx === c && t.gy === r)) return false;
     return true;
+  }
+
+  function canPlaceReason(gx: number, gy: number): string | null {
+    const c = Math.floor(Number(gx));
+    const r = Math.floor(Number(gy));
+    if (!Number.isFinite(c) || !Number.isFinite(r) || c < 0 || r < 0 || c >= COLS || r >= ROWS)
+      return "超出地圖";
+    if (!isCellOnBoard(boardRef.current, c, r)) return "未解鎖地塊";
+    if (gateHere(c, r)) return "出入口不可建";
+    if (isSanctuaryFootprint(c, r)) return "聖地範圍不可建";
+    const key = cellKey(c, r);
+    if (!sim.current.blocked.has(key) && !(mapRef.current instanceof Set && mapRef.current.has(key)))
+      return "道路不可建，請點高地／平地";
+    if (sim.current.towers.some((t) => t.gx === c && t.gy === r)) return "此格已有建築";
+    return null;
   }
 
   function start() {
@@ -4417,13 +4452,31 @@ export function FoxTD() {
     setWorkshop(false);
     setPaused(false);
     pausedRef.current = false;
-    const commit = (canvasRef.current as HTMLCanvasElement & { __commit?: (n: Set<string>) => boolean }).__commit;
-    commit?.(new Set(mapRef.current));
+    // 強制重建碰撞／高地，避免 blocked 與畫面脫節導致無法放塔
+    if (boardRef.current.placed.length > 0) {
+      const walls = buildBlocked(boardRef.current);
+      const heights = buildHeights(boardRef.current);
+      heightsRef.current = heights;
+      sim.current.heights = heights;
+      mapRef.current = walls;
+      sim.current.blocked = walls;
+      const commit = (canvasRef.current as HTMLCanvasElement & { __commit?: (n: Set<string>) => boolean }).__commit;
+      if (!commit?.(new Set(walls))) {
+        // 路徑失敗時仍保留 walls，至少可建塔
+        sim.current.blocked = walls;
+        mapRef.current = walls;
+      }
+    } else {
+      const commit = (canvasRef.current as HTMLCanvasElement & { __commit?: (n: Set<string>) => boolean }).__commit;
+      commit?.(new Set(mapRef.current));
+    }
     // 開局備戰：先放塔，不自動出怪；按「開始第 1 波」才开战
     sim.current.wave = 0;
     sim.current.queue = [];
     sim.current.enemies = [];
     sim.current.between = 0;
+    (sim.current as { prepGoldGiven?: number }).prepGoldGiven = 0;
+    (sim.current as { prepGoldAcc?: number }).prepGoldAcc = 0;
     setWave(0);
     // 預設適中縮放並對準大本，避免玩家找不到聖地
     sim.current.cam.zoom = Math.max(sim.current.cam.zoom || 1, 0.85);
