@@ -3283,6 +3283,25 @@ export function FoxTD() {
         ctx.font = "bold 11px sans-serif";
         ctx.fillStyle = ok ? "#dff6ff" : "#ffb0b0";
         ctx.fillText(ok ? `💰${cost}` : "無法放置", px - 18, py + 4);
+        // 視野內可建格淡綠框，避免只靠游標猜高地
+        const pad = 2;
+        const c0 = Math.max(0, x0 - pad);
+        const c1 = Math.min(COLS - 1, x1 + pad);
+        const r0 = Math.max(0, y0 - pad);
+        const r1 = Math.min(ROWS - 1, y1 + pad);
+        ctx.save();
+        for (let rr = r0; rr <= r1; rr++) {
+          for (let cc = c0; cc <= c1; cc++) {
+            if (cc === gx && rr === gy) continue;
+            if (!canPlace(cc, rr)) continue;
+            const hx = cc * CELL;
+            const hy = rr * CELL;
+            ctx.strokeStyle = "rgba(140, 230, 170, 0.55)";
+            ctx.lineWidth = 1.5;
+            ctx.strokeRect(hx + 3, hy + 3, CELL - 6, CELL - 6);
+          }
+        }
+        ctx.restore();
         if (bonus > 0 && ok) {
           ctx.fillStyle = "#ffe08a";
           ctx.fillText(`高地 +${bonus}`, px - 28, py - 34);
@@ -4097,21 +4116,25 @@ export function FoxTD() {
       const diff = difficultyRef.current;
       const cost = Math.max(1, Math.round(base.cost * (diff.towerCostMul ?? 1)));
       const dmg = base.damage * (diff.towerDmgMul ?? 1);
-      if (!canPlace(gx, gy)) {
+      const snapped = snapPlaceCell(gx, gy);
+      if (!snapped) {
         setHover(canPlaceReason(gx, gy) || (isExpandBoard(boardRef.current) ? "請點高地建塔" : "此格不可建塔"));
         return;
       }
+      const pgx = snapped.gx;
+      const pgy = snapped.gy;
+      const snappedAway = pgx !== gx || pgy !== gy;
       if (goldRef.current < cost) {
         setHover("金幣不夠");
         return;
       }
       goldRef.current -= cost;
       setGold(goldRef.current);
-      const bonus = rangeBonus(cellHeight(s.heights, gx, gy));
+      const bonus = rangeBonus(cellHeight(s.heights, pgx, pgy));
       s.towers.push({
         def: id,
-        x: gx * GRID + GRID / 2,
-        y: gy * GRID + GRID / 2,
+        x: pgx * GRID + GRID / 2,
+        y: pgy * GRID + GRID / 2,
         damage: dmg,
         cooldown: base.cooldown,
         range: base.range + bonus,
@@ -4125,8 +4148,8 @@ export function FoxTD() {
         maxHp: 175,
         shake: 0,
         stake: false,
-        gx,
-        gy,
+        gx: pgx,
+        gy: pgy,
         rateMul: 1,
         terrorT: 0,
         spent: cost,
@@ -4135,7 +4158,10 @@ export function FoxTD() {
         skillShots: 0,
         special: base.special,
       });
-      setHover(bonus > 0 ? `已放置 ${base.name} · 高地射程 +${bonus}` : `已放置 ${base.name}`);
+      setHover(
+        (snappedAway ? "已改放到鄰近高地 · " : "") +
+          (bonus > 0 ? `已放置 ${base.name} · 高地射程 +${bonus}` : `已放置 ${base.name}`),
+      );
     };
 
     const onWheel = (ev: WheelEvent) => {
@@ -4350,6 +4376,33 @@ export function FoxTD() {
     }
     if (sim.current.towers.some((t) => t.gx === gx && t.gy === gy)) return false;
     return true;
+  }
+
+  /** 點到路／邊緣時，改放到游標最近的鄰格高地（切比雪夫 1） */
+  function snapPlaceCell(gx: number, gy: number): { gx: number; gy: number } | null {
+    if (canPlace(gx, gy)) return { gx, gy };
+    const px = sim.current.pointer.x;
+    const py = sim.current.pointer.y;
+    let best: { gx: number; gy: number } | null = null;
+    let bestD = Infinity;
+    for (let dr = -1; dr <= 1; dr++) {
+      for (let dc = -1; dc <= 1; dc++) {
+        if (dc === 0 && dr === 0) continue;
+        const x = gx + dc;
+        const y = gy + dr;
+        if (!canPlace(x, y)) continue;
+        const d = Math.hypot(x * CELL + CELL / 2 - px, y * CELL + CELL / 2 - py);
+        if (d < bestD) {
+          bestD = d;
+          best = { gx: x, gy: y };
+        }
+      }
+    }
+    // 只在游標其實更靠近那一格中心時吸附，避免隔一條路亂跳
+    if (!best) return null;
+    const here = Math.hypot(gx * CELL + CELL / 2 - px, gy * CELL + CELL / 2 - py);
+    if (bestD + 6 < here) return best;
+    return null;
   }
 
   function canPlaceReason(gx: number, gy: number): string | null {
