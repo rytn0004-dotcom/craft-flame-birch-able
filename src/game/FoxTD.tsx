@@ -106,6 +106,11 @@ const HQ_REFLECT_W = 0.12;
 const HQ_CONTACT_PATH = 36;
 /** 像素距離備援 */
 const HQ_CONTACT_PX = 44;
+/** 聖砲／加固各最多 5 次，禁止無限強化 */
+const HQ_FIRE_MAX = 5;
+const HQ_FORT_MAX = 5;
+const SHRINE_PLACE_GOLD = 45;
+const ELITE_BP_CHANCE = 0.22;
 
 type HqPathId = "blade" | "bow" | "tide";
 type EscortKind = "melee" | "ranged" | "healer";
@@ -174,6 +179,34 @@ function defaultHqProgress(): HqProgress {
     mixRanged: 0,
     mixHealer: 0,
   };
+}
+
+type HqBuffId = "dmg" | "resist" | "escort_cd" | "escort_hp" | "range" | "free_escort";
+type HqBuffProgress = {
+  tier: number;
+  picks: HqBuffId[];
+  blueprints: number;
+  shrineBuilt: boolean;
+  freePerWave: number;
+};
+function defaultHqBuff(): HqBuffProgress {
+  return { tier: 0, picks: [], blueprints: 0, shrineBuilt: false, freePerWave: 0 };
+}
+function hqBuffChoices(tier: number): { id: HqBuffId; name: string; desc: string }[] {
+  if (tier === 1)
+    return [
+      { id: "dmg", name: "聖焰加持", desc: "聖地傷害 +18%" },
+      { id: "resist", name: "潮盾", desc: "漏怪傷害再 −12%" },
+    ];
+  if (tier === 2)
+    return [
+      { id: "escort_cd", name: "急動員", desc: "護衛投放間隔 −2.5s" },
+      { id: "escort_hp", name: "護潮甲", desc: "護衛生命 +25%" },
+    ];
+  return [
+    { id: "range", name: "遠望聖域", desc: "聖地射程 +24" },
+    { id: "free_escort", name: "潮汐預備", desc: "+2 免費名額，之後每波 +1" },
+  ];
 }
 
 /** 鎖定路線：三選一 */
@@ -506,18 +539,22 @@ type Tower = {
   hqBuildFlash?: number;
 };
 
-function sanctuaryStats(tw: {
-  hqCoreLv?: number;
-  hqFireLv?: number;
-  hqFortifyLv?: number;
-}) {
-  const fire = tw.hqFireLv ?? 0;
-  const fort = tw.hqFortifyLv ?? 0;
-  const damage = HQ_BASE_DMG * Math.pow(1.2, fire) * Math.pow(1.05, fort);
-  const range = HQ_BASE_RANGE + fire * 12 + fort * 4;
+function sanctuaryStats(
+  tw: { hqCoreLv?: number; hqFireLv?: number; hqFortifyLv?: number },
+  buffPicks: HqBuffId[] = [],
+) {
+  const fire = Math.min(HQ_FIRE_MAX, tw.hqFireLv ?? 0);
+  const fort = Math.min(HQ_FORT_MAX, tw.hqFortifyLv ?? 0);
+  let damage = HQ_BASE_DMG * Math.pow(1.2, fire) * Math.pow(1.05, fort);
+  let range = HQ_BASE_RANGE + fire * 12 + fort * 4;
   const cooldown = Math.max(0.38, HQ_BASE_CD * Math.pow(0.91, fire) * Math.pow(0.98, fort));
   const maxHp = HQ_BUILDING_HP + fort * 150 + fire * 35;
-  const leakResist = Math.min(0.45, fort * 0.09);
+  let leakResist = Math.min(0.45, fort * 0.09);
+  for (const id of buffPicks) {
+    if (id === "dmg") damage *= 1.18;
+    if (id === "resist") leakResist = Math.min(0.55, leakResist + 0.12);
+    if (id === "range") range += 24;
+  }
   return { damage, range, cooldown, maxHp, leakResist };
 }
 
@@ -1108,6 +1145,9 @@ export function FoxTD() {
   const [diffName, setDiffName] = useState("自訂難度");
   const boardRef = useRef<TileBoard>(seedBoard());
   const hqProgRef = useRef<HqProgress>(defaultHqProgress());
+  const hqBuffRef = useRef<HqBuffProgress>(defaultHqBuff());
+  const [, bumpHqBuffUi] = useState(0);
+  const bumpHqBuff = () => bumpHqBuffUi((n) => n + 1);
   const [, setHqProgTick] = useState(0);
   const bumpHqUi = () => setHqProgTick((n) => n + 1);
   const tileOfferRef = useRef<string[] | null>(null);
@@ -2096,7 +2136,7 @@ export function FoxTD() {
         }
         if (e.dist >= routeLen(e.route)) {
           const hq = s.towers.find((t) => t.sanctuary);
-          const resist = hq ? sanctuaryStats(hq).leakResist : 0;
+          const resist = hq ? sanctuaryStats(hq, hqBuffRef.current.picks).leakResist : 0;
           const leakDmg = sanctuaryLeakDamage(e, resist);
           const pLeak = posAt(e.dist, e.route);
           if (hq) {
@@ -2143,7 +2183,16 @@ export function FoxTD() {
             if (combo.n >= 3) g += Math.max(1, Math.round(e.gold * COMBO_GOLD_PER * Math.min(combo.n, 20)));
             goldRef.current += g;
             setGold(goldRef.current);
-            if (e.boss) float(p.x, p.y - 36, "Boss 討伐", "#ffd27a");
+            if (e.boss) {
+              float(p.x, p.y - 36, "Boss 討伐", "#ffd27a");
+              hqBuffRef.current.blueprints += 1;
+              bumpHqBuff();
+              float(p.x, p.y - 52, "潮紋圖紙 +1", "#9ad7ff");
+            } else if (e.type >= 2 && Math.random() < ELITE_BP_CHANCE) {
+              hqBuffRef.current.blueprints += 1;
+              bumpHqBuff();
+              float(p.x, p.y - 36, "潮紋圖紙 +1", "#9ad7ff");
+            }
             if (combo.n >= 5 && combo.n % 5 === 0) float(p.x, p.y - 14, `連殺 ×${combo.n}`, "#ff9ecd");
             float(p.x, p.y, `+${g}`, combo.n >= 3 ? "#ffe08a" : "#ffd27a");
             if (combo.n >= 3) bumpFlavor();
@@ -2424,7 +2473,7 @@ export function FoxTD() {
         const mistMul = tideRef.current?.id === "mist" ? 1.25 : 1;
         for (let i = s.escorts.length - 1; i >= 0; i--) {
           const u = s.escorts[i];
-          if (u.hp <= 0) {
+          if (u.hp <= 0 || (u.fade ?? 1) <= 0) {
             s.escorts.splice(i, 1);
             continue;
           }
@@ -2696,6 +2745,11 @@ export function FoxTD() {
         }
       }
       s.wave += 1;
+      if (hqBuffRef.current.freePerWave > 0) {
+        freeEscortRef.current += hqBuffRef.current.freePerWave;
+      }
+      // 清除已消散／無血護衛，避免持續占資源
+      sim.current.escorts = sim.current.escorts.filter((u) => (u.fade ?? 1) > 0.05 && u.hp > 0);
       s.clock = 0;
       s.between = 0;
       const custom = wavesRef.current;
@@ -3292,6 +3346,30 @@ export function FoxTD() {
       for (let i = 0; i < s.towers.length; i++) {
         const src = s.towers[i];
         const tw = { ...src, y: src.y - cellHeight(s.heights, src.gx, src.gy) * 5 };
+        if ((tw as Tower & { tideShrine?: boolean }).tideShrine) {
+          // 潮紋祭壇：小型石台 + 符文光
+          const py = tw.y - cellHeight(s.heights, tw.gx, tw.gy) * 5;
+          ctx.save();
+          ctx.translate(tw.x, py);
+          ctx.fillStyle = "rgba(0,0,0,0.35)";
+          ctx.beginPath();
+          ctx.ellipse(0, 10, 16, 7, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = "#3d5a78";
+          ctx.fillRect(-14, -8, 28, 18);
+          ctx.fillStyle = "#6ec8ff";
+          ctx.globalAlpha = 0.55 + Math.sin(t * 2) * 0.15;
+          ctx.beginPath();
+          ctx.arc(0, -4, 8, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalAlpha = 1;
+          ctx.fillStyle = "#c8ecff";
+          ctx.font = "bold 9px sans-serif";
+          ctx.textAlign = "center";
+          ctx.fillText("祭壇", 0, 22);
+          ctx.restore();
+          continue;
+        }
         if (tw.sanctuary) {
           const prog = hqProgRef.current;
           const pathName = prog.path ? HQ_PATH_META[prog.path].name : "未選路線";
@@ -4733,6 +4811,8 @@ export function FoxTD() {
       hqBuildFlash: 0.6,
     });
     hqProgRef.current = defaultHqProgress();
+    hqBuffRef.current = defaultHqBuff();
+    sim.current.escorts = [];
     bumpHqUi();
   }
 
@@ -4774,6 +4854,14 @@ export function FoxTD() {
     if (idx === null) return;
     const tw = sim.current.towers[idx];
     if (!tw?.sanctuary) return;
+    if (branch === "fire" && (tw.hqFireLv ?? 0) >= HQ_FIRE_MAX) {
+      setHover(`聖砲已達上限（最多 ${HQ_FIRE_MAX} 次）`);
+      return;
+    }
+    if (branch === "fortify" && (tw.hqFortifyLv ?? 0) >= HQ_FORT_MAX) {
+      setHover(`加固已達上限（最多 ${HQ_FORT_MAX} 次）`);
+      return;
+    }
     const lv = tw.hqCoreLv ?? 1;
     const cost = coreUpgradeCost(lv);
     if (goldRef.current < cost) {
@@ -4926,6 +5014,106 @@ export function FoxTD() {
     setHover(
       `護衛出動 ×${Math.min(kinds.length, room)}（波${wave} 編制加成 +${Math.floor(wave / 4)}）· 移速100 · −${HQ_ESCORT_COST} 金`,
     );
+  }
+
+
+  function placeTideShrine() {
+    const b = hqBuffRef.current;
+    if (b.shrineBuilt) {
+      setHover("潮紋祭壇已建（一場限一座）");
+      return;
+    }
+    if (b.blueprints < 1) {
+      setHover("需要潮紋圖紙（Boss 必掉／精英約 22%）");
+      return;
+    }
+    if (goldRef.current < SHRINE_PLACE_GOLD) {
+      setHover(`需要 ${SHRINE_PLACE_GOLD} 金`);
+      return;
+    }
+    const hq = sim.current.towers.find((t) => t.sanctuary);
+    if (!hq) return;
+    const candidates: { gx: number; gy: number }[] = [];
+    for (let dy = -4; dy <= 4; dy++) {
+      for (let dx = -4; dx <= 4; dx++) {
+        if (!dx && !dy) continue;
+        const gx = hq.gx + dx, gy = hq.gy + dy;
+        if (canPlace(gx, gy)) candidates.push({ gx, gy });
+      }
+    }
+    if (!candidates.length) {
+      setHover("聖地旁無可用高地");
+      return;
+    }
+    candidates.sort((a, c) => Math.abs(a.gx - hq.gx) + Math.abs(a.gy - hq.gy) - (Math.abs(c.gx - hq.gx) + Math.abs(c.gy - hq.gy)));
+    const { gx, gy } = candidates[0];
+    goldRef.current -= SHRINE_PLACE_GOLD;
+    setGold(goldRef.current);
+    b.blueprints -= 1;
+    b.shrineBuilt = true;
+    bumpHqBuff();
+    sim.current.towers.push({
+      def: 0,
+      x: gx * GRID + GRID / 2,
+      y: gy * GRID + GRID / 2,
+      damage: 0,
+      cooldown: 99,
+      range: 40,
+      cd: 0,
+      level: 1,
+      aim: 0,
+      recoil: 0,
+      atkT: 0,
+      atkDur: 0,
+      hp: 200,
+      maxHp: 200,
+      shake: 0,
+      stake: false,
+      gx,
+      gy,
+      rateMul: 1,
+      terrorT: 0,
+      spent: SHRINE_PLACE_GOLD,
+      sanctuary: false,
+      tideShrine: true,
+    } as Tower & { tideShrine?: boolean });
+    setHover("潮紋祭壇已建 · 開啟 3 階二選一加持");
+  }
+
+  function pickHqBuff(id: HqBuffId) {
+    const b = hqBuffRef.current;
+    if (!b.shrineBuilt) {
+      setHover("請先建造潮紋祭壇");
+      return;
+    }
+    if (b.tier >= 3) {
+      setHover("加持已滿（3/3）");
+      return;
+    }
+    const need = b.tier + 1;
+    const opts = hqBuffChoices(need);
+    if (!opts.some((o) => o.id === id)) return;
+    b.picks.push(id);
+    b.tier = need;
+    const p = hqProgRef.current;
+    if (id === "escort_cd") p.deployCd = Math.max(5, p.deployCd - 2.5);
+    if (id === "escort_hp") p.meleeHp = Math.round(p.meleeHp * 1.25);
+    if (id === "free_escort") {
+      freeEscortRef.current += 2;
+      b.freePerWave += 1;
+    }
+    const hq = sim.current.towers.find((t) => t.sanctuary);
+    if (hq) {
+      const st = sanctuaryStats(hq, b.picks);
+      const ratio = hq.hp / Math.max(1, hq.maxHp);
+      hq.damage = st.damage;
+      hq.range = st.range;
+      hq.cooldown = st.cooldown;
+      hq.maxHp = st.maxHp;
+      hq.hp = Math.min(st.maxHp, Math.max(1, Math.round(st.maxHp * ratio)));
+    }
+    bumpHqBuff();
+    setHover(`加持「${opts.find((o) => o.id === id)?.name}」· ${b.tier}/3`);
   }
 
   function lockHqPath(path: HqPathId) {
@@ -5871,20 +6059,28 @@ export function FoxTD() {
                 <button
                   className="btn"
                   style={{ flex: 1, fontSize: 11 }}
-                  disabled={gold < coreUpgradeCost(selected.hqCoreLv ?? 1)}
+                  disabled={
+                    gold < coreUpgradeCost(selected.hqCoreLv ?? 1) ||
+                    (selected.hqFireLv ?? 0) >= HQ_FIRE_MAX
+                  }
                   onClick={() => upgradeSanctuaryCore("fire")}
                   title="Lv1 四角砲台 · Lv2 屋頂聖砲 · 傷害／射程提升"
                 >
-                  {(selected.hqFireLv ?? 0) < 1
-                    ? `裝角樓 ${coreUpgradeCost(selected.hqCoreLv ?? 1)}`
-                    : (selected.hqFireLv ?? 0) < 2
-                      ? `裝聖砲 ${coreUpgradeCost(selected.hqCoreLv ?? 1)}`
-                      : `強聖砲 ${coreUpgradeCost(selected.hqCoreLv ?? 1)}`}
+                  {(selected.hqFireLv ?? 0) >= HQ_FIRE_MAX
+                    ? `聖砲已滿 ${HQ_FIRE_MAX}/${HQ_FIRE_MAX}`
+                    : (selected.hqFireLv ?? 0) < 1
+                      ? `裝角樓 ${coreUpgradeCost(selected.hqCoreLv ?? 1)}`
+                      : (selected.hqFireLv ?? 0) < 2
+                        ? `裝聖砲 ${coreUpgradeCost(selected.hqCoreLv ?? 1)}`
+                        : `強聖砲 ${(selected.hqFireLv ?? 0) + 1}/${HQ_FIRE_MAX} · ${coreUpgradeCost(selected.hqCoreLv ?? 1)}`}
                 </button>
                 <button
                   className="btn ghost"
                   style={{ flex: 1, fontSize: 11, borderColor: "#9dffc0" }}
-                  disabled={gold < coreUpgradeCost(selected.hqCoreLv ?? 1)}
+                  disabled={
+                    gold < coreUpgradeCost(selected.hqCoreLv ?? 1) ||
+                    (selected.hqFortifyLv ?? 0) >= HQ_FORT_MAX
+                  }
                   onClick={() => upgradeSanctuaryCore("fortify")}
                   title="加厚城牆、提升建築血與漏抗"
                 >
@@ -5892,8 +6088,44 @@ export function FoxTD() {
                 </button>
               </div>
               <p className="mt-1 text-[10px] text-[#9ec4de]">
-                火力：角樓砲台 → 屋頂聖砲（獨立模型與射擊動畫）· 加固：城垛與血量
+                聖砲最多 {HQ_FIRE_MAX} 次 · 加固最多 {HQ_FORT_MAX} 次 · 火力：角樓→聖砲 · 加固：城垛血量
               </p>
+              <div className="mt-2 rounded border border-[#3a6080] bg-[#0a1828cc] p-2 text-[11px]">
+                <div className="mb-1 flex items-center justify-between text-[#9ad7ff]">
+                  <span>潮紋祭壇 · 圖紙 {hqBuffRef.current.blueprints}</span>
+                  <span>加持 {hqBuffRef.current.tier}/3</span>
+                </div>
+                <button
+                  type="button"
+                  className="btn ghost"
+                  style={{ width: "100%", fontSize: 11, marginBottom: 6 }}
+                  disabled={hqBuffRef.current.shrineBuilt || hqBuffRef.current.blueprints < 1 || gold < SHRINE_PLACE_GOLD}
+                  onClick={() => placeTideShrine()}
+                >
+                  {hqBuffRef.current.shrineBuilt
+                    ? "祭壇已建置"
+                    : `建祭壇（圖紙×1 + ${SHRINE_PLACE_GOLD}金）`}
+                </button>
+                {hqBuffRef.current.shrineBuilt && hqBuffRef.current.tier < 3 && (
+                  <div className="flex flex-col gap-1">
+                    {hqBuffChoices(hqBuffRef.current.tier + 1).map((opt) => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        className="btn ghost"
+                        style={{ fontSize: 11, textAlign: "left" }}
+                        onClick={() => pickHqBuff(opt.id)}
+                      >
+                        <strong>{opt.name}</strong>
+                        <span className="block text-[10px] text-[#9ec4de]">{opt.desc}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {hqBuffRef.current.tier >= 3 && (
+                  <p className="text-[10px] text-[#b8f0c8]">加持路線完成</p>
+                )}
+              </div>
               {!hqProgRef.current.path ? (
                 <div className="mt-2">
                   <p className="text-[10px] text-[#ffd27a]">鎖定本場唯一路線（三選一，不可更改）</p>
