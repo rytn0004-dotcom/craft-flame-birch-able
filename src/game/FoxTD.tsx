@@ -894,6 +894,7 @@ function drawSanctuaryCastle(
   },
   t: number,
   pathName: string,
+  art?: HTMLImageElement | null,
 ) {
   const fire = tw.hqFireLv ?? 0;
   const fort = tw.hqFortifyLv ?? 0;
@@ -906,16 +907,35 @@ function drawSanctuaryCastle(
   ctx.translate(tw.x + sh, tw.y + sh);
 
   // —— 神聖光暈 ——
-  const g0 = ctx.createRadialGradient(0, 0, R * 0.2, 0, 0, R * 1.35);
-  g0.addColorStop(0, `rgba(255, 236, 180, ${0.22 * pulse})`);
-  g0.addColorStop(0.45, `rgba(180, 200, 255, ${0.12 * pulse})`);
+  const g0 = ctx.createRadialGradient(0, 0, R * 0.2, 0, 0, R * 1.45);
+  g0.addColorStop(0, `rgba(255, 236, 180, ${0.28 * pulse})`);
+  g0.addColorStop(0.45, `rgba(120, 180, 255, ${0.14 * pulse})`);
   g0.addColorStop(1, "rgba(40, 60, 120, 0)");
   ctx.fillStyle = g0;
   ctx.beginPath();
-  ctx.arc(0, 0, R * 1.35, 0, Math.PI * 2);
+  ctx.arc(0, 0, R * 1.45, 0, Math.PI * 2);
   ctx.fill();
 
-  // —— 護城石基 ——
+  // —— 3D 聖城貼圖（優先）——
+  if (art && art.complete && art.naturalWidth > 8) {
+    const iw = R * 2.35;
+    const ih = R * 1.85;
+    ctx.globalAlpha = 0.98;
+    ctx.drawImage(art, -iw / 2, -ih / 2 - R * 0.12, iw, ih);
+    ctx.globalAlpha = 1;
+    // 升級閃光
+    if (flash > 0) {
+      ctx.globalAlpha = flash * 0.45;
+      ctx.fillStyle = "#ffe08a";
+      ctx.beginPath();
+      ctx.arc(0, 0, R * 0.9, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    // 火力等級角樓／聖砲開火特效仍疊在貼圖上
+    // （下方共用角樓動畫區塊）
+  } else {
+  // —— 護城石基（無貼圖後備）——
   const wallTop = -R * 0.92;
   const wallBot = R * 0.95;
   const wallL = -R * 0.95;
@@ -1022,6 +1042,23 @@ function drawSanctuaryCastle(
   ctx.font = "9px sans-serif";
   ctx.fillStyle = "#9ad7ff";
   ctx.fillText(pathName, 0, R * 0.7);
+  } // end procedural else
+
+  // 貼圖／後備共用：HP
+  {
+    const ratio = Math.max(0, tw.hp / Math.max(1, tw.maxHp));
+    ctx.fillStyle = "rgba(0,0,0,0.5)";
+    ctx.fillRect(-R * 0.5, R * 1.02, R, 5);
+    ctx.fillStyle = ratio > 0.35 ? "#7ec8ff" : "#ff8aa0";
+    ctx.fillRect(-R * 0.5, R * 1.02, R * ratio, 5);
+    ctx.textAlign = "center";
+    ctx.font = "bold 10px sans-serif";
+    ctx.fillStyle = "#ffe7c2";
+    ctx.fillText("聖地", 0, R * 0.92);
+    ctx.font = "9px sans-serif";
+    ctx.fillStyle = "#9ad7ff";
+    ctx.fillText(pathName, 0, R * 1.18);
+  }
 
   // —— 四角砲台（火力 ≥1）——
   const corners = [
@@ -1349,6 +1386,7 @@ export function FoxTD() {
       height3: "/scene/height3.png",
       entrance: "/scene/entrance.png",
       exit: "/scene/exit.png",
+      sanctuary: "/scene/sanctuary.png?v=1",
     })) {
       const img = new Image();
       img.src = src;
@@ -3308,7 +3346,7 @@ export function FoxTD() {
         if (tw.sanctuary) {
           const prog = hqProgRef.current;
           const pathName = prog.path ? HQ_PATH_META[prog.path].name : "未選路線";
-          drawSanctuaryCastle(ctx, tw, t, pathName);
+          drawSanctuaryCastle(ctx, tw, t, pathName, s.scene.sanctuary);
           continue;
         }
 
@@ -3675,9 +3713,15 @@ export function FoxTD() {
 
     const screenOf = (ev: PointerEvent) => {
       const rect = canvas.getBoundingClientRect();
+      // object-fit: contain 的 letterbox，避免對準聖地後滑鼠偏移
+      const scale = Math.min(rect.width / VIEWW, rect.height / VIEWH) || 1;
+      const dispW = VIEWW * scale;
+      const dispH = VIEWH * scale;
+      const offX = (rect.width - dispW) / 2;
+      const offY = (rect.height - dispH) / 2;
       return {
-        x: ((ev.clientX - rect.left) / rect.width) * VIEWW,
-        y: ((ev.clientY - rect.top) / rect.height) * VIEWH,
+        x: ((ev.clientX - rect.left - offX) / dispW) * VIEWW,
+        y: ((ev.clientY - rect.top - offY) / dispH) * VIEWH,
       };
     };
     const local = (ev: PointerEvent) => {
@@ -3942,8 +3986,13 @@ export function FoxTD() {
     const onWheel = (ev: WheelEvent) => {
       ev.preventDefault();
       const rect = canvas.getBoundingClientRect();
-      const sx = ((ev.clientX - rect.left) / rect.width) * VIEWW;
-      const sy = ((ev.clientY - rect.top) / rect.height) * VIEWH;
+      const scale = Math.min(rect.width / VIEWW, rect.height / VIEWH) || 1;
+      const dispW = VIEWW * scale;
+      const dispH = VIEWH * scale;
+      const offX = (rect.width - dispW) / 2;
+      const offY = (rect.height - dispH) / 2;
+      const sx = ((ev.clientX - rect.left - offX) / dispW) * VIEWW;
+      const sy = ((ev.clientY - rect.top - offY) / dispH) * VIEWH;
       const cam = sim.current.cam;
       const oldZ = cam.zoom || 1;
       const factor = ev.deltaY > 0 ? 0.9 : 1.1;
