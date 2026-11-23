@@ -496,6 +496,12 @@ type Tower = {
   hqFortifyLv?: number;
   /** 週期投放計時 */
   escortCd?: number;
+  /** 四角砲台開火動畫 0..1 */
+  hqTurretAtk?: number[];
+  /** 屋頂大砲開火動畫 0..1 */
+  hqCannonAtk?: number;
+  /** 升級外觀閃光 */
+  hqBuildFlash?: number;
 };
 
 function sanctuaryStats(tw: {
@@ -867,6 +873,248 @@ function blitTower(ctx: CanvasRenderingContext2D, img: HTMLImageElement, dx: num
   ctx.drawImage(img, 0, 0, sw, sh, dx, dy, dw, dh);
   ctx.restore();
 }
+
+
+/** 聖地中世紀聖城外觀 + 角樓／屋頂砲（依火力等級顯形） */
+function drawSanctuaryCastle(
+  ctx: CanvasRenderingContext2D,
+  tw: {
+    x: number;
+    y: number;
+    range: number;
+    aim?: number;
+    hp: number;
+    maxHp: number;
+    hqFireLv?: number;
+    hqFortifyLv?: number;
+    hqTurretAtk?: number[];
+    hqCannonAtk?: number;
+    hqBuildFlash?: number;
+    shake?: number;
+  },
+  t: number,
+  pathName: string,
+) {
+  const fire = tw.hqFireLv ?? 0;
+  const fort = tw.hqFortifyLv ?? 0;
+  const pulse = 0.88 + Math.sin(t * 1.8) * 0.06;
+  const R = CELL * 2.55;
+  const sh = (tw.shake ?? 0) > 0 ? (Math.random() - 0.5) * 4 : 0;
+  const flash = Math.max(0, tw.hqBuildFlash ?? 0);
+
+  ctx.save();
+  ctx.translate(tw.x + sh, tw.y + sh);
+
+  // —— 神聖光暈 ——
+  const g0 = ctx.createRadialGradient(0, 0, R * 0.2, 0, 0, R * 1.35);
+  g0.addColorStop(0, `rgba(255, 236, 180, ${0.22 * pulse})`);
+  g0.addColorStop(0.45, `rgba(180, 200, 255, ${0.12 * pulse})`);
+  g0.addColorStop(1, "rgba(40, 60, 120, 0)");
+  ctx.fillStyle = g0;
+  ctx.beginPath();
+  ctx.arc(0, 0, R * 1.35, 0, Math.PI * 2);
+  ctx.fill();
+
+  // —— 護城石基 ——
+  const wallTop = -R * 0.92;
+  const wallBot = R * 0.95;
+  const wallL = -R * 0.95;
+  const wallR = R * 0.95;
+  // 外牆陰影
+  ctx.fillStyle = "rgba(8, 14, 28, 0.55)";
+  ctx.fillRect(wallL + 6, wallTop + 8, wallR - wallL, wallBot - wallTop);
+
+  // 主牆體（石色，加固越深越厚）
+  const wallInset = Math.max(0, 4 - fort);
+  ctx.fillStyle = fort >= 2 ? "#3a4558" : fort >= 1 ? "#434e62" : "#4a5568";
+  ctx.strokeStyle = flash > 0 ? `rgba(255,230,160,${0.5 + flash})` : "rgba(220, 200, 150, 0.65)";
+  ctx.lineWidth = 2.5 + Math.min(2, fort);
+  ctx.beginPath();
+  ctx.rect(wallL + wallInset, wallTop + wallInset, wallR - wallL - wallInset * 2, wallBot - wallTop - wallInset * 2);
+  ctx.fill();
+  ctx.stroke();
+
+  // 磚縫
+  ctx.strokeStyle = "rgba(20, 28, 40, 0.35)";
+  ctx.lineWidth = 1;
+  for (let y = wallTop + 14; y < wallBot - 8; y += 14) {
+    ctx.beginPath();
+    ctx.moveTo(wallL + 8, y);
+    ctx.lineTo(wallR - 8, y);
+    ctx.stroke();
+  }
+
+  // 雉堞（城垛）
+  ctx.fillStyle = "#5a6578";
+  const merlonW = 14;
+  for (let x = wallL + 6; x < wallR - 6; x += merlonW + 6) {
+    ctx.fillRect(x, wallTop - 10, merlonW, 12);
+  }
+  for (let y = wallTop + 10; y < wallBot - 10; y += merlonW + 6) {
+    ctx.fillRect(wallL - 8, y, 10, merlonW);
+    ctx.fillRect(wallR - 2, y, 10, merlonW);
+  }
+
+  // —— 內殿／聖堂主樓 ——
+  ctx.fillStyle = "#2a3348";
+  ctx.fillRect(-R * 0.42, -R * 0.55, R * 0.84, R * 0.85);
+  ctx.strokeStyle = "rgba(255, 220, 160, 0.4)";
+  ctx.strokeRect(-R * 0.42, -R * 0.55, R * 0.84, R * 0.85);
+
+  // 尖頂屋頂
+  ctx.beginPath();
+  ctx.moveTo(-R * 0.48, -R * 0.52);
+  ctx.lineTo(0, -R * 1.05);
+  ctx.lineTo(R * 0.48, -R * 0.52);
+  ctx.closePath();
+  ctx.fillStyle = "#6b3a4a";
+  ctx.fill();
+  ctx.strokeStyle = "rgba(255, 200, 140, 0.5)";
+  ctx.stroke();
+
+  // 聖光窗
+  ctx.fillStyle = `rgba(255, 230, 160, ${0.35 + 0.2 * pulse})`;
+  ctx.beginPath();
+  ctx.arc(0, -R * 0.15, 10, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = `rgba(180, 220, 255, ${0.25 * pulse})`;
+  ctx.fillRect(-6, R * 0.05, 12, 22);
+
+  // 正門
+  ctx.fillStyle = "#1a2030";
+  ctx.beginPath();
+  ctx.moveTo(-12, wallBot - 8);
+  ctx.lineTo(-12, wallBot - 36);
+  ctx.quadraticCurveTo(0, wallBot - 48, 12, wallBot - 36);
+  ctx.lineTo(12, wallBot - 8);
+  ctx.fill();
+
+  // 旗幟
+  const flagX = R * 0.35;
+  const flagY = -R * 1.0;
+  ctx.strokeStyle = "#c9b896";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(flagX, flagY);
+  ctx.lineTo(flagX, flagY + 28);
+  ctx.stroke();
+  const fw = 16 + Math.sin(t * 3) * 2;
+  ctx.fillStyle = "#e8c070";
+  ctx.beginPath();
+  ctx.moveTo(flagX, flagY);
+  ctx.lineTo(flagX + fw, flagY + 6);
+  ctx.lineTo(flagX, flagY + 12);
+  ctx.closePath();
+  ctx.fill();
+
+  // HP 條
+  const ratio = Math.max(0, tw.hp / Math.max(1, tw.maxHp));
+  ctx.fillStyle = "rgba(0,0,0,0.5)";
+  ctx.fillRect(-R * 0.5, R * 1.05, R, 5);
+  ctx.fillStyle = ratio > 0.35 ? "#7ec8ff" : "#ff8aa0";
+  ctx.fillRect(-R * 0.5, R * 1.05, R * ratio, 5);
+
+  // 標籤
+  ctx.textAlign = "center";
+  ctx.font = "bold 11px sans-serif";
+  ctx.fillStyle = "#ffe7c2";
+  ctx.fillText("聖地", 0, R * 0.55);
+  ctx.font = "9px sans-serif";
+  ctx.fillStyle = "#9ad7ff";
+  ctx.fillText(pathName, 0, R * 0.7);
+
+  // —— 四角砲台（火力 ≥1）——
+  const corners = [
+    { x: wallL + 8, y: wallTop + 8 },
+    { x: wallR - 8, y: wallTop + 8 },
+    { x: wallL + 8, y: wallBot - 8 },
+    { x: wallR - 8, y: wallBot - 8 },
+  ];
+  if (fire >= 1) {
+    const atkArr = tw.hqTurretAtk ?? [0, 0, 0, 0];
+    corners.forEach((c, i) => {
+      const atk = Math.max(0, Math.min(1, atkArr[i] ?? 0));
+      const kick = Math.sin(atk * Math.PI) * 4;
+      const ang = tw.aim ?? -Math.PI / 2;
+      ctx.save();
+      ctx.translate(c.x, c.y);
+      // 角樓基座
+      ctx.fillStyle = "#5c4a3a";
+      ctx.fillRect(-9, -9, 18, 18);
+      ctx.strokeStyle = "rgba(255, 210, 140, 0.55)";
+      ctx.strokeRect(-9, -9, 18, 18);
+      // 砲管
+      ctx.rotate(ang);
+      ctx.fillStyle = atk > 0.05 ? "#e8d0a0" : "#8a7a60";
+      ctx.fillRect(4 - kick, -3, 16 + kick, 6);
+      ctx.fillStyle = "#2a2018";
+      ctx.beginPath();
+      ctx.arc(4, 0, 5, 0, Math.PI * 2);
+      ctx.fill();
+      // 開火閃光
+      if (atk > 0.15 && atk < 0.85) {
+        const g = ctx.createRadialGradient(18, 0, 1, 18, 0, 14);
+        g.addColorStop(0, "rgba(255, 240, 180, 0.9)");
+        g.addColorStop(0.4, "rgba(255, 160, 60, 0.45)");
+        g.addColorStop(1, "rgba(255, 80, 20, 0)");
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(18, 0, 14, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    });
+  }
+
+  // —— 屋頂聖砲（火力 ≥2）——
+  if (fire >= 2) {
+    const catk = Math.max(0, Math.min(1, tw.hqCannonAtk ?? 0));
+    const kick = Math.sin(catk * Math.PI) * 6;
+    ctx.save();
+    ctx.translate(0, -R * 0.72);
+    // 砲座
+    ctx.fillStyle = "#4a3a2a";
+    ctx.beginPath();
+    ctx.ellipse(0, 6, 16, 8, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.rotate(tw.aim ?? -Math.PI / 2);
+    // 砲身
+    ctx.fillStyle = catk > 0.05 ? "#d4c090" : "#6a5a40";
+    ctx.fillRect(0 - kick * 0.3, -7, 28 + kick, 14);
+    ctx.fillStyle = "#1a1510";
+    ctx.fillRect(24 + kick, -4, 8, 8);
+    // 聖紋
+    ctx.strokeStyle = "rgba(255, 220, 140, 0.7)";
+    ctx.strokeRect(4, -5, 12, 10);
+    if (catk > 0.12 && catk < 0.9) {
+      const g = ctx.createRadialGradient(32, 0, 2, 32, 0, 22);
+      g.addColorStop(0, "rgba(255, 250, 200, 1)");
+      g.addColorStop(0.35, "rgba(255, 180, 80, 0.55)");
+      g.addColorStop(1, "rgba(255, 100, 40, 0)");
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(32, 0, 22, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  } else if (fire >= 1) {
+    // 火力1：屋頂先放簡單聖燈
+    ctx.fillStyle = `rgba(255, 230, 160, ${0.5 * pulse})`;
+    ctx.beginPath();
+    ctx.arc(0, -R * 0.72, 6, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // 射程環（淡）
+  ctx.beginPath();
+  ctx.arc(0, 0, tw.range, 0, Math.PI * 2);
+  ctx.strokeStyle = "rgba(255, 210, 150, 0.12)";
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  ctx.restore();
+}
+
 
 export function FoxTD() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -1433,11 +1681,106 @@ export function FoxTD() {
       const effects = collectEffects(skills);
       tw.skillShots = (tw.skillShots || 0) + 1;
       const dmg = tw.damage;
+      tw.aim = Math.atan2(p.y - tw.y, p.x - tw.x);
 
-      const pushShot = (tx: number, ty: number, tgt: Enemy | null, special: Special, color: string, spd: number, life: number) => {
+      // —— 聖地：角樓砲台／屋頂聖砲獨立彈道與動畫 ——
+      if (tw.sanctuary) {
+        const fireLv = tw.hqFireLv ?? 0;
+        const R = CELL * 2.55;
+        const corners = [
+          { x: tw.x - R * 0.95 + 8, y: tw.y - R * 0.92 + 8 },
+          { x: tw.x + R * 0.95 - 8, y: tw.y - R * 0.92 + 8 },
+          { x: tw.x - R * 0.95 + 8, y: tw.y + R * 0.95 - 8 },
+          { x: tw.x + R * 0.95 - 8, y: tw.y + R * 0.95 - 8 },
+        ];
+        if (!tw.hqTurretAtk) tw.hqTurretAtk = [0, 0, 0, 0];
+
+        const useCannon = fireLv >= 2 && (tw.skillShots % 3 === 0 || fireLv >= 3);
+        if (useCannon) {
+          const ox = tw.x + Math.cos(tw.aim) * 12;
+          const oy = tw.y - R * 0.72 + Math.sin(tw.aim) * 8;
+          tw.hqCannonAtk = 1;
+          sim.current.shots.push({
+            x: ox,
+            y: oy,
+            tx: p.x,
+            ty: p.y,
+            speed: 320,
+            damage: dmg * 1.55,
+            special: "high",
+            color: "#ffe08a",
+            life: 2.2,
+            pierced: new Set(),
+            target,
+            skills: [],
+            fromTower: towerIndex,
+            pierceCount: 0,
+          });
+          burst(ox, oy, "#ffe08a", 8, 2.2);
+          sim.current.rings.push({ x: ox, y: oy, r: 6, max: 28, color: "rgba(255,220,140,0.5)", life: 0.25 });
+          float(ox, oy - 22, "聖砲", "#ffe08a");
+        } else if (fireLv >= 1) {
+          // 選最靠近目標的角樓開火
+          let bestI = 0;
+          let bestD = 1e9;
+          for (let i = 0; i < 4; i++) {
+            const d = Math.hypot(corners[i].x - p.x, corners[i].y - p.y);
+            if (d < bestD) {
+              bestD = d;
+              bestI = i;
+            }
+          }
+          tw.hqTurretAtk[bestI] = 1;
+          const c = corners[bestI];
+          sim.current.shots.push({
+            x: c.x,
+            y: c.y,
+            tx: p.x,
+            ty: p.y,
+            speed: 500,
+            damage: dmg * 1.05,
+            special: "high",
+            color: "#ffd2a8",
+            life: 1.4,
+            pierced: new Set(),
+            target,
+            skills: [],
+            fromTower: towerIndex,
+            pierceCount: 0,
+          });
+          burst(c.x, c.y, "#ffd2a8", 5, 1.5);
+          float(c.x, c.y - 16, "角樓", "#ffd2a8");
+        } else {
+          // 初始小兵器：主殿微光彈
+          sim.current.shots.push({
+            x: tw.x,
+            y: tw.y,
+            tx: p.x,
+            ty: p.y,
+            speed: 420,
+            damage: dmg,
+            special: "high",
+            color: "#c9e8ff",
+            life: 1.5,
+            pierced: new Set(),
+            target,
+            skills: [],
+            fromTower: towerIndex,
+            pierceCount: 0,
+          });
+          burst(tw.x, tw.y, "#c9e8ff", 4, 1.2);
+        }
+        tw.recoil = 0.22;
+        const period = Math.max(0.12, tw.cooldown / (tw.rateMul > 0 ? tw.rateMul : 1));
+        tw.atkDur = Math.min(0.85, Math.max(0.18, period * 0.9));
+        tw.atkT = 0;
+        return;
+      }
+
+      const pushShot = (sx: number, sy: number, tx: number, ty: number, tgt: Enemy | null, special: Special, color: string, spd: number, life: number) => {
         sim.current.shots.push({
-          x: tw.x,
-          y: tw.y,
+          x: sx,
+          y: sy,
           tx,
           ty,
           speed: spd,
@@ -1467,24 +1810,22 @@ export function FoxTD() {
 
       if (def.special === "pierce") {
         const ang = Math.atan2(p.y - tw.y, p.x - tw.x);
-        pushShot(tw.x + Math.cos(ang) * 900, tw.y + Math.sin(ang) * 900, null, def.special, def.color, 520, 1.1);
+        pushShot(tw.x, tw.y, tw.x + Math.cos(ang) * 900, tw.y + Math.sin(ang) * 900, null, def.special, def.color, 520, 1.1);
       } else {
-        pushShot(p.x, p.y, target, def.special, def.color, 460, 1.6);
+        pushShot(tw.x, tw.y, p.x, p.y, target, def.special, def.color, 460, 1.6);
         for (const d of effects) {
           if (d.type === "doubleShot" && Math.random() < d.chance) {
-            pushShot(p.x + 6, p.y + 6, target, def.special, def.color, 480, 1.5);
+            pushShot(tw.x, tw.y, p.x + 6, p.y + 6, target, def.special, def.color, 480, 1.5);
           }
         }
       }
       burst(tw.x, tw.y, def.color, 4, 1.4);
       tw.recoil = 0.28;
-      // 攻擊動畫貼射速：佔本輪冷卻大部分，快塔更快播完；末幀仍會被權重拉長
       {
         const period = Math.max(0.12, tw.cooldown / (tw.rateMul > 0 ? tw.rateMul : 1));
         tw.atkDur = Math.min(0.85, Math.max(0.18, period * 0.92));
         tw.atkT = 0;
       }
-      tw.aim = Math.atan2(p.y - tw.y, p.x - tw.x);
       sim.current.pops.push({
         x: tw.x + Math.cos(tw.aim) * 28,
         y: tw.y + Math.sin(tw.aim) * 28,
@@ -2065,8 +2406,15 @@ export function FoxTD() {
         if (tw.recoil > 0) tw.recoil -= dt;
         if (tw.atkDur > 0 && tw.atkT < tw.atkDur) tw.atkT = Math.min(tw.atkDur, tw.atkT + dt);
         if (tw.shake > 0) tw.shake -= dt;
-        // 聖地週期護衛
+        // 聖地週期護衛 + 外觀動畫衰減
         if (tw.sanctuary) {
+          if (tw.hqTurretAtk) {
+            for (let ti = 0; ti < tw.hqTurretAtk.length; ti++) {
+              if (tw.hqTurretAtk[ti] > 0) tw.hqTurretAtk[ti] = Math.max(0, tw.hqTurretAtk[ti] - dt * 2.4);
+            }
+          }
+          if ((tw.hqCannonAtk ?? 0) > 0) tw.hqCannonAtk = Math.max(0, (tw.hqCannonAtk ?? 0) - dt * 1.7);
+          if ((tw.hqBuildFlash ?? 0) > 0) tw.hqBuildFlash = Math.max(0, (tw.hqBuildFlash ?? 0) - dt * 1.3);
           tw.escortCd = (tw.escortCd ?? 0) - dt;
           if (tw.escortCd <= 0 && s.enemies.some((e) => e.hp > 0)) {
             // 自動動員（耗金，金幣不足則延遲重試）
@@ -2958,40 +3306,9 @@ export function FoxTD() {
         const src = s.towers[i];
         const tw = { ...src, y: src.y - cellHeight(s.heights, src.gx, src.gy) * 5 };
         if (tw.sanctuary) {
-          const pulse = 0.9 + Math.sin(t * 2) * 0.05;
-          const R = CELL * 2.5;
-          ctx.save();
-          ctx.translate(tw.x, tw.y);
-          // 建築基座（約 4 格視覺）
-          ctx.fillStyle = "rgba(20, 40, 70, 0.92)";
-          ctx.strokeStyle = "rgba(255, 220, 160, 0.75)";
-          ctx.lineWidth = 3;
-          ctx.beginPath();
-          ctx.roundRect?.(-R, -R, R * 2, R * 2, 12);
-          if (!ctx.roundRect) {
-            ctx.rect(-R, -R, R * 2, R * 2);
-          }
-          ctx.fill();
-          ctx.stroke();
-          // 內殿
-          ctx.fillStyle = `rgba(255, 200, 140, ${0.2 * pulse})`;
-          ctx.fillRect(-R * 0.55, -R * 0.55, R * 1.1, R * 1.1);
-          ctx.fillStyle = "#ffe7c2";
-          ctx.font = "bold 13px sans-serif";
-          ctx.textAlign = "center";
-          ctx.fillText("聖地", 0, -6);
-          ctx.font = "10px sans-serif";
-          ctx.fillStyle = "#9ad7ff";
-          ctx.fillText(`火${tw.hqFireLv ?? 0}/固${tw.hqFortifyLv ?? 0}`, 0, 10);
           const prog = hqProgRef.current;
-          ctx.fillText(prog.path ? HQ_PATH_META[prog.path].name : "未選路線", 0, 22);
-          // 射程環
-          ctx.beginPath();
-          ctx.arc(0, 0, tw.range, 0, Math.PI * 2);
-          ctx.strokeStyle = "rgba(255, 210, 150, 0.15)";
-          ctx.lineWidth = 1.5;
-          ctx.stroke();
-          ctx.restore();
+          const pathName = prog.path ? HQ_PATH_META[prog.path].name : "未選路線";
+          drawSanctuaryCastle(ctx, tw, t, pathName);
           continue;
         }
 
@@ -4398,6 +4715,9 @@ export function FoxTD() {
       hqFireLv: 0,
       hqFortifyLv: 0,
       escortCd: 3,
+      hqTurretAtk: [0, 0, 0, 0],
+      hqCannonAtk: 0,
+      hqBuildFlash: 0.6,
     });
     hqProgRef.current = defaultHqProgress();
     bumpHqUi();
@@ -4466,9 +4786,25 @@ export function FoxTD() {
       tw.hp = Math.min(tw.maxHp, tw.hp + Math.max(20, Math.floor((tw.maxHp - prevMax) * 0.5)));
     }
     const tag = branch === "fire" ? "火力" : "加固";
-    setHover(
-      `聖地${tag} → 總Lv.${tw.hqCoreLv}（火${tw.hqFireLv ?? 0}/固${tw.hqFortifyLv ?? 0}）· ${Math.round(tw.hp)}/${tw.maxHp} · 漏抗 ${Math.round(st.leakResist * 100)}%（−${cost}）`,
-    );
+    tw.hqBuildFlash = 1;
+    if (branch === "fire") {
+      const fl = tw.hqFireLv ?? 0;
+      if (fl === 1) {
+        float(tw.x, tw.y - 40, "四角砲台就位", "#ffd2a8");
+        setHover(`聖地火力 · 四角砲台展開！Lv.${tw.hqCoreLv}（−${cost}）`);
+      } else if (fl === 2) {
+        float(tw.x, tw.y - 48, "屋頂聖砲就位", "#ffe08a");
+        setHover(`聖地火力 · 屋頂聖砲部署！Lv.${tw.hqCoreLv}（−${cost}）`);
+      } else {
+        float(tw.x, tw.y - 40, "聖砲強化", "#ffe08a");
+        setHover(`聖地${tag} → 總Lv.${tw.hqCoreLv}（火${fl}/固${tw.hqFortifyLv ?? 0}）（−${cost}）`);
+      }
+    } else {
+      float(tw.x, tw.y - 40, "城牆加固", "#9ad7ff");
+      setHover(
+        `聖地加固 → 總Lv.${tw.hqCoreLv}（火${tw.hqFireLv ?? 0}/固${tw.hqFortifyLv ?? 0}）· ${Math.round(tw.hp)}/${tw.maxHp} · 漏抗 ${Math.round(st.leakResist * 100)}%（−${cost}）`,
+      );
+    }
     setSel(idx);
   }
 
@@ -5493,21 +5829,27 @@ export function FoxTD() {
                   style={{ flex: 1, fontSize: 11 }}
                   disabled={gold < coreUpgradeCost(selected.hqCoreLv ?? 1)}
                   onClick={() => upgradeSanctuaryCore("fire")}
-                  title="強化主砲傷害、射速與射程"
+                  title="Lv1 四角砲台 · Lv2 屋頂聖砲 · 傷害／射程提升"
                 >
-                  火力 {coreUpgradeCost(selected.hqCoreLv ?? 1)}
+                  {(selected.hqFireLv ?? 0) < 1
+                    ? `裝角樓 ${coreUpgradeCost(selected.hqCoreLv ?? 1)}`
+                    : (selected.hqFireLv ?? 0) < 2
+                      ? `裝聖砲 ${coreUpgradeCost(selected.hqCoreLv ?? 1)}`
+                      : `強聖砲 ${coreUpgradeCost(selected.hqCoreLv ?? 1)}`}
                 </button>
                 <button
                   className="btn ghost"
                   style={{ flex: 1, fontSize: 11, borderColor: "#9dffc0" }}
                   disabled={gold < coreUpgradeCost(selected.hqCoreLv ?? 1)}
                   onClick={() => upgradeSanctuaryCore("fortify")}
-                  title="強化建築血量並降低漏怪傷害"
+                  title="加厚城牆、提升建築血與漏抗"
                 >
-                  加固 {coreUpgradeCost(selected.hqCoreLv ?? 1)}
+                  加固城牆 {coreUpgradeCost(selected.hqCoreLv ?? 1)}
                 </button>
               </div>
-              <p className="mt-1 text-[10px] text-[#9ec4de]">參考 KR：每次二選一偏科，費用隨總等級上升</p>
+              <p className="mt-1 text-[10px] text-[#9ec4de]">
+                火力：角樓砲台 → 屋頂聖砲（獨立模型與射擊動畫）· 加固：城垛與血量
+              </p>
               {!hqProgRef.current.path ? (
                 <div className="mt-2">
                   <p className="text-[10px] text-[#ffd27a]">鎖定本場唯一路線（三選一，不可更改）</p>
