@@ -704,7 +704,10 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     };
 
     const updateSpriteTexture = (sprite: any, image: HTMLImageElement | null | undefined) => {
-      sprite.material.map = image && image.complete && image.naturalWidth > 0 ? getTexture(image) : null;
+      const nextTexture = image && image.complete && image.naturalWidth > 0 ? getTexture(image) : null;
+      // 角色通常會連續數百幀使用同一張圖；只有素材真的切換時才觸發材質更新。
+      if (sprite.material.map === nextTexture) return;
+      sprite.material.map = nextTexture;
       sprite.material.needsUpdate = true;
     };
 
