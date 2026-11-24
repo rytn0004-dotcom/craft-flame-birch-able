@@ -548,6 +548,8 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     };
 
     const rebuildBuildings = (data: Terrain3DSnapshot, animateTurrets: boolean, animateMainUpgrade: boolean) => {
+      for (const effect of installationRings) effect.material.dispose();
+      for (const effect of buildFlashEffects) effect.material.dispose();
       clearGroup(buildingRoot);
       rings.length = 0;
       gems.length = 0;
@@ -837,7 +839,9 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         effect.mesh.scale.setScalar(0.22 + p * 1.42);
         effect.material.opacity = (1 - p) * 0.92;
         if (p >= 1) {
-          effect.mesh.visible = false;
+          effect.mesh.parent?.remove(effect.mesh);
+          effect.mesh.geometry?.dispose?.();
+          effect.material.dispose();
           installationRings.splice(i, 1);
         }
       }
@@ -846,14 +850,14 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         effect.material.opacity = flash * 0.72;
         effect.mesh.scale.setScalar(1 + (1 - flash) * 0.16);
       }
-      for (const core of chargeCores) {
-        const charge = Math.max(0, Math.min(1, core.tower.hqCharge ?? 0));
-        core.material.emissiveIntensity = 0.85 + charge * 2.8;
-        core.mesh.scale.setScalar(1 + charge * 0.22);
-      }
       for (const gem of gems) {
         const pulse = 1 + Math.sin(time * 0.0022) * 0.045;
         gem.scale.setScalar(pulse);
+      }
+      for (const core of chargeCores) {
+        const charge = Math.max(0, Math.min(1, core.tower.hqCharge ?? 0));
+        core.material.emissiveIntensity = 0.85 + charge * 2.8;
+        core.mesh.scale.setScalar((1 + Math.sin(time * 0.0022) * 0.045) * (1 + charge * 0.22));
       }
       for (const turret of turretGroups) {
         turret.group.rotation.y = Math.atan2(Math.cos(turret.tower.aim), Math.sin(turret.tower.aim));
@@ -886,6 +890,8 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       controls.dispose();
       apiRef.current = null;
       clearGroup(terrainRoot);
+      for (const effect of installationRings) effect.material.dispose();
+      for (const effect of buildFlashEffects) effect.material.dispose();
       clearGroup(buildingRoot);
       clearGroup(actorRoot);
       clearGroup(effectRoot);
