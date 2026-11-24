@@ -48,18 +48,19 @@ type Props = {
 };
 
 const HEIGHT_STEP = 0.42;
+// 美術方向：海岸奇幻 × 魔導遺跡。地形偏自然暖色，建築以深海藍、青綠晶體與柔金作識別。
 const MATERIALS = {
-  road: "#344b5d",
-  low: "#687c86",
-  mid: "#87979a",
-  high: "#a9b4b0",
-  stone: "#d0d8db",
-  ivory: "#e8e9df",
-  blue: "#163e70",
-  roof: "#2360a0",
-  gold: "#c9953f",
-  brightGold: "#ffe0a0",
-  crystal: "#42caff",
+  road: "#405968",
+  low: "#718b79",
+  mid: "#91a28a",
+  high: "#b2b18f",
+  stone: "#ded7c3",
+  ivory: "#f0e8d4",
+  blue: "#17475a",
+  roof: "#267c86",
+  gold: "#bd9250",
+  brightGold: "#f2d89b",
+  crystal: "#53d7dc",
 };
 
 function clearGroup(group: any) {
@@ -92,8 +93,8 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     let lastTime = 0;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color("#0a1d30");
-    scene.fog = new THREE.Fog("#0a1d30", 70, 245);
+    scene.background = new THREE.Color("#10232c");
+    scene.fog = new THREE.Fog("#10232c", 70, 245);
     const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 500);
     const terrainRoot = new THREE.Group();
     const buildingRoot = new THREE.Group();
@@ -101,9 +102,9 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     const effectRoot = new THREE.Group();
     scene.add(terrainRoot, buildingRoot, actorRoot, effectRoot);
 
-    scene.add(new THREE.HemisphereLight("#dff2ff", "#24394a", 1.8));
-    scene.add(new THREE.AmbientLight("#91b7d5", 0.42));
-    const sun = new THREE.DirectionalLight("#fff1d4", 2.65);
+    scene.add(new THREE.HemisphereLight("#e6f4ed", "#31433b", 1.55));
+    scene.add(new THREE.AmbientLight("#9dbbb6", 0.48));
+    const sun = new THREE.DirectionalLight("#ffe3b5", 2.35);
     sun.position.set(-32, 48, 28);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
@@ -154,28 +155,28 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       gold: new THREE.MeshStandardMaterial({ color: MATERIALS.gold, metalness: 0.78, roughness: 0.28 }),
       brightGold: new THREE.MeshStandardMaterial({ color: MATERIALS.brightGold, metalness: 0.7, roughness: 0.22, emissive: "#754c16", emissiveIntensity: 0.18 }),
       crystal: new THREE.MeshStandardMaterial({ color: MATERIALS.crystal, metalness: 0.25, roughness: 0.18, emissive: "#008fe8", emissiveIntensity: 1.0 }),
-      chargeCrystal: new THREE.MeshStandardMaterial({ color: "#78e6ff", metalness: 0.24, roughness: 0.16, emissive: "#00aaff", emissiveIntensity: 0.85 }),
-      glass: new THREE.MeshStandardMaterial({ color: "#0b3155", roughness: 0.22, emissive: "#0876bd", emissiveIntensity: 0.5 }),
+      chargeCrystal: new THREE.MeshStandardMaterial({ color: "#8af4e8", metalness: 0.24, roughness: 0.16, emissive: "#00a89c", emissiveIntensity: 0.8 }),
+      glass: new THREE.MeshStandardMaterial({ color: "#0e3945", roughness: 0.22, emissive: "#0a6070", emissiveIntensity: 0.42 }),
       terrain: [
         new THREE.MeshStandardMaterial({ color: MATERIALS.road, roughness: 0.95 }),
         new THREE.MeshStandardMaterial({ color: MATERIALS.low, roughness: 0.92 }),
         new THREE.MeshStandardMaterial({ color: MATERIALS.mid, roughness: 0.9 }),
         new THREE.MeshStandardMaterial({ color: MATERIALS.high, roughness: 0.88 }),
       ],
-      cliff: new THREE.MeshStandardMaterial({ color: "#354b59", roughness: 0.97 }),
-      cliffBand: new THREE.MeshStandardMaterial({ color: "#71858a", roughness: 0.88 }),
-      cliffBandLight: new THREE.MeshStandardMaterial({ color: "#aab9b5", roughness: 0.82 }),
-      cliffCap: new THREE.MeshStandardMaterial({ color: "#c2cbc3", roughness: 0.76 }),
-      rockDetail: new THREE.MeshStandardMaterial({ color: "#89999a", roughness: 0.96 }),
+      cliff: new THREE.MeshStandardMaterial({ color: "#344c4c", roughness: 0.97 }),
+      cliffBand: new THREE.MeshStandardMaterial({ color: "#637c6b", roughness: 0.88 }),
+      cliffBandLight: new THREE.MeshStandardMaterial({ color: "#9a9f7d", roughness: 0.82 }),
+      cliffCap: new THREE.MeshStandardMaterial({ color: "#d0c49b", roughness: 0.76 }),
+      rockDetail: new THREE.MeshStandardMaterial({ color: "#8b927d", roughness: 0.96 }),
       terrainCrystal: new THREE.MeshStandardMaterial({
-        color: "#4d8589",
+        color: "#55a6a2",
         metalness: 0.22,
         roughness: 0.34,
-        emissive: "#174d52",
+        emissive: "#1d6865",
         emissiveIntensity: 0.18,
       }),
-      floor: new THREE.MeshStandardMaterial({ color: "#10283a", roughness: 0.98 }),
-      ramp: new THREE.MeshStandardMaterial({ color: "#9aabb0", roughness: 0.9 }),
+      floor: new THREE.MeshStandardMaterial({ color: "#182d34", roughness: 0.98 }),
+      ramp: new THREE.MeshStandardMaterial({ color: "#aeb49c", roughness: 0.9 }),
     };
 
     const getTexture = (image: HTMLImageElement) => {
@@ -1017,7 +1018,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       }
     };
 
-    const selectedRangeMaterial = new THREE.MeshBasicMaterial({ color: "#9ad7ff", transparent: true, opacity: 0.34, side: THREE.DoubleSide, depthWrite: false });
+    const selectedRangeMaterial = new THREE.MeshBasicMaterial({ color: "#a7e8dc", transparent: true, opacity: 0.34, side: THREE.DoubleSide, depthWrite: false });
     const selectedRange = new THREE.Mesh(new THREE.TorusGeometry(1, 0.018, 8, 96), selectedRangeMaterial);
     selectedRange.rotation.x = Math.PI / 2;
     selectedRange.visible = false;
@@ -1332,7 +1333,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
   }, [snapshotRef, apiRef]);
 
   return (
-    <div ref={hostRef} className="absolute inset-0 overflow-hidden" style={{ background: "#0a1d30" }}>
+    <div ref={hostRef} className="absolute inset-0 overflow-hidden" style={{ background: "#10232c" }}>
       {error ? (
         <div className="absolute inset-0 flex items-center justify-center p-6 text-center text-sm text-[#c5dff2]">{error}</div>
       ) : (
