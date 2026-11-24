@@ -782,6 +782,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     window.addEventListener("blur", onBlur);
     renderer.domElement.addEventListener("contextmenu", onContextMenu);
 
+    let lastHqFireLevel: number | null = null;
     const render = (time: number) => {
       if (disposed) return;
       animationFrame = requestAnimationFrame(render);
@@ -805,7 +806,12 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
           [tower.sanctuary ? "hq" : tower.stake ? "stake" : "tower", tower.gx, tower.gy, tower.def, tower.level, tower.hqFireLv ?? 0, tower.hqFortifyLv ?? 0].join(","),
         ).join("|");
         if (buildingKey !== lastBuildingKey) {
-          rebuildBuildings(data);
+          const hq = data.towers.find((tower) => tower.sanctuary);
+          const fireLevel = hq?.hqFireLv ?? 0;
+          const animateTurrets = lastHqFireLevel !== null && lastHqFireLevel < 1 && fireLevel >= 1;
+          const animateMainUpgrade = lastHqFireLevel !== null && lastHqFireLevel < 2 && fireLevel >= 2;
+          rebuildBuildings(data, animateTurrets, animateMainUpgrade);
+          lastHqFireLevel = fireLevel;
           lastBuildingKey = buildingKey;
         }
       }
@@ -815,6 +821,36 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       const dt = lastTime ? Math.min(0.05, (time - lastTime) / 1000) : 0;
       lastTime = time;
       for (const ring of rings) ring.rotation.y += dt * 0.42;
+      for (let i = installationAnimations.length - 1; i >= 0; i--) {
+        const animation = installationAnimations[i];
+        animation.age += dt;
+        const p = Math.min(1, animation.age / animation.duration);
+        const ease = 1 - Math.pow(1 - p, 3);
+        animation.group.scale.setScalar(animation.fromScale + (1 - animation.fromScale) * ease);
+        animation.group.position.y = animation.targetY + (1 - ease) * 0.92;
+        if (p >= 1) installationAnimations.splice(i, 1);
+      }
+      for (let i = installationRings.length - 1; i >= 0; i--) {
+        const effect = installationRings[i];
+        effect.age += dt;
+        const p = Math.min(1, effect.age / effect.duration);
+        effect.mesh.scale.setScalar(0.22 + p * 1.42);
+        effect.material.opacity = (1 - p) * 0.92;
+        if (p >= 1) {
+          effect.mesh.visible = false;
+          installationRings.splice(i, 1);
+        }
+      }
+      for (const effect of buildFlashEffects) {
+        const flash = Math.max(0, Math.min(1, effect.tower.hqBuildFlash ?? 0));
+        effect.material.opacity = flash * 0.72;
+        effect.mesh.scale.setScalar(1 + (1 - flash) * 0.16);
+      }
+      for (const core of chargeCores) {
+        const charge = Math.max(0, Math.min(1, core.tower.hqCharge ?? 0));
+        core.material.emissiveIntensity = 0.85 + charge * 2.8;
+        core.mesh.scale.setScalar(1 + charge * 0.22);
+      }
       for (const gem of gems) {
         const pulse = 1 + Math.sin(time * 0.0022) * 0.045;
         gem.scale.setScalar(pulse);
@@ -824,6 +860,8 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         const flash = turret.index < 0
           ? turret.tower.hqCannonAtk ?? 0
           : turret.tower.hqTurretAtk?.[turret.index] ?? 0;
+        turret.group.position.y = turret.baseY - flash * 0.11;
+        turret.group.position.z = turret.baseZ;
         turret.flash.visible = flash > 0.06;
         turret.flash.scale.setScalar(0.72 + flash * 1.8);
         turret.flash.material.opacity = Math.min(1, flash * 1.25);
