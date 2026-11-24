@@ -3,6 +3,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { CELL, COLS, ROWS } from "./grid";
 import { TILE, type PlacedTile } from "./tiles";
+import { TOWERS } from "./types";
 
 export type Terrain3DTower = {
   x: number; y: number; gx: number; gy: number; def: number; level: number; aim: number;
@@ -117,6 +118,22 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     const pointer = new THREE.Vector2();
     const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
     const textureCache = new Map<HTMLImageElement, any>();
+    const towerAccentMaterials = new Map<string, any>();
+    const getTowerAccentMaterial = (color: string) => {
+      const key = /^#[0-9a-f]{6}$/i.test(color) ? color : "#78cfe8";
+      let material = towerAccentMaterials.get(key);
+      if (!material) {
+        material = new THREE.MeshStandardMaterial({
+          color: key,
+          metalness: 0.5,
+          roughness: 0.26,
+          emissive: key,
+          emissiveIntensity: 0.16,
+        });
+        towerAccentMaterials.set(key, material);
+      }
+      return material;
+    };
     const rings: any[] = [];
     const gems: any[] = [];
     const turretGroups: { group: any; tower: Terrain3DTower; index: number; flash: any; baseY: number; baseZ: number }[] = [];
@@ -454,22 +471,154 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       const root = new THREE.Group();
       root.position.set(tower.x / CELL, groundTop(heights[tower.gy * COLS + tower.gx] ?? 0), tower.y / CELL);
       const level = Math.max(1, Math.min(8, tower.level || 1));
-      const radius = 0.62 + Math.min(0.08, (level - 1) * 0.012);
-      addCylinder(root, radius, radius + 0.12, 0.22, 0, 0.11, 0, shared.blue, 12);
-      addCylinder(root, radius * 0.83, radius * 0.83, 0.09, 0, 0.265, 0, shared.gold, 12);
-      addCylinder(root, 0.38, 0.48, 0.54 + Math.min(0.16, (level - 1) * 0.035), 0, 0.58, 0, shared.stone, 10);
-      addCylinder(root, 0.43, 0.43, 0.075, 0, 0.88 + Math.min(0.16, (level - 1) * 0.035), 0, shared.brightGold, 12);
-      const collar = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.045, 8, 28), shared.gold);
-      collar.rotation.x = Math.PI / 2;
-      collar.position.y = 0.64 + Math.min(0.16, (level - 1) * 0.035);
-      root.add(collar);
+      const definition = TOWERS[tower.def];
+      const accent = getTowerAccentMaterial(definition?.color ?? "#78cfe8");
+      const special = definition?.special ?? "high";
+      const levelLift = Math.min(0.18, (level - 1) * 0.026);
+      const radius = 0.66 + Math.min(0.08, (level - 1) * 0.012);
+
+      // 分層八角底座：深藍承重層、金屬壓邊、淺石平台。
+      addCylinder(root, radius, radius + 0.16, 0.2, 0, 0.1, 0, shared.blue, 12);
+      addCylinder(root, radius * 0.94, radius * 0.94, 0.075, 0, 0.238, 0, shared.gold, 12);
+      addCylinder(root, radius * 0.82, radius * 0.9, 0.15, 0, 0.34, 0, shared.stone, 10);
+      addCylinder(root, 0.48, 0.55, 0.5 + levelLift, 0, 0.66 + levelLift / 2, 0, shared.ivory, 10);
+      addCylinder(root, 0.55, 0.55, 0.075, 0, 0.93 + levelLift, 0, shared.blue, 12);
+      addCylinder(root, 0.51, 0.51, 0.035, 0, 0.982 + levelLift, 0, accent, 12);
+
+      const lowerTrim = new THREE.Mesh(new THREE.TorusGeometry(0.61, 0.035, 8, 40), shared.gold);
+      lowerTrim.rotation.x = Math.PI / 2;
+      lowerTrim.position.y = 0.28;
+      root.add(lowerTrim);
+      const upperTrim = new THREE.Mesh(new THREE.TorusGeometry(0.53, 0.035, 8, 40), accent);
+      upperTrim.rotation.x = Math.PI / 2;
+      upperTrim.position.y = 0.91 + levelLift;
+      root.add(upperTrim);
+
+      // 四根角柱托住角色展示位，頂端以各塔專屬色的水晶標示屬性。
       for (let i = 0; i < 4; i++) {
-        const angle = (i * Math.PI) / 2;
-        const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.1 + Math.min(0.04, (level - 1) * 0.006), 0), shared.crystal);
-        crystal.position.set(Math.cos(angle) * 0.52, 0.49, Math.sin(angle) * 0.52);
+        const angle = Math.PI / 4 + (i * Math.PI) / 2;
+        const x = Math.cos(angle) * 0.47;
+        const z = Math.sin(angle) * 0.47;
+        addCylinder(root, 0.065, 0.085, 0.52 + levelLift, x, 0.54 + levelLift / 2, z, shared.blue, 8);
+        addCylinder(root, 0.09, 0.09, 0.055, x, 0.82 + levelLift, z, shared.brightGold, 8);
+        const crystal = new THREE.Mesh(
+          new THREE.OctahedronGeometry(0.105 + Math.min(0.045, (level - 1) * 0.006), 1),
+          accent,
+        );
+        crystal.position.set(x, 0.91 + levelLift, z);
+        crystal.castShadow = true;
         root.add(crystal);
         gems.push(crystal);
       }
+
+      // 不同塔種使用不同的底座紋章；不改角色 Sprite 或戰鬥判定。
+      const motifY = 0.47 + levelLift;
+      if (special === "slow") {
+        for (let i = 0; i < 4; i++) {
+          const a = (i * Math.PI) / 2;
+          const shard = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.32, 5), accent);
+          shard.position.set(Math.cos(a) * 0.31, motifY + 0.08, Math.sin(a) * 0.31);
+          shard.rotation.z = Math.cos(a) * -0.18;
+          shard.castShadow = true;
+          root.add(shard);
+        }
+      } else if (special === "burn") {
+        for (let i = 0; i < 4; i++) {
+          const a = (i * Math.PI) / 2;
+          const flame = new THREE.Mesh(new THREE.ConeGeometry(0.11, 0.34, 6), accent);
+          flame.position.set(Math.cos(a) * 0.32, motifY + 0.1, Math.sin(a) * 0.32);
+          flame.rotation.z = Math.cos(a) * -0.28;
+          root.add(flame);
+        }
+      } else if (special === "range") {
+        const sightRing = new THREE.Mesh(new THREE.TorusGeometry(0.38, 0.035, 8, 36), accent);
+        sightRing.rotation.x = Math.PI / 2;
+        sightRing.position.y = motifY + 0.06;
+        root.add(sightRing);
+        addCylinder(root, 0.045, 0.065, 0.36, 0, motifY + 0.19, -0.28, shared.gold, 8);
+      } else if (special === "rapid") {
+        for (let i = 0; i < 4; i++) {
+          const a = (i * Math.PI) / 2;
+          const fin = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.26, 0.32), accent);
+          fin.position.set(Math.cos(a) * 0.34, motifY + 0.08, Math.sin(a) * 0.34);
+          fin.rotation.y = a;
+          root.add(fin);
+        }
+      } else if (special === "aoe") {
+        for (let i = 0; i < 6; i++) {
+          const a = (i * Math.PI) / 3;
+          const petal = new THREE.Mesh(new THREE.OctahedronGeometry(0.12, 0), accent);
+          petal.position.set(Math.cos(a) * 0.35, motifY + 0.06, Math.sin(a) * 0.35);
+          petal.scale.set(0.72, 1.35, 0.72);
+          root.add(petal);
+        }
+      } else if (special === "root") {
+        for (let i = 0; i < 4; i++) {
+          const a = (i * Math.PI) / 2;
+          const thorn = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.36, 5), accent);
+          thorn.position.set(Math.cos(a) * 0.37, motifY + 0.08, Math.sin(a) * 0.37);
+          thorn.rotation.z = Math.cos(a) * -0.48;
+          thorn.rotation.x = Math.sin(a) * 0.48;
+          root.add(thorn);
+        }
+      } else if (special === "break") {
+        for (let i = 0; i < 4; i++) {
+          const a = (i * Math.PI) / 2;
+          const shield = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.28, 0.065), accent);
+          shield.position.set(Math.cos(a) * 0.37, motifY + 0.07, Math.sin(a) * 0.37);
+          shield.rotation.y = -a;
+          root.add(shield);
+        }
+      } else if (special === "chain") {
+        const conductorRing = new THREE.Mesh(new THREE.TorusGeometry(0.38, 0.025, 6, 36), accent);
+        conductorRing.rotation.x = Math.PI / 2;
+        conductorRing.position.y = motifY + 0.08;
+        root.add(conductorRing);
+        for (let i = 0; i < 4; i++) {
+          const a = (i * Math.PI) / 2;
+          const node = new THREE.Mesh(new THREE.SphereGeometry(0.085, 8, 8), accent);
+          node.position.set(Math.cos(a) * 0.38, motifY + 0.08, Math.sin(a) * 0.38);
+          root.add(node);
+        }
+      } else if (special === "pierce") {
+        const spear = new THREE.Mesh(new THREE.ConeGeometry(0.11, 0.48, 6), accent);
+        spear.rotation.x = Math.PI / 2;
+        spear.position.set(0, motifY + 0.08, 0.34);
+        root.add(spear);
+        addBox(root, 0.1, 0.12, 0.55, 0, motifY, 0.06, shared.gold);
+      } else if (special === "execute") {
+        for (const side of [-1, 1]) {
+          const blade = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.32, 0.42), accent);
+          blade.position.set(side * 0.25, motifY + 0.08, 0);
+          blade.rotation.z = side * -0.32;
+          root.add(blade);
+        }
+      } else if (special === "ultimate") {
+        for (const side of [-1, 1]) {
+          const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.18, 1), accent);
+          crystal.position.set(side * 0.34, motifY + 0.1, 0);
+          crystal.rotation.z = side * 0.42;
+          crystal.scale.set(0.8, 1.55, 0.8);
+          root.add(crystal);
+          gems.push(crystal);
+        }
+      } else {
+        const crown = new THREE.Mesh(new THREE.OctahedronGeometry(0.17, 1), accent);
+        crown.position.set(0, motifY + 0.1, 0);
+        crown.scale.set(0.8, 1.35, 0.8);
+        root.add(crown);
+        gems.push(crown);
+      }
+
+      // 升級刻度：每升一級增加一枚金色徽記，最高顯示七枚。
+      const markCount = Math.min(7, level - 1);
+      for (let i = 0; i < markCount; i++) {
+        const angle = (i / Math.max(1, markCount)) * Math.PI * 2;
+        const mark = new THREE.Mesh(new THREE.OctahedronGeometry(0.055, 0), shared.brightGold);
+        mark.position.set(Math.cos(angle) * 0.72, 0.26, Math.sin(angle) * 0.72);
+        root.add(mark);
+      }
+
       buildingRoot.add(root);
     };
 
@@ -1075,6 +1224,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       selectedRangeMaterial.dispose();
       clearGroup(effectRoot);
       for (const texture of textureCache.values()) texture.dispose();
+      for (const material of towerAccentMaterials.values()) material.dispose();
       renderer.dispose();
       renderer.domElement.remove();
     };
