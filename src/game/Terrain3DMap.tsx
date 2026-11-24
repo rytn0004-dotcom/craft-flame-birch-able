@@ -167,6 +167,13 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       cliffBandLight: new THREE.MeshStandardMaterial({ color: "#aab9b5", roughness: 0.82 }),
       cliffCap: new THREE.MeshStandardMaterial({ color: "#c2cbc3", roughness: 0.76 }),
       rockDetail: new THREE.MeshStandardMaterial({ color: "#89999a", roughness: 0.96 }),
+      terrainCrystal: new THREE.MeshStandardMaterial({
+        color: "#4d8589",
+        metalness: 0.22,
+        roughness: 0.34,
+        emissive: "#174d52",
+        emissiveIntensity: 0.18,
+      }),
       floor: new THREE.MeshStandardMaterial({ color: "#10283a", roughness: 0.98 }),
       ramp: new THREE.MeshStandardMaterial({ color: "#9aabb0", roughness: 0.9 }),
     };
@@ -494,6 +501,35 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       upperTrim.position.y = 0.91 + levelLift;
       root.add(upperTrim);
 
+      // 四角立柱與頂框把角色展示位包成真正的防禦塔建築；保留中央輪廓，不遮住既有角色 Sprite。
+      const frameCorners = [[-0.82, -0.78], [0.82, -0.78], [-0.82, 0.78], [0.82, 0.78]];
+      for (const [x, z] of frameCorners) {
+        addBox(root, 0.14, 1.62 + levelLift * 0.35, 0.14, x, 1.68 + levelLift * 0.18, z, shared.blue);
+        addBox(root, 0.2, 0.09, 0.2, x, 1.02 + levelLift * 0.18, z, shared.gold);
+        addBox(root, 0.19, 0.075, 0.19, x, 2.47 + levelLift * 0.18, z, shared.brightGold);
+        addBox(root, 0.19, 0.11, 0.19, x, 2.58 + levelLift * 0.18, z, accent);
+      }
+      // 頂部四向橫樑與屋簷，讓低角度環視能看到建築的厚度。
+      for (const sign of [-1, 1]) {
+        addBox(root, 1.72, 0.12, 0.14, 0, 2.56 + levelLift * 0.18, sign * 0.78, shared.blue);
+        addBox(root, 0.14, 0.12, 1.72, sign * 0.82, 2.56 + levelLift * 0.18, 0, shared.blue);
+        addBox(root, 1.82, 0.055, 0.2, 0, 2.64 + levelLift * 0.18, sign * 0.78, shared.gold);
+        addBox(root, 0.2, 0.055, 1.82, sign * 0.82, 2.64 + levelLift * 0.18, 0, shared.gold);
+      }
+      // 背側冠飾與塔種能量徽記，從斜角仍能辨認各塔的屬性。
+      const crest = new THREE.Group();
+      crest.position.set(0, 2.78 + levelLift * 0.18, -0.82);
+      const crestPlate = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.34, 0.09), shared.blue);
+      crest.add(crestPlate);
+      const crestEdge = new THREE.Mesh(new THREE.TorusGeometry(0.2, 0.025, 6, 24), shared.brightGold);
+      crestEdge.position.z = 0.06;
+      crest.add(crestEdge);
+      const crestGem = new THREE.Mesh(new THREE.OctahedronGeometry(0.13, 1), accent);
+      crestGem.position.z = 0.12;
+      crest.add(crestGem);
+      root.add(crest);
+      gems.push(crestGem);
+
       // 四根角柱托住角色展示位，頂端以各塔專屬色的水晶標示屬性。
       for (let i = 0; i < 4; i++) {
         const angle = Math.PI / 4 + (i * Math.PI) / 2;
@@ -610,6 +646,28 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         gems.push(crown);
       }
 
+      // 中高階塔增加旋轉能量環；高階塔再加第二層，升級差異在遠距離也看得出來。
+      if (level >= 3) {
+        const tierRing = new THREE.Mesh(
+          new THREE.TorusGeometry(0.76, 0.026, 6, 48),
+          accent,
+        );
+        tierRing.rotation.x = Math.PI / 2;
+        tierRing.position.y = 0.43;
+        root.add(tierRing);
+        rings.push(tierRing);
+      }
+      if (level >= 6) {
+        const upperTierRing = new THREE.Mesh(
+          new THREE.TorusGeometry(0.58, 0.022, 6, 48),
+          shared.brightGold,
+        );
+        upperTierRing.rotation.x = Math.PI / 2;
+        upperTierRing.position.y = 1.08 + levelLift;
+        root.add(upperTierRing);
+        rings.push(upperTierRing);
+      }
+
       // 升級刻度：每升一級增加一枚金色徽記，最高顯示七枚。
       const markCount = Math.min(7, level - 1);
       for (let i = 0; i < markCount; i++) {
@@ -709,6 +767,49 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         rocks.castShadow = true;
         rocks.receiveShadow = true;
         terrainRoot.add(rocks);
+      }
+
+      // 高台邊緣偶爾露出低矮的海蝕礦晶，密度刻意偏低，避免水元素搶過建築主體。
+      const mineralCells = Array.from(tileCells.values()).filter((cell) => {
+        if (cell.h < 2) return false;
+        const gx = Math.floor(cell.x);
+        const gy = Math.floor(cell.z);
+        const edge = [
+          tileCells.get(gx + "," + (gy - 1)),
+          tileCells.get((gx + 1) + "," + gy),
+          tileCells.get(gx + "," + (gy + 1)),
+          tileCells.get((gx - 1) + "," + gy),
+        ].some((neighbor) => !neighbor || neighbor.h < cell.h);
+        const seed = Math.abs(Math.sin(cell.x * 51.7 + cell.z * 97.3) * 36431.71) % 1;
+        return edge && seed > 0.91;
+      });
+      if (mineralCells.length) {
+        const minerals = new THREE.InstancedMesh(
+          new THREE.OctahedronGeometry(0.065, 0),
+          shared.terrainCrystal,
+          mineralCells.length * 2,
+        );
+        const dummy = new THREE.Object3D();
+        for (let i = 0; i < mineralCells.length; i++) {
+          const cell = mineralCells[i];
+          const seed = Math.abs(Math.sin(cell.x * 127.1 + cell.z * 311.7) * 43758.5453) % 1;
+          for (let shard = 0; shard < 2; shard++) {
+            const index = i * 2 + shard;
+            dummy.position.set(
+              cell.x + (shard === 0 ? -0.09 : 0.1) + (seed - 0.5) * 0.08,
+              groundTop(cell.h) + 0.07 + shard * 0.035,
+              cell.z + (shard === 0 ? 0.07 : -0.08),
+            );
+            dummy.rotation.set(seed * 0.5, seed * Math.PI * 2 + shard, seed * 0.4);
+            dummy.scale.set(0.82 + seed * 0.35, 1.0 + shard * 0.48, 0.82 + seed * 0.35);
+            dummy.updateMatrix();
+            minerals.setMatrixAt(index, dummy.matrix);
+          }
+        }
+        minerals.instanceMatrix.needsUpdate = true;
+        minerals.castShadow = true;
+        minerals.receiveShadow = true;
+        terrainRoot.add(minerals);
       }
 
       // 裸露邊緣的層理岩壁：高度差越大，側面越深、越厚。
