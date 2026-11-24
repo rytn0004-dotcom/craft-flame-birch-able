@@ -538,6 +538,8 @@ type Tower = {
   hqTurretAtk?: number[];
   /** 屋頂大砲開火動畫 0..1 */
   hqCannonAtk?: number;
+  /** 主砲蓄能 0..1 */
+  hqCharge?: number;
   /** 升級外觀閃光 */
   hqBuildFlash?: number;
 };
@@ -1432,6 +1434,7 @@ export function FoxTD() {
           stake: tower.stake, sanctuary: tower.sanctuary,
           hqFireLv: tower.hqFireLv, hqFortifyLv: tower.hqFortifyLv,
           hqTurretAtk: tower.hqTurretAtk?.slice(), hqCannonAtk: tower.hqCannonAtk,
+          hqCharge: tower.hqCharge, hqBuildFlash: tower.hqBuildFlash,
           hp: tower.hp, maxHp: tower.maxHp, image,
         };
       }),
@@ -1952,6 +1955,7 @@ export function FoxTD() {
           const ox = tw.x + Math.cos(tw.aim) * 12;
           const oy = tw.y - R * 0.72 + Math.sin(tw.aim) * 8;
           tw.hqCannonAtk = 1;
+          tw.hqCharge = 0;
           sim.current.shots.push({
             x: ox,
             y: oy,
@@ -1973,6 +1977,7 @@ export function FoxTD() {
           float(ox, oy - 22, "聖砲", "#ffe08a");
         } else if (fireLv >= 1) {
           tw.hqCannonAtk = 0;
+          tw.hqCharge = 0;
           // 選最靠近目標的角樓開火
           let bestI = 0;
           let bestD = 1e9;
@@ -2006,6 +2011,7 @@ export function FoxTD() {
         } else {
           // 初始中央主炮：保留較小威力，但 3D 模型會有明確炮口閃光
           tw.hqCannonAtk = 0.62;
+          tw.hqCharge = 0;
           // 初始小兵器：主殿微光彈
           sim.current.shots.push({
             x: tw.x,
@@ -2818,6 +2824,16 @@ export function FoxTD() {
         } else if (best) {
           const p = posAt(best.dist, best.route);
           tw.aim = Math.atan2(p.y - tw.y, p.x - tw.x);
+        }
+        if (tw.sanctuary) {
+          const fireLevel = tw.hqFireLv ?? 0;
+          const mainCanCharge = fireLevel === 0 || fireLevel >= 2;
+          if (best && mainCanCharge) {
+            const period = Math.max(0.12, tw.cooldown / Math.max(0.1, tw.rateMul || 1));
+            tw.hqCharge = Math.max(0, Math.min(1, 1 - Math.max(0, tw.cd) / period));
+          } else {
+            tw.hqCharge = Math.max(0, (tw.hqCharge ?? 0) - dt * 2.1);
+          }
         }
         if (tw.recoil > 0) tw.recoil -= dt;
         if (tw.atkDur > 0 && tw.atkT < tw.atkDur) tw.atkT = Math.min(tw.atkDur, tw.atkT + dt);
