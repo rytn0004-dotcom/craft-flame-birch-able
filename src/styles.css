@@ -617,3 +617,84 @@ html, body, #root, #app {
 .stage canvas[data-game3d="true"]:active {
   cursor: grabbing;
 }
+
+
+/* ===== 3D 戰場與操作面板共用同一個可視高度 ===== */
+.td-layout {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  grid-template-columns: minmax(0, 1fr) clamp(300px, 27vw, 360px);
+  align-items: stretch;
+}
+
+.td-layout > .stage,
+.td-layout > .panel {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  max-height: none;
+}
+
+.td-layout > .stage {
+  aspect-ratio: auto;
+}
+
+.td-layout > .panel {
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.stage > div:first-child {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.stage canvas[data-game3d="true"] {
+  width: 100% !important;
+  height: 100% !important;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: fill;
+}
+
+/* 窄螢幕時遊戲畫面與操作面板同寬，並在視窗內分配固定可視區，不讓整頁被面板撐出畫布。 */
+@media (max-width: 900px) {
+  .td-shell {
+    min-height: 100dvh;
+    height: 100dvh;
+  }
+
+  .td-layout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(220px, 1.15fr) minmax(190px, 0.85fr);
+    overflow: hidden;
+    padding: 6px 8px 8px;
+  }
+
+  .td-layout > .stage,
+  .td-layout > .panel {
+    width: 100%;
+    height: 100%;
+    max-height: none !important;
+  }
+
+  .td-layout > .panel {
+    padding: 10px;
+  }
+}
+
+@media (max-height: 680px) {
+  .td-shell > header {
+    padding-top: 5px !important;
+    padding-bottom: 5px !important;
+  }
+
+  .td-layout {
+    padding-top: 5px;
+    padding-bottom: 7px;
+  }
+}
