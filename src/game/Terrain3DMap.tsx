@@ -460,6 +460,8 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         }
         const node = shotNodes[i];
         node.visible = true;
+        node.children[0].material.color.set(shot.color);
+        node.children[0].material.emissive.set(shot.color);
         const dx = (shot.tx - shot.x) / CELL;
         const dz = (shot.ty - shot.y) / CELL;
         const length = Math.hypot(dx, dz) || 1;
