@@ -886,7 +886,8 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         const blocked = data.blocked.has(key);
         let h = data.heights[gy * COLS + gx] ?? 0;
         if (data.mapMode === "expand" && !data.placed.length && blocked && h === 0) h = 1;
-        if (!blocked) h = 0;
+        // 擴張模式 blocked=false 是怪物道路，必須保持平地；完整關卡則依 heights 保留可建造高地。
+        if (data.mapMode === "expand" && !blocked) h = 0;
         h = Math.max(0, Math.min(3, h | 0));
         const cell = { x: gx + 0.5, z: gy + 0.5, h };
         tileCells.set(key, cell);
