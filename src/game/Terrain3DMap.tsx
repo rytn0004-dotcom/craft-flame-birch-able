@@ -7,7 +7,7 @@ import { TILE, type PlacedTile } from "./tiles";
 export type Terrain3DTower = {
   x: number; y: number; gx: number; gy: number; def: number; level: number; aim: number;
   stake?: boolean; sanctuary?: boolean; hqFireLv?: number; hqFortifyLv?: number;
-  hqTurretAtk?: number[]; hqCannonAtk?: number[]; hqCharge?: number; hqBuildFlash?: number;
+  hqTurretAtk?: number[]; hqCannonAtk?: number; hqCharge?: number; hqBuildFlash?: number;
   hp: number; maxHp: number; image?: HTMLImageElement | null;
 };
 
@@ -226,7 +226,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       return cannon;
     };
 
-    const createSanctuary = (tower: Terrain3DTower, heights: number[]) => {
+    const createSanctuary = (tower: Terrain3DTower, heights: number[], animateTurrets: boolean, animateMainUpgrade: boolean) => {
       const root = new THREE.Group();
       root.position.set(tower.x / CELL, groundTop(heights[tower.gy * COLS + tower.gx] ?? 0), tower.y / CELL);
       // 六乘六格石造基座，金邊和階層清楚標示建築佔地
@@ -245,6 +245,21 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         addBox(root, 0.14, 0.88, 0.14, side * 2.27, 1.15, offset, shared.gold);
         addBox(root, 0.14, 0.88, 0.14, offset, 1.15, side * 2.27, shared.gold);
       }
+      // 城垛：四面牆頂都有獨立齒狀石塊，近距離環視仍能讀出防禦結構。
+      for (const sign of [-1, 1]) {
+        for (let i = -2; i <= 2; i++) {
+          addBox(root, 0.48, 0.2, 0.34, i * 0.82, 1.55, sign * 2.25, shared.ivory);
+          addBox(root, 0.34, 0.2, 0.48, sign * 2.25, 1.55, i * 0.82, shared.ivory);
+        }
+      }
+      // 深色窗縫與正面大門，讓牆面不再只是平整石盒。
+      for (const sign of [-1, 1]) for (const offset of [-1.35, 0, 1.35]) {
+        const slit = addBox(root, 0.12, 0.27, 0.025, offset, 1.05, sign * 2.435, shared.glass);
+        slit.castShadow = false;
+      }
+      addBox(root, 0.78, 0.68, 0.08, 0, 0.98, 2.49, shared.blue);
+      addBox(root, 0.52, 0.47, 0.035, 0, 0.98, 2.55, shared.gold);
+      addBox(root, 0.33, 0.37, 0.035, 0, 0.98, 2.58, shared.glass);
 
       // 中央聖殿、藍色穹頂和高聳水晶尖塔
       addCylinder(root, 1.03, 1.18, 1.52, 0, 1.64, -0.28, shared.ivory, 12);
@@ -258,19 +273,34 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       spire.position.set(0, 4.12, -0.28);
       spire.castShadow = true;
       root.add(spire);
-      makeCrystal(root, 0, 4.82, -0.28, 0.53);
+      const heartCrystal = makeCrystal(root, 0, 4.82, -0.28, 0.53);
+      chargeCores.push({ mesh: heartCrystal, material: shared.crystal, tower });
+
+      // 主殿四面柱與金色飛簷，強化建築層次。
+      for (const side of [-1, 1]) {
+        addCylinder(root, 0.12, 0.15, 1.15, side * 1.22, 1.9, -0.28, shared.gold, 8);
+        addCylinder(root, 0.12, 0.15, 1.15, -0.28, 1.9, side * 1.22, shared.gold, 8);
+      }
+      addCylinder(root, 1.42, 1.42, 0.12, 0, 2.62, -0.28, shared.brightGold, 12);
 
       // 主炮始終存在，使用金屬炮身＋藍色晶體砲口
       const mainGunMount = new THREE.Group();
-      mainGunMount.position.set(0, 1.55, 0.72);
+      mainGunMount.position.set(0, 1.86, 0.82);
       mainGunMount.rotation.y = Math.atan2(Math.cos(tower.aim), Math.sin(tower.aim));
-      const mainCannon = makeCannon(mainGunMount, (tower.hqFireLv ?? 0) >= 2 ? 1.28 : 1.08);
+      const mainCannon = makeCannon(mainGunMount, (tower.hqFireLv ?? 0) >= 2 ? 1.38 : 1.08);
       mainCannon.position.y = 0.12;
+      if (animateMainUpgrade) {
+        mainCannon.scale.setScalar(0.72);
+        installationAnimations.push({ group: mainCannon, targetY: 0.12, age: 0, duration: 0.72, fromScale: 0.72 });
+      }
       root.add(mainGunMount);
-      turretGroups.push({ group: mainGunMount, tower, index: -1, flash: mainCannon.userData.muzzleFlash });
+      turretGroups.push({
+        group: mainGunMount, tower, index: -1, flash: mainCannon.userData.muzzleFlash,
+        baseY: 1.86, baseZ: 0.82,
+      });
 
       const mainRing = new THREE.Group();
-      mainRing.position.set(0, 1.79, 0.72);
+      mainRing.position.set(0, 2.02, 0.82);
       const ringMesh = new THREE.Mesh(new THREE.TorusGeometry((tower.hqFireLv ?? 0) >= 2 ? 0.92 : 0.76, 0.065, 10, 44), shared.brightGold);
       ringMesh.rotation.x = Math.PI / 2;
       mainRing.add(ringMesh);
@@ -280,8 +310,10 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       // 四座角樓先有空砲座；購買火力後才安裝砲塔和炮管
       const corners = [[-2.28, -2.28], [2.28, -2.28], [-2.28, 2.28], [2.28, 2.28]];
       for (const [cx, cz] of corners) {
-        addCylinder(root, 0.52, 0.67, 0.9, cx, 1.05, cz, shared.stone, 12);
-        addCylinder(root, 0.59, 0.59, 0.12, cx, 1.56, cz, shared.gold, 12);
+        addCylinder(root, 0.56, 0.69, 1.02, cx, 1.12, cz, shared.stone, 10);
+        addCylinder(root, 0.6, 0.66, 0.13, cx, 1.69, cz, shared.gold, 10);
+        addCylinder(root, 0.48, 0.58, 0.2, cx, 1.82, cz, shared.roof, 10);
+        addCylinder(root, 0.53, 0.53, 0.065, cx, 1.94, cz, shared.brightGold, 10);
         const spin = new THREE.Group();
         spin.position.set(cx, 1.64, cz);
         const runeRing = new THREE.Mesh(new THREE.TorusGeometry(0.45, 0.055, 8, 28), shared.brightGold);
@@ -309,9 +341,27 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
           cannon.position.y = 0.28;
           mount.rotation.y = Math.atan2(Math.cos(tower.aim), Math.sin(tower.aim));
           root.add(mount);
-          turretGroups.push({ group: mount, tower, index: corners.findIndex(([x, z]) => x === cx && z === cz), flash: cannon.userData.muzzleFlash });
+          const turretIndex = corners.findIndex(([x, z]) => x === cx && z === cz);
+          if (animateTurrets) {
+            mount.scale.setScalar(0.015);
+            mount.position.y = 2.55;
+            installationAnimations.push({ group: mount, targetY: 1.72, age: 0, duration: 0.88 + turretIndex * 0.06, fromScale: 0.015 });
+            addCornerInstallationRing(root, cx, cz);
+          }
+          turretGroups.push({
+            group: mount, tower, index: turretIndex, flash: cannon.userData.muzzleFlash,
+            baseY: 1.72, baseZ: cz,
+          });
         }
       }
+
+      // 升級回饋環：隨 HQ build flash 展開後淡出。
+      const buildMaterial = new THREE.MeshBasicMaterial({ color: "#ffe0a0", transparent: true, opacity: 0, side: THREE.DoubleSide });
+      const buildRing = new THREE.Mesh(new THREE.TorusGeometry(2.72, 0.075, 8, 64), buildMaterial);
+      buildRing.rotation.x = Math.PI / 2;
+      buildRing.position.y = 0.34;
+      root.add(buildRing);
+      buildFlashEffects.push({ mesh: buildRing, material: buildMaterial, tower });
 
       // 城牆加固會逐層出現金屬護條
       for (let i = 0; i < Math.min(5, tower.hqFortifyLv ?? 0); i++) {
@@ -401,13 +451,17 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       terrainRoot.add(floor);
     };
 
-    const rebuildBuildings = (data: Terrain3DSnapshot) => {
+    const rebuildBuildings = (data: Terrain3DSnapshot, animateTurrets: boolean, animateMainUpgrade: boolean) => {
       clearGroup(buildingRoot);
       rings.length = 0;
       gems.length = 0;
       turretGroups.length = 0;
+      installationAnimations.length = 0;
+      installationRings.length = 0;
+      buildFlashEffects.length = 0;
+      chargeCores.length = 0;
       for (const tower of data.towers) {
-        if (tower.sanctuary) createSanctuary(tower, data.heights);
+        if (tower.sanctuary) createSanctuary(tower, data.heights, animateTurrets, animateMainUpgrade);
         else if (tower.stake) createStake(tower, data.heights);
         else createTowerBase(tower, data.heights);
       }
