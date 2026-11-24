@@ -1763,8 +1763,8 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         placementPreview.visible = true;
         placementPreview.position.set(gx + 0.5, groundTop(height) + 0.045, gy + 0.5);
         placementPreview.scale.setScalar(snapped ? 0.94 : 1);
-        const fillColor = !valid ? "#ff7188" : height >= 2 ? "#f1c982" : height === 1 ? "#a4d49a" : "#8ce3ac";
-        const lineColor = !valid ? "#ff9cac" : height >= 2 ? "#ffe2a5" : height === 1 ? "#c8f0a7" : "#c1f4d0";
+        const fillColor = !valid ? "#ff7188" : height > 0 ? "#f1c982" : "#8ce3ac";
+        const lineColor = !valid ? "#ff9cac" : height > 0 ? "#ffe2a5" : "#c1f4d0";
         placementFillMaterial.color.set(fillColor);
         placementOutlineMaterial.color.set(lineColor);
         placementFillMaterial.opacity = valid
@@ -2039,8 +2039,8 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
             Alt＋左鍵旋轉 · 右鍵平移 · 滾輪縮放
           </div>
           <div className="pointer-events-none absolute bottom-3 left-3 z-10 rounded-lg border border-[#8ec8ee33] bg-[#061525cc] px-3 py-2 text-[11px] text-[#9ec4de]">
-            建塔預覽：綠＝平地 · 金＝高地 · 紅＝不可建
-            <span className="block mt-1 text-[#d8c89e]">地勢：0 平地 · 1 單層岩台 · 2 雙層岩台 · 3 三層峭台</span>
+            建塔預覽：綠＝平地可建 · 金＝高地可建 · 紅＝不可建
+            <span className="block mt-1 text-[#d8c89e]">0～3 級皆可建塔｜1／2／3 級分別有單／雙／三層岩沿</span>
           </div>
           <button
             type="button"
