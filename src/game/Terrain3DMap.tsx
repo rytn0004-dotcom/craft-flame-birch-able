@@ -218,6 +218,16 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       roadEdge: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.9 }),
       foundationStone: new THREE.MeshStandardMaterial({ color: "#b5b29f", roughness: 0.9 }),
       foundationGold: new THREE.MeshStandardMaterial({ color: "#c5a56c", metalness: 0.58, roughness: 0.38 }),
+      ruinStone: new THREE.MeshStandardMaterial({ color: "#a7a18d", roughness: 0.96 }),
+      ruinShadow: new THREE.MeshStandardMaterial({ color: "#596c64", roughness: 0.94 }),
+      runeGlow: new THREE.MeshStandardMaterial({
+        color: "#79d9c8",
+        metalness: 0.18,
+        roughness: 0.3,
+        emissive: "#147b70",
+        emissiveIntensity: 0.72,
+      }),
+      rampStep: new THREE.MeshStandardMaterial({ color: "#c0b69b", roughness: 0.92 }),
       grass: new THREE.MeshStandardMaterial({ color: "#83a878", roughness: 0.96 }),
       terrainCrystal: new THREE.MeshStandardMaterial({
         color: "#55a6a2",
@@ -1526,6 +1536,149 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         terrainRoot.add(rails, ends);
       }
 
+      // 稀疏古代遺跡：只落在可建造的高平台，避開道路、建築與聖地，不改格子資料。
+      const ruinSites: { x: number; z: number; h: number; seed: number }[] = [];
+      const ruinNeighborOffsets = [
+        [0, -1], [1, 0], [0, 1], [-1, 0],
+        [-1, -1], [1, -1], [1, 1], [-1, 1],
+      ];
+      for (const cell of tileCells.values()) {
+        if (cell.h < 2) continue;
+        const gx = Math.floor(cell.x);
+        const gy = Math.floor(cell.z);
+        const key = gx + "," + gy;
+        if (data.mapMode === "layout" && data.blocked.has(key)) continue;
+        const seed = Math.abs(Math.sin(cell.x * 39.7 + cell.z * 83.1) * 31871.23) % 1;
+        if (seed < 0.9915) continue;
+        const tooCloseToBuilding = protectedBuildings.some((building) =>
+          Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 2.65,
+        );
+        if (tooCloseToBuilding) continue;
+        const neighbors = ruinNeighborOffsets.map(([dc, dr]) =>
+          tileCells.get((gx + dc) + "," + (gy + dr)),
+        );
+        if (neighbors.filter((neighbor) => neighbor && neighbor.h >= cell.h - 0).length < 3) continue;
+        const nearRoad = data.mapMode === "expand" && neighbors.some((neighbor, index) => {
+          if (!neighbor) return false;
+          const [dc, dr] = ruinNeighborOffsets[index];
+          return !data.blocked.has((gx + dc) + "," + (gy + dr));
+        });
+        if (nearRoad) continue;
+        if (ruinSites.some((site) => Math.hypot(cell.x - site.x, cell.z - site.z) < 6.4)) continue;
+        ruinSites.push({ x: cell.x, z: cell.z, h: cell.h, seed });
+        if (ruinSites.length >= 18) break;
+      }
+
+      if (ruinSites.length) {
+        const plinths = new THREE.InstancedMesh(
+          new THREE.BoxGeometry(1.08, 0.13, 1.08),
+          shared.ruinShadow,
+          ruinSites.length,
+        );
+        const columns = new THREE.InstancedMesh(
+          new THREE.CylinderGeometry(0.19, 0.25, 1, 8),
+          shared.ruinStone,
+          ruinSites.length * 2,
+        );
+        const runeSlabs = new THREE.InstancedMesh(
+          new THREE.BoxGeometry(0.34, 0.92, 0.18),
+          shared.ruinStone,
+          ruinSites.length,
+        );
+        const runeLines = new THREE.InstancedMesh(
+          new THREE.BoxGeometry(0.15, 0.026, 0.018),
+          shared.runeGlow,
+          ruinSites.length * 3,
+        );
+        const rubble = new THREE.InstancedMesh(
+          new THREE.DodecahedronGeometry(0.18, 0),
+          shared.ruinShadow,
+          ruinSites.length * 3,
+        );
+        const dummy = new THREE.Object3D();
+        const tint = new THREE.Color();
+        for (let i = 0; i < ruinSites.length; i++) {
+          const site = ruinSites[i];
+          const top = groundTop(site.h);
+          const angle = site.seed * Math.PI * 2;
+          dummy.position.set(site.x, top + 0.065, site.z);
+          dummy.rotation.set(0, angle, 0);
+          dummy.scale.set(1, 1, 1);
+          dummy.updateMatrix();
+          plinths.setMatrixAt(i, dummy.matrix);
+          tint.set(site.seed > 0.995 ? "#c2b99e" : "#8e927f");
+          plinths.setColorAt(i, tint);
+
+          // 一根完整、一根折斷傾斜的柱身，讓遺跡輪廓不會像整齊排列的複製品。
+          const pillarData = [
+            { x: -0.38, z: -0.12, height: 1.12, lean: 0.035, tint: "#b8b09a" },
+            { x: 0.39, z: 0.16, height: 0.62, lean: 0.34, tint: "#8e9586" },
+          ];
+          for (let p = 0; p < pillarData.length; p++) {
+            const pillar = pillarData[p];
+            const index = i * 2 + p;
+            dummy.position.set(
+              site.x + pillar.x * Math.cos(angle) - pillar.z * Math.sin(angle),
+              top + pillar.height * 0.5 + 0.13,
+              site.z + pillar.x * Math.sin(angle) + pillar.z * Math.cos(angle),
+            );
+            dummy.rotation.set(pillar.lean * 0.45, angle + (p ? 0.42 : 0), pillar.lean);
+            dummy.scale.set(1, pillar.height, 1);
+            dummy.updateMatrix();
+            columns.setMatrixAt(index, dummy.matrix);
+            tint.set(pillar.tint);
+            columns.setColorAt(index, tint);
+          }
+
+          // 符文石面向略偏外側；三道青綠刻痕以微弱自發光辨識古代遺跡。
+          const runeX = site.x + 0.58 * Math.cos(angle) - 0.42 * Math.sin(angle);
+          const runeZ = site.z + 0.58 * Math.sin(angle) + 0.42 * Math.cos(angle);
+          dummy.position.set(runeX, top + 0.46, runeZ);
+          dummy.rotation.set(0.035, angle + 0.18, -0.035);
+          dummy.scale.set(1, 1, 1);
+          dummy.updateMatrix();
+          runeSlabs.setMatrixAt(i, dummy.matrix);
+          tint.set("#c1b69b");
+          runeSlabs.setColorAt(i, tint);
+
+          for (let mark = 0; mark < 3; mark++) {
+            const lineIndex = i * 3 + mark;
+            const markY = top + (mark === 0 ? 0.36 : mark === 1 ? 0.52 : 0.68);
+            dummy.position.set(
+              runeX + Math.sin(angle + 0.18) * 0.096,
+              markY,
+              runeZ + Math.cos(angle + 0.18) * 0.096,
+            );
+            dummy.rotation.set(0, angle + 0.18, mark === 1 ? 0.18 : -0.12);
+            dummy.scale.set(mark === 1 ? 0.72 : 1, 1, 1);
+            dummy.updateMatrix();
+            runeLines.setMatrixAt(lineIndex, dummy.matrix);
+          }
+
+          for (let rock = 0; rock < 3; rock++) {
+            const rockIndex = i * 3 + rock;
+            const rockAngle = angle + rock * (Math.PI * 2 / 3) + 0.3;
+            const radius = 0.68 + ((site.seed * (rock + 3.7)) % 1) * 0.12;
+            dummy.position.set(
+              site.x + Math.cos(rockAngle) * radius,
+              top + 0.055,
+              site.z + Math.sin(rockAngle) * radius,
+            );
+            dummy.rotation.set(site.seed * 0.5, rockAngle, (site.seed - 0.5) * 0.3);
+            dummy.scale.set(0.9 + site.seed * 0.4, 0.46 + rock * 0.12, 0.8 + site.seed * 0.3);
+            dummy.updateMatrix();
+            rubble.setMatrixAt(rockIndex, dummy.matrix);
+          }
+        }
+        for (const mesh of [plinths, columns, runeSlabs, runeLines, rubble]) {
+          mesh.instanceMatrix.needsUpdate = true;
+          if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+          mesh.castShadow = mesh === columns || mesh === runeSlabs;
+          mesh.receiveShadow = true;
+          terrainRoot.add(mesh);
+        }
+      }
+
       // 裸露邊緣的層理岩壁：高度差越大，側面越深、越厚。
       const cliffDirections = [
         { dc: 0, dr: -1, dx: 0, dz: -0.46, sx: 0.94, sz: 0.08 },
@@ -1794,7 +1947,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       ], 3));
       rampGeometry.setIndex([0, 2, 1, 1, 2, 3]);
       rampGeometry.computeVertexNormals();
-      const rampCells: { x: number; y: number; z: number; rot: number }[] = [];
+      const rampCells: { x: number; y: number; z: number; rot: number; level: number }[] = [];
       for (const cell of tileCells.values()) {
         if (cell.h <= 0) continue;
         const gx = Math.floor(cell.x), gy = Math.floor(cell.z);
@@ -1802,7 +1955,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
           const neighbor = tileCells.get((gx + d.dc) + "," + (gy + d.dr));
           return !!neighbor && neighbor.h === cell.h + 1;
         });
-        if (higher) rampCells.push({ x: cell.x, y: groundTop(cell.h) + 0.012, z: cell.z, rot: higher.rot });
+        if (higher) rampCells.push({ x: cell.x, y: groundTop(cell.h) + 0.012, z: cell.z, rot: higher.rot, level: cell.h });
       }
       if (rampCells.length) {
         const ramps = new THREE.InstancedMesh(rampGeometry, shared.ramp, rampCells.length);
@@ -1816,6 +1969,38 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         ramps.instanceMatrix.needsUpdate = true;
         ramps.receiveShadow = true;
         terrainRoot.add(ramps);
+
+        // 部分坡面疊加三段薄石階，順著原坡度排列；只增加視覺層次，不遮住通道寬度。
+        const stairRamps = rampCells.filter((ramp) => {
+          const seed = Math.abs(Math.sin(ramp.x * 61.7 + ramp.z * 23.9) * 21731.19) % 1;
+          return seed > 0.48 && !protectedBuildings.some((building) =>
+            Math.hypot(ramp.x - building.x, ramp.z - building.z) < building.radius + 1.2,
+          );
+        });
+        if (stairRamps.length) {
+          const stairSteps = new THREE.InstancedMesh(
+            new THREE.BoxGeometry(0.76, 0.045, 0.18),
+            shared.rampStep,
+            stairRamps.length * 3,
+          );
+          const stairDummy = new THREE.Object3D();
+          for (let i = 0; i < stairRamps.length; i++) {
+            const ramp = stairRamps[i];
+            for (let step = 0; step < 3; step++) {
+              const z = (step - 1) * 0.28;
+              const heightAlongRamp = HEIGHT_STEP * (0.5 - z / 0.92) + 0.025;
+              stairDummy.position.set(ramp.x, ramp.y + heightAlongRamp, ramp.z);
+              stairDummy.rotation.set(0, ramp.rot, 0);
+              stairDummy.scale.set(1, 1, 1);
+              stairDummy.updateMatrix();
+              stairSteps.setMatrixAt(i * 3 + step, stairDummy.matrix);
+            }
+          }
+          stairSteps.instanceMatrix.needsUpdate = true;
+          stairSteps.castShadow = false;
+          stairSteps.receiveShadow = true;
+          terrainRoot.add(stairSteps);
+        }
       }
 
       // 海面已由上方深海／淺灘雙層承接，移除舊的單色底板以露出水域。
