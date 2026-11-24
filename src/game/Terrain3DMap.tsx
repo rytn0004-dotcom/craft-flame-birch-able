@@ -214,6 +214,8 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       terrainMoss: new THREE.MeshStandardMaterial({ color: "#66856a", roughness: 0.98 }),
       terrainStrata: new THREE.MeshStandardMaterial({ color: "#c0b99d", roughness: 0.92 }),
       terrainInlay: new THREE.MeshStandardMaterial({ color: "#e1d0a6", roughness: 0.82, metalness: 0.08 }),
+      roadPaver: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.94 }),
+      roadEdge: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.9 }),
       grass: new THREE.MeshStandardMaterial({ color: "#83a878", roughness: 0.96 }),
       terrainCrystal: new THREE.MeshStandardMaterial({
         color: "#55a6a2",
@@ -947,6 +949,85 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         mesh.receiveShadow = true;
         mesh.frustumCulled = false;
         terrainRoot.add(mesh);
+      }
+
+      // 擴張地圖的道路格保持原有高度與碰撞資料，只在表面加石板鋪面。
+      // 每格一片低矮石板，靠色差與細縫建立行進方向；道路外緣以窄石沿收邊。
+      if (data.mapMode === "expand") {
+        const roadCells = Array.from(tileCells.values()).filter((cell) =>
+          !data.blocked.has(Math.floor(cell.x) + "," + Math.floor(cell.z)),
+        );
+        if (roadCells.length) {
+          const pavers = new THREE.InstancedMesh(
+            new THREE.BoxGeometry(0.92, 0.026, 0.92),
+            shared.roadPaver,
+            roadCells.length,
+          );
+          const dummy = new THREE.Object3D();
+          const tint = new THREE.Color();
+          for (let i = 0; i < roadCells.length; i++) {
+            const cell = roadCells[i];
+            const seed = Math.abs(Math.sin(cell.x * 53.7 + cell.z * 91.3) * 27183.41) % 1;
+            dummy.position.set(cell.x, groundTop(0) + 0.014, cell.z);
+            dummy.rotation.y = Math.floor(seed * 4) * (Math.PI / 2);
+            dummy.scale.set(0.96 + seed * 0.045, 1, 0.95 + ((seed * 3.71) % 1) * 0.045);
+            dummy.updateMatrix();
+            pavers.setMatrixAt(i, dummy.matrix);
+            tint.set(seed > 0.78 ? "#82949a" : seed > 0.42 ? "#667d88" : "#536b78");
+            pavers.setColorAt(i, tint);
+          }
+          pavers.instanceMatrix.needsUpdate = true;
+          if (pavers.instanceColor) pavers.instanceColor.needsUpdate = true;
+          pavers.castShadow = false;
+          pavers.receiveShadow = true;
+          terrainRoot.add(pavers);
+
+          const roadEdges: { x: number; z: number; rot: number; shade: string }[] = [];
+          const edgeDirs = [
+            { dc: 0, dr: -1, dx: 0, dz: -0.46, rot: 0 },
+            { dc: 1, dr: 0, dx: 0.46, dz: 0, rot: Math.PI / 2 },
+            { dc: 0, dr: 1, dx: 0, dz: 0.46, rot: 0 },
+            { dc: -1, dr: 0, dx: -0.46, dz: 0, rot: Math.PI / 2 },
+          ];
+          for (const cell of roadCells) {
+            const gx = Math.floor(cell.x);
+            const gy = Math.floor(cell.z);
+            for (const dir of edgeDirs) {
+              const neighborKey = (gx + dir.dc) + "," + (gy + dir.dr);
+              const neighbor = tileCells.get(neighborKey);
+              if (!neighbor || !data.blocked.has(neighborKey)) continue;
+              const seed = Math.abs(Math.sin(cell.x * 37.1 + cell.z * 61.9 + dir.rot * 11) * 19371.7) % 1;
+              roadEdges.push({
+                x: cell.x + dir.dx,
+                z: cell.z + dir.dz,
+                rot: dir.rot,
+                shade: seed > 0.55 ? "#9aab9e" : "#748b8d",
+              });
+            }
+          }
+          if (roadEdges.length) {
+            const curbs = new THREE.InstancedMesh(
+              new THREE.BoxGeometry(0.9, 0.052, 0.075),
+              shared.roadEdge,
+              roadEdges.length,
+            );
+            for (let i = 0; i < roadEdges.length; i++) {
+              const edge = roadEdges[i];
+              dummy.position.set(edge.x, groundTop(0) + 0.027, edge.z);
+              dummy.rotation.set(0, edge.rot, 0);
+              dummy.scale.set(1, 1, 1);
+              dummy.updateMatrix();
+              curbs.setMatrixAt(i, dummy.matrix);
+              tint.set(edge.shade);
+              curbs.setColorAt(i, tint);
+            }
+            curbs.instanceMatrix.needsUpdate = true;
+            if (curbs.instanceColor) curbs.instanceColor.needsUpdate = true;
+            curbs.castShadow = false;
+            curbs.receiveShadow = true;
+            terrainRoot.add(curbs);
+          }
+        }
       }
 
       // 雙層海面：近岸較淺、外海較深；全部位於地塊底面以下，不介入地形碰撞或道路判定。
