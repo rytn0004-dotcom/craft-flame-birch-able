@@ -1132,6 +1132,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         sx: number; sy: number; sz: number;
         tint: string;
       }[] = [];
+      const talusDebris: { x: number; y: number; z: number; scale: number; rot: number; tint: string }[] = [];
       for (const cell of tileCells.values()) {
         if (cell.h <= 0) continue;
         const gx = Math.floor(cell.x), gy = Math.floor(cell.z);
@@ -1187,6 +1188,28 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
                 sz: d.dr === 0 ? width * 0.72 : 0.1,
                 tint: "#b6aa88",
               });
+            }
+          }
+
+          if (neighbor && neighbor.h > 0 && cell.h >= neighbor.h + 1) {
+            // 低側平台只在非道路格留下少量崩落碎石，並避開塔座和聖地周圍。
+            const rubbleSeed = Math.abs(Math.sin(cell.x * 17.9 + cell.z * 61.3 + d.dc * 9.1 + d.dr * 21.7) * 17281.91) % 1;
+            if (rubbleSeed > 0.62) {
+              const lowerX = cell.x + d.dc * 0.66;
+              const lowerZ = cell.z + d.dr * 0.66;
+              const nearBuilding = protectedBuildings.some((building) =>
+                Math.hypot(lowerX - building.x, lowerZ - building.z) < building.radius + 0.35,
+              );
+              if (!nearBuilding) {
+                talusDebris.push({
+                  x: lowerX + (rubbleSeed - 0.5) * 0.18,
+                  y: groundTop(neighbor.h) + 0.045,
+                  z: lowerZ + (0.5 - rubbleSeed) * 0.18,
+                  scale: 0.055 + rubbleSeed * 0.055,
+                  rot: rubbleSeed * Math.PI * 2,
+                  tint: rubbleSeed > 0.82 ? "#b2a384" : "#778273",
+                });
+              }
             }
           }
 
@@ -1256,6 +1279,31 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         fragments.castShadow = true;
         fragments.receiveShadow = true;
         terrainRoot.add(fragments);
+      }
+
+      if (talusDebris.length) {
+        const rubble = new THREE.InstancedMesh(
+          new THREE.DodecahedronGeometry(0.075, 0),
+          shared.rockDetail,
+          talusDebris.length,
+        );
+        const dummy = new THREE.Object3D();
+        const tint = new THREE.Color();
+        for (let i = 0; i < talusDebris.length; i++) {
+          const stone = talusDebris[i];
+          dummy.position.set(stone.x, stone.y, stone.z);
+          dummy.rotation.set(stone.rot * 0.22, stone.rot, stone.rot * -0.16);
+          dummy.scale.setScalar(stone.scale / 0.075);
+          dummy.updateMatrix();
+          rubble.setMatrixAt(i, dummy.matrix);
+          tint.set(stone.tint);
+          rubble.setColorAt(i, tint);
+        }
+        rubble.instanceMatrix.needsUpdate = true;
+        if (rubble.instanceColor) rubble.instanceColor.needsUpdate = true;
+        rubble.castShadow = false;
+        rubble.receiveShadow = true;
+        terrainRoot.add(rubble);
       }
 
       if (cliffLedges.length) {
