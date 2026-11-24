@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Terrain3DMap, type Terrain3DApi, type Terrain3DSnapshot } from "./Terrain3DMap";
 import { CELL, COLS, cellHeight, cellKey, defaultEntrances, defaultExits, emptyHeights, pathsForGates, pointsOf, presetMaps, rangeBonus, ROWS, sameCell, VIEW_H, VIEW_W, WORLD_H, WORLD_W, type Cell, type MapLayout } from "./grid";
 import { tickBrain, type Blackboard } from "./ai";
 import {
@@ -1192,6 +1193,15 @@ function roundRect(
 export function FoxTD() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const terrain3DApiRef = useRef<Terrain3DApi | null>(null);
+  const terrain3DSnapshotRef = useRef<() => Terrain3DSnapshot>(() => ({
+    placed: [],
+    heights: emptyHeights(),
+    blocked: new Set<string>(),
+    towers: [],
+    enemies: [],
+    mapMode: "expand",
+  }));
   const [gold, setGold] = useState(START_GOLD);
   /** 明潮砂：重骰地塊用，基礎產量 0 */
   const [mingSand, setMingSand] = useState(0);
@@ -1395,6 +1405,48 @@ export function FoxTD() {
     },
     drag: { on: false, sx: 0, sy: 0, cx: 0, cy: 0, moved: false },
   });
+
+  // 3D renderer reads the same live simulation data; tower/enemy sprite frames are unchanged.
+  terrain3DSnapshotRef.current = () => {
+    const current = sim.current;
+    const now = performance.now() / 1000;
+    return {
+      placed: boardRef.current.placed,
+      heights: current.heights,
+      blocked: current.blocked,
+      mapMode: mapModeRef.current,
+      towers: current.towers.map((tower, index) => {
+        const idle = current.towerFrames[tower.def] || [];
+        const attack = current.towerAtkFrames[tower.def] || [];
+        const attacking = tower.atkDur > 0 && tower.atkT < tower.atkDur && attack.length > 0;
+        const image = attacking
+          ? attack[attackFrameIndex(attackEase(tower.atkT / tower.atkDur), attack.length)]
+          : idle.length > 1
+            ? idle[pingIndex(idle.length, Math.floor(now * 6 + index))]
+            : current.images[tower.def];
+        return {
+          x: tower.x, y: tower.y, gx: tower.gx, gy: tower.gy,
+          def: tower.def, level: tower.level, aim: tower.aim,
+          stake: tower.stake, sanctuary: tower.sanctuary,
+          hqFireLv: tower.hqFireLv, hqFortifyLv: tower.hqFortifyLv,
+          hp: tower.hp, maxHp: tower.maxHp, image,
+        };
+      }),
+      enemies: current.enemies.map((enemy) => {
+        const book = bestiaryRef.current[enemy.type] ?? bestiaryRef.current[0];
+        const setName = (book?.sprite as string) || (enemy.boss ? "boss" : enemy.type <= 1 ? "imp" : enemy.type <= 3 ? "brute" : "boss");
+        const frames = current.sheets[setName] || [];
+        const frame = frames.length
+          ? frames[Math.floor(now * 7 + enemy.dist / 20 + enemy.phase) % frames.length]
+          : undefined;
+        const p = posAt(enemy.dist, enemy.route);
+        return {
+          x: p.x, y: p.y, r: enemy.r, hp: enemy.hp, maxHp: enemy.maxHp,
+          hurt: enemy.hurt, face: enemy.face, image: frame, color: enemy.color, boss: enemy.boss,
+        };
+      }),
+    };
+  };
 
   useEffect(() => {
     const imgs = TOWERS.map((t) => {
@@ -4193,36 +4245,25 @@ export function FoxTD() {
     }
 
     const screenOf = (ev: PointerEvent) => {
-      const rect = canvas.getBoundingClientRect();
-      // object-fit: contain 的 letterbox，避免對準聖地後滑鼠偏移
-      const scale = Math.min(rect.width / VIEWW, rect.height / VIEWH) || 1;
-      const dispW = VIEWW * scale;
-      const dispH = VIEWH * scale;
-      const offX = (rect.width - dispW) / 2;
-      const offY = (rect.height - dispH) / 2;
+      const rect = wrapRef.current?.getBoundingClientRect() ?? canvas.getBoundingClientRect();
       return {
-        x: ((ev.clientX - rect.left - offX) / dispW) * VIEWW,
-        y: ((ev.clientY - rect.top - offY) / dispH) * VIEWH,
+        x: ((ev.clientX - rect.left) / Math.max(1, rect.width)) * VIEWW,
+        y: ((ev.clientY - rect.top) / Math.max(1, rect.height)) * VIEWH,
       };
     };
     const local = (ev: PointerEvent) => {
-      const s = screenOf(ev);
+      const world = terrain3DApiRef.current?.screenToWorld(ev.clientX, ev.clientY);
+      if (world) return world;
+      const screen = screenOf(ev);
       const cam = sim.current.cam;
-      const z = cam.zoom || 1;
-      return { x: cam.x + s.x / z, y: cam.y + s.y / z };
+      const zoom = cam.zoom || 1;
+      return { x: cam.x + screen.x / zoom, y: cam.y + screen.y / zoom };
     };
+    const isGameSurface = (ev: PointerEvent) =>
+      (ev.target as HTMLElement | null)?.closest?.("canvas[data-game3d='true']") != null;
 
     const onMove = (ev: PointerEvent) => {
-      const drag = sim.current.drag;
-      if (drag.on) {
-        const sc = screenOf(ev);
-        const z = sim.current.cam.zoom || 1;
-        sim.current.cam.x = drag.cx - (sc.x - drag.sx) / z;
-        sim.current.cam.y = drag.cy - (sc.y - drag.sy) / z;
-        clampCam(sim.current.cam);
-        drag.moved = Math.hypot(sc.x - drag.sx, sc.y - drag.sy) > 4;
-        return;
-      }
+      if (!isGameSurface(ev)) return;
       const world = local(ev);
       sim.current.pointer = { ...world, down: sim.current.pointer.down };
       // 擴張預覽：游標移到最新接口時提示可否放置
@@ -4257,32 +4298,12 @@ export function FoxTD() {
       }
     };
     const onUp = () => {
-      sim.current.drag.on = false;
       sim.current.pointer.down = false;
     };
     const onDown = (ev: PointerEvent) => {
-      const sc = screenOf(ev);
+      if (!isGameSurface(ev) || ev.button !== 0 || ev.altKey) return;
       const p = local(ev);
       sim.current.pointer = { ...p, down: true };
-      // 中鍵／右鍵／Alt+左鍵：拖曳鏡頭
-      const pan = ev.button === 1 || ev.button === 2 || ev.altKey;
-      if (pan) {
-        ev.preventDefault();
-        sim.current.drag = {
-          on: true,
-          sx: sc.x,
-          sy: sc.y,
-          cx: sim.current.cam.x,
-          cy: sim.current.cam.y,
-          moved: false,
-        };
-        try {
-          canvas.setPointerCapture(ev.pointerId);
-        } catch {
-          /* ignore */
-        }
-        return;
-      }
       if (phaseRef.current !== "play") {
         if (!workshopRef.current) return;
         // 工房工具：入口／出口
@@ -4411,9 +4432,9 @@ export function FoxTD() {
       if (pickRef.current === null && !stakeRef.current && !shrinePlaceRef.current) {
         for (let i = 0; i < s.towers.length; i++) {
           const tw = s.towers[i];
-          const py = tw.y - cellHeight(s.heights, tw.gx, tw.gy) * 5;
-          const hitR = tw.sanctuary ? 36 : 28;
-          if (Math.hypot(tw.x - p.x, py - p.y) < hitR / (s.cam.zoom || 1)) {
+          const py = tw.y;
+          const hitR = tw.sanctuary ? 112 : 42;
+          if (Math.hypot(tw.x - p.x, py - p.y) < hitR) {
             selRef.current = i;
             setSel(i);
             pickRef.current = null;
@@ -4429,23 +4450,7 @@ export function FoxTD() {
       const id = pickRef.current;
       const gx = gx0;
       const gy = gy0;
-      if (id === null) {
-        // 左鍵空白處也可拖鏡頭
-        sim.current.drag = {
-          on: true,
-          sx: sc.x,
-          sy: sc.y,
-          cx: sim.current.cam.x,
-          cy: sim.current.cam.y,
-          moved: false,
-        };
-        try {
-          canvas.setPointerCapture(ev.pointerId);
-        } catch {
-          /* ignore */
-        }
-        return;
-      }
+      if (id === null) return;
       const base = towerBookRef.current[id] ?? TOWERS[id];
       const diff = difficultyRef.current;
       const cost = Math.max(1, Math.round(base.cost * (diff.towerCostMul ?? 1)));
@@ -4530,45 +4535,21 @@ export function FoxTD() {
       );
     };
 
-    const onWheel = (ev: WheelEvent) => {
-      ev.preventDefault();
-      const rect = canvas.getBoundingClientRect();
-      const scale = Math.min(rect.width / VIEWW, rect.height / VIEWH) || 1;
-      const dispW = VIEWW * scale;
-      const dispH = VIEWH * scale;
-      const offX = (rect.width - dispW) / 2;
-      const offY = (rect.height - dispH) / 2;
-      const sx = ((ev.clientX - rect.left - offX) / dispW) * VIEWW;
-      const sy = ((ev.clientY - rect.top - offY) / dispH) * VIEWH;
-      const cam = sim.current.cam;
-      const oldZ = cam.zoom || 1;
-      const factor = ev.deltaY > 0 ? 0.9 : 1.1;
-      const nextZ = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, oldZ * factor));
-      // 以游標為錨點縮放
-      const worldX = cam.x + sx / oldZ;
-      const worldY = cam.y + sy / oldZ;
-      cam.zoom = nextZ;
-      cam.x = worldX - sx / nextZ;
-      cam.y = worldY - sy / nextZ;
-      clampCam(cam);
-      setHover(`縮放 ${Math.round(nextZ * 100)}% · 滾輪縮放 · 拖曳平移`);
-    };
     const onContext = (ev: Event) => ev.preventDefault();
 
-    canvas.addEventListener("pointermove", onMove);
-    canvas.addEventListener("pointerdown", onDown);
-    canvas.addEventListener("pointerup", onUp);
-    canvas.addEventListener("pointercancel", onUp);
-    canvas.addEventListener("wheel", onWheel, { passive: false });
-    canvas.addEventListener("contextmenu", onContext);
+    const inputSurface = wrapRef.current ?? canvas;
+    inputSurface.addEventListener("pointermove", onMove);
+    inputSurface.addEventListener("pointerdown", onDown);
+    inputSurface.addEventListener("pointerup", onUp);
+    inputSurface.addEventListener("pointercancel", onUp);
+    inputSurface.addEventListener("contextmenu", onContext);
     return () => {
       cancelAnimationFrame(raf);
-      canvas.removeEventListener("pointermove", onMove);
-      canvas.removeEventListener("pointerdown", onDown);
-      canvas.removeEventListener("pointerup", onUp);
-      canvas.removeEventListener("pointercancel", onUp);
-      canvas.removeEventListener("wheel", onWheel);
-      canvas.removeEventListener("contextmenu", onContext);
+      inputSurface.removeEventListener("pointermove", onMove);
+      inputSurface.removeEventListener("pointerdown", onDown);
+      inputSurface.removeEventListener("pointerup", onUp);
+      inputSurface.removeEventListener("pointercancel", onUp);
+      inputSurface.removeEventListener("contextmenu", onContext);
     };
   }, []);
 
@@ -5312,6 +5293,7 @@ export function FoxTD() {
       s.cam.x = hqTw.x - VIEWW / (2 * z);
       s.cam.y = hqTw.y - VIEWH / (2 * z);
       clampCam(s.cam);
+      terrain3DApiRef.current?.focus(hqTw.x, hqTw.y);
       return;
     }
     // 擴張模式：HQ 地塊中心
@@ -5322,6 +5304,7 @@ export function FoxTD() {
       s.cam.x = cx - VIEWW / (2 * z);
       s.cam.y = cy - VIEWH / (2 * z);
       clampCam(s.cam);
+      terrain3DApiRef.current?.focus(cx, cy);
       return;
     }
     // 完整地圖：出口／入口中心
@@ -5869,12 +5852,13 @@ export function FoxTD() {
           <h1 className="font-['Cormorant_Garamond'] text-4xl leading-none text-[#ffe7f1]">狐仙塔防</h1>
         </div>
         <p className="hidden text-sm text-[#9ec4de] sm:block">
-          滾輪縮放 · [空格]下一波 · [H]對準聖地 · [G]護衛 · [D/F]升級 · 狐緣鄰格 · 紅線=高壓
+Alt＋左鍵環視 · 右鍵平移 · 滾輪縮放 · [H]對準聖地 · [空格]下一波 · [G]護衛 · [D/F]升級
         </p>
       </header>
       <div className="td-layout">
         <div className="stage" ref={wrapRef}>
-          <canvas ref={canvasRef} width={VIEWW} height={VIEWH} />
+          <Terrain3DMap snapshotRef={terrain3DSnapshotRef} apiRef={terrain3DApiRef} />
+          <canvas ref={canvasRef} width={VIEWW} height={VIEWH} style={{ display: "none" }} />
           <div className="hud-float">
             <div className="chip" title="聖地建築耐久（漏怪依怪物剩餘生命扣血）">
               {(() => {
