@@ -853,6 +853,19 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) addCell(c, r);
       }
 
+      // 依目前真正已鋪設的地塊計算海域中心與尺寸；擴張時海岸同步外推，不把 200×200 空棋盤當成島嶼。
+      let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
+      for (const cell of tileCells.values()) {
+        minX = Math.min(minX, cell.x - 0.5);
+        minZ = Math.min(minZ, cell.z - 0.5);
+        maxX = Math.max(maxX, cell.x + 0.5);
+        maxZ = Math.max(maxZ, cell.z + 0.5);
+      }
+      const mapCenterX = Number.isFinite(minX) ? (minX + maxX) / 2 : COLS / 2;
+      const mapCenterZ = Number.isFinite(minZ) ? (minZ + maxZ) / 2 : ROWS / 2;
+      const mapWidth = Number.isFinite(minX) ? Math.max(1, maxX - minX) : TILE;
+      const mapDepth = Number.isFinite(minZ) ? Math.max(1, maxZ - minZ) : TILE;
+
       // 每格岩面保留些微色差，讓平台表面不再像單色網格。
       for (let h = 0; h <= 3; h++) {
         const list = byHeight[h];
@@ -884,18 +897,18 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
 
       // 雙層海面：近岸較淺、外海較深；全部位於地塊底面以下，不介入地形碰撞或道路判定。
       const deepWater = new THREE.Mesh(
-        new THREE.PlaneGeometry(COLS + 44, ROWS + 44),
+        new THREE.PlaneGeometry(mapWidth + 36, mapDepth + 36),
         shared.floor,
       );
       deepWater.rotation.x = -Math.PI / 2;
-      deepWater.position.set(COLS / 2, -0.34, ROWS / 2);
+      deepWater.position.set(mapCenterX, -0.34, mapCenterZ);
       deepWater.receiveShadow = false;
       const shelfWater = new THREE.Mesh(
-        new THREE.PlaneGeometry(COLS + 16, ROWS + 16),
+        new THREE.PlaneGeometry(mapWidth + 12, mapDepth + 12),
         shared.seaShelf,
       );
       shelfWater.rotation.x = -Math.PI / 2;
-      shelfWater.position.set(COLS / 2, -0.285, ROWS / 2);
+      shelfWater.position.set(mapCenterX, -0.285, mapCenterZ);
       shelfWater.receiveShadow = false;
       terrainRoot.add(deepWater, shelfWater);
 
