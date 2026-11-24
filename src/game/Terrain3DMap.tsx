@@ -168,6 +168,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       cliffBandLight: new THREE.MeshStandardMaterial({ color: "#9a9f7d", roughness: 0.82 }),
       cliffCap: new THREE.MeshStandardMaterial({ color: "#d0c49b", roughness: 0.76 }),
       rockDetail: new THREE.MeshStandardMaterial({ color: "#8b927d", roughness: 0.96 }),
+      grass: new THREE.MeshStandardMaterial({ color: "#83a878", roughness: 0.96 }),
       terrainCrystal: new THREE.MeshStandardMaterial({
         color: "#55a6a2",
         metalness: 0.22,
@@ -786,7 +787,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         const bladeCount = grassCells.length * 3;
         const grass = new THREE.InstancedMesh(
           new THREE.ConeGeometry(0.052, 0.22, 5),
-          new THREE.MeshStandardMaterial({ color: "#83a878", roughness: 0.96 }),
+          shared.grass,
           bladeCount,
         );
         const dummy = new THREE.Object3D();
