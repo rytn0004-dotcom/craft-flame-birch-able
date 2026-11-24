@@ -95,7 +95,8 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
 
     const scene = new THREE.Scene();
     scene.background = null;
-    scene.fog = new THREE.Fog("#718f86", 82, 270);
+    const atmosphericFog = new THREE.Fog("#819b91", 72, 252);
+    scene.fog = atmosphericFog;
 
     // 柔和的海天漸層穹頂：由深海青過渡到暖霧色，再到高空藍綠。
     const skyGeometry = new THREE.SphereGeometry(360, 40, 24);
@@ -134,26 +135,40 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     const effectRoot = new THREE.Group();
     scene.add(terrainRoot, buildingRoot, actorRoot, effectRoot);
 
-    scene.add(new THREE.HemisphereLight("#e6f4ed", "#31433b", 1.52));
-    scene.add(new THREE.AmbientLight("#9dbbb6", 0.38));
-    const sun = new THREE.DirectionalLight("#ffe2b8", 2.25);
-    sun.position.set(-32, 48, 28);
+    scene.add(new THREE.HemisphereLight("#e8f4e9", "#263e3b", 1.28));
+    scene.add(new THREE.AmbientLight("#9bbab2", 0.31));
+
+    // 主光源以地圖中心為目標，讓不同地塊區域都能得到一致方向的立體陰影。
+    const sun = new THREE.DirectionalLight("#ffe0b6", 2.55);
+    sun.position.set(COLS / 2 - 32, 48, ROWS / 2 + 28);
+    sun.target.position.set(COLS / 2, 0, ROWS / 2);
+    scene.add(sun.target);
     sun.castShadow = true;
-    sun.shadow.radius = 4;
-    sun.shadow.normalBias = 0.022;
+    sun.shadow.radius = 3;
+    sun.shadow.normalBias = 0.03;
     sun.shadow.camera.near = 1;
-    sun.shadow.camera.far = 190;
+    sun.shadow.camera.far = 230;
     sun.shadow.mapSize.set(2048, 2048);
-    sun.shadow.camera.left = -115;
-    sun.shadow.camera.right = 115;
-    sun.shadow.camera.top = 115;
-    sun.shadow.camera.bottom = -115;
-    sun.shadow.bias = -0.0003;
+    sun.shadow.camera.left = -112;
+    sun.shadow.camera.right = 112;
+    sun.shadow.camera.top = 112;
+    sun.shadow.camera.bottom = -112;
+    sun.shadow.bias = -0.00016;
     scene.add(sun);
-    const seaFill = new THREE.DirectionalLight("#79cbd0", 0.46);
-    seaFill.position.set(42, 22, -36);
+
+    // 海面冷色補光與背側輪廓光不投影，避免額外增加陰影貼圖成本。
+    const seaFill = new THREE.DirectionalLight("#79cbd0", 0.52);
+    seaFill.position.set(COLS / 2 + 42, 22, ROWS / 2 - 36);
+    seaFill.target.position.set(COLS / 2, 0, ROWS / 2);
+    scene.add(seaFill.target);
     seaFill.castShadow = false;
     scene.add(seaFill);
+    const ridgeFill = new THREE.DirectionalLight("#b4d8c8", 0.24);
+    ridgeFill.position.set(COLS / 2 + 34, 34, ROWS / 2 + 52);
+    ridgeFill.target.position.set(COLS / 2, 0, ROWS / 2);
+    scene.add(ridgeFill.target);
+    ridgeFill.castShadow = false;
+    scene.add(ridgeFill);
 
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
@@ -179,6 +194,12 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     const gems: any[] = [];
     const waterRippleEntries: { x: number; z: number; phase: number; speed: number }[] = [];
     let waterRippleMesh: any = null;
+    const landmarkLights: { light: THREE.PointLight; phase: number; intensity: number }[] = [];
+    const updateLandmarkLights = (time: number) => {
+      for (const entry of landmarkLights) {
+        entry.light.intensity = entry.intensity * (0.88 + Math.sin(time * 0.0016 + entry.phase) * 0.12);
+      }
+    };
     const waterRippleDummy = new THREE.Object3D();
     const turretGroups: { group: any; tower: Terrain3DTower; index: number; flash: any; baseY: number; baseZ: number }[] = [];
     const installationAnimations: { group: any; targetY: number; age: number; duration: number; fromScale: number }[] = [];
@@ -954,6 +975,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       clearGroup(terrainRoot);
       waterRippleMesh = null;
       waterRippleEntries.length = 0;
+      landmarkLights.length = 0;
       const byHeight: { x: number; z: number; h: number }[][] = [[], [], [], []];
       const tileCells = new Map<string, { x: number; z: number; h: number }>();
 
@@ -1979,6 +2001,14 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
           const top = site.baseY ?? groundTop(site.h);
           const angle = site.seed * Math.PI * 2;
           const variant = Math.abs(Math.sin(site.x * 17.1 + site.z * 31.7) * 29171.3) % 1;
+          // 陸上古遺跡配置最多 4 盞微弱符文光；海中遺跡保留材質自發光即可。
+          if (site.baseY === undefined && i % 2 === 0 && landmarkLights.filter((entry) => entry.phase >= 10).length < 4) {
+            const glow = new THREE.PointLight("#62d5bd", 0.36 + variant * 0.08, 7.2, 2);
+            glow.position.set(site.x, top + 1.1, site.z);
+            glow.castShadow = false;
+            terrainRoot.add(glow);
+            landmarkLights.push({ light: glow, phase: 10 + i * 0.63, intensity: 0.36 + variant * 0.08 });
+          }
           dummy.position.set(site.x, top + 0.065, site.z);
           dummy.rotation.set(0, angle, 0);
           dummy.scale.set(1, 1, 1);
@@ -2228,6 +2258,15 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
           mesh.receiveShadow = true;
           terrainRoot.add(mesh);
         }
+        // 古橋中央加暖色光，不投影，作為遠處可辨識的少量視覺節點。
+        for (let i = 0; i < Math.min(2, bridgeSites.length); i++) {
+          const site = bridgeSites[i];
+          const glow = new THREE.PointLight("#f0c98e", 0.38, 6.5, 2);
+          glow.position.set(site.x, site.deckY + 0.32, site.z);
+          glow.castShadow = false;
+          terrainRoot.add(glow);
+          landmarkLights.push({ light: glow, phase: 20 + i * 2.1, intensity: 0.38 });
+        }
       }
 
       // 裸露邊緣的層理岩壁：高度差越大，側面越深、越厚。
@@ -2455,6 +2494,20 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         caveArches.castShadow = true;
         caveArches.receiveShadow = true;
         terrainRoot.add(caveMouths, caveArches);
+
+        // 最多 4 處洞口使用不投影的青綠微光，讓洞穴有深度而不增加陰影成本。
+        for (let i = 0; i < Math.min(4, caveEntrances.length); i++) {
+          const cave = caveEntrances[i];
+          const glow = new THREE.PointLight("#59cdb5", 0.46, 5.8, 2);
+          glow.position.set(
+            cave.x + Math.sin(cave.rot) * 0.28,
+            cave.y + 0.02,
+            cave.z + Math.cos(cave.rot) * 0.28,
+          );
+          glow.castShadow = false;
+          terrainRoot.add(glow);
+          landmarkLights.push({ light: glow, phase: i * 1.7, intensity: 0.46 });
+        }
       }
 
       if (cliffRibs.length) {
@@ -2928,7 +2981,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       renderer.outputColorSpace = THREE.SRGBColorSpace;
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = 1.16;
+      renderer.toneMappingExposure = 1.1;
       renderer.domElement.dataset.game3d = "true";
       renderer.domElement.style.width = "100%";
       renderer.domElement.style.height = "100%";
@@ -3034,6 +3087,11 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       updateActors(data, time);
       updateEffects(data);
       updateWaterRipples(time);
+      updateLandmarkLights(time);
+      // 鏡頭拉遠時霧層更柔和、遠景更自然；拉近時保留地表紋理與建築邊緣。
+      const viewDistance = camera.position.distanceTo(controls.target);
+      atmosphericFog.near = THREE.MathUtils.clamp(viewDistance * 1.28, 58, 108);
+      atmosphericFog.far = THREE.MathUtils.clamp(viewDistance * 3.45, 205, 365);
       const dt = lastTime ? Math.min(0.05, (time - lastTime) / 1000) : 0;
       lastTime = time;
       for (const ring of rings) ring.rotation.y += dt * 0.42;
