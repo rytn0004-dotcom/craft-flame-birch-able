@@ -8,7 +8,7 @@ export type Terrain3DTower = {
   x: number; y: number; gx: number; gy: number; def: number; level: number; aim: number;
   stake?: boolean; sanctuary?: boolean; hqFireLv?: number; hqFortifyLv?: number;
   hqTurretAtk?: number[]; hqCannonAtk?: number; hqCharge?: number; hqBuildFlash?: number;
-  hp: number; maxHp: number; image?: HTMLImageElement | null;
+  hp: number; maxHp: number; range?: number; selected?: boolean; image?: HTMLImageElement | null;
 };
 
 export type Terrain3DShot = {
@@ -126,6 +126,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     const chargeCores: { mesh: any; material: any; tower: Terrain3DTower }[] = [];
     const towerSprites: any[] = [];
     const enemySprites: any[] = [];
+    const enemyHealthBars: { back: any; fill: any }[] = [];
     const shotNodes: any[] = [];
     const ringNodes: any[] = [];
     const shared = {
@@ -388,8 +389,23 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     const createTowerBase = (tower: Terrain3DTower, heights: number[]) => {
       const root = new THREE.Group();
       root.position.set(tower.x / CELL, groundTop(heights[tower.gy * COLS + tower.gx] ?? 0), tower.y / CELL);
-      addCylinder(root, 0.52, 0.63, 0.24, 0, 0.12, 0, shared.blue, 12);
-      addCylinder(root, 0.43, 0.43, 0.08, 0, 0.28, 0, shared.gold, 12);
+      const level = Math.max(1, Math.min(8, tower.level || 1));
+      const radius = 0.62 + Math.min(0.08, (level - 1) * 0.012);
+      addCylinder(root, radius, radius + 0.12, 0.22, 0, 0.11, 0, shared.blue, 12);
+      addCylinder(root, radius * 0.83, radius * 0.83, 0.09, 0, 0.265, 0, shared.gold, 12);
+      addCylinder(root, 0.38, 0.48, 0.54 + Math.min(0.16, (level - 1) * 0.035), 0, 0.58, 0, shared.stone, 10);
+      addCylinder(root, 0.43, 0.43, 0.075, 0, 0.88 + Math.min(0.16, (level - 1) * 0.035), 0, shared.brightGold, 12);
+      const collar = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.045, 8, 28), shared.gold);
+      collar.rotation.x = Math.PI / 2;
+      collar.position.y = 0.64 + Math.min(0.16, (level - 1) * 0.035);
+      root.add(collar);
+      for (let i = 0; i < 4; i++) {
+        const angle = (i * Math.PI) / 2;
+        const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.1 + Math.min(0.04, (level - 1) * 0.006), 0), shared.crystal);
+        crystal.position.set(Math.cos(angle) * 0.52, 0.49, Math.sin(angle) * 0.52);
+        root.add(crystal);
+        gems.push(crystal);
+      }
       buildingRoot.add(root);
     };
 
@@ -589,7 +605,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         const sprite = ensureSprite(towerSprites, i, actorRoot);
         updateSpriteTexture(sprite, tower.image);
         const h = data.heights[tower.gy * COLS + tower.gx] ?? 0;
-        sprite.position.set(tower.x / CELL, groundTop(h) + 0.08, tower.y / CELL);
+        sprite.position.set(tower.x / CELL, groundTop(h) + 1.03 + Math.min(0.16, (tower.level - 1) * 0.025), tower.y / CELL);
         sprite.scale.set(1.42, 1.58, 1);
         sprite.renderOrder = 4;
       }
@@ -608,9 +624,41 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         sprite.scale.set(size * (enemy.face < 0 ? -1 : 1) * squash, size / squash, 1);
         sprite.material.opacity = enemy.hurt > 0 ? 0.84 : 1;
         sprite.renderOrder = 5;
+
+        if (!enemyHealthBars[i]) {
+          const back = new THREE.Sprite(new THREE.SpriteMaterial({ color: "#091522", transparent: true, opacity: 0.9, depthWrite: false }));
+          const fill = new THREE.Sprite(new THREE.SpriteMaterial({ color: "#73d7a1", transparent: true, opacity: 0.95, depthWrite: false }));
+          back.center.set(0.5, 0.5);
+          fill.center.set(0.5, 0.5);
+          actorRoot.add(back, fill);
+          enemyHealthBars[i] = { back, fill };
+        }
+        const bar = enemyHealthBars[i];
+        const ratio = Math.max(0, Math.min(1, enemy.hp / Math.max(1, enemy.maxHp)));
+        const barWidth = Math.max(0.34, size * 0.76);
+        const barY = groundTop(h) + size * 1.18;
+        bar.back.position.set(enemy.x / CELL, barY, enemy.y / CELL);
+        bar.back.scale.set(barWidth, 0.055, 1);
+        bar.back.visible = enemy.hp > 0;
+        bar.fill.position.set(enemy.x / CELL - (barWidth * (1 - ratio)) / 2, barY + 0.006, enemy.y / CELL);
+        bar.fill.scale.set(Math.max(0.005, barWidth * ratio), 0.035, 1);
+        bar.fill.material.color.set(ratio > 0.35 ? "#73d7a1" : "#ff657b");
+        bar.fill.visible = enemy.hp > 0;
       }
-      for (let i = data.enemies.length; i < enemySprites.length; i++) enemySprites[i].visible = false;
+      for (let i = data.enemies.length; i < enemySprites.length; i++) {
+        enemySprites[i].visible = false;
+        if (enemyHealthBars[i]) {
+          enemyHealthBars[i].back.visible = false;
+          enemyHealthBars[i].fill.visible = false;
+        }
+      }
     };
+
+    const selectedRangeMaterial = new THREE.MeshBasicMaterial({ color: "#9ad7ff", transparent: true, opacity: 0.34, side: THREE.DoubleSide, depthWrite: false });
+    const selectedRange = new THREE.Mesh(new THREE.TorusGeometry(1, 0.018, 8, 96), selectedRangeMaterial);
+    selectedRange.rotation.x = Math.PI / 2;
+    selectedRange.visible = false;
+    effectRoot.add(selectedRange);
 
     const updateEffects = (data: Terrain3DSnapshot) => {
       for (let i = 0; i < data.shots.length; i++) {
@@ -663,6 +711,19 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         mesh.material.color.set(ring.color.startsWith("#") ? ring.color : "#ffd27a");
       }
       for (let i = data.rings.length; i < ringNodes.length; i++) ringNodes[i].visible = false;
+
+      const selectedTower = data.towers.find((tower) => tower.selected);
+      if (selectedTower && (selectedTower.range ?? 0) > 0) {
+        const gx = Math.max(0, Math.min(COLS - 1, Math.floor(selectedTower.x / CELL)));
+        const gy = Math.max(0, Math.min(ROWS - 1, Math.floor(selectedTower.y / CELL)));
+        const h = data.heights[gy * COLS + gx] ?? 0;
+        selectedRange.visible = true;
+        selectedRange.position.set(selectedTower.x / CELL, groundTop(h) + 0.045, selectedTower.y / CELL);
+        selectedRange.scale.setScalar(selectedTower.range! / CELL);
+        selectedRangeMaterial.opacity = 0.24 + Math.sin(performance.now() * 0.003) * 0.05;
+      } else {
+        selectedRange.visible = false;
+      }
     };
 
     const resize = () => {
@@ -894,6 +955,11 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       for (const effect of buildFlashEffects) effect.material.dispose();
       clearGroup(buildingRoot);
       clearGroup(actorRoot);
+      for (const bar of enemyHealthBars) {
+        bar.back.material.dispose();
+        bar.fill.material.dispose();
+      }
+      selectedRangeMaterial.dispose();
       clearGroup(effectRoot);
       for (const texture of textureCache.values()) texture.dispose();
       renderer.dispose();
