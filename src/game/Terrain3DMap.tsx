@@ -211,6 +211,9 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       cliffBandLight: new THREE.MeshStandardMaterial({ color: "#9a9f7d", roughness: 0.82 }),
       cliffCap: new THREE.MeshStandardMaterial({ color: "#d0c49b", roughness: 0.76 }),
       rockDetail: new THREE.MeshStandardMaterial({ color: "#8b927d", roughness: 0.96 }),
+      terrainMoss: new THREE.MeshStandardMaterial({ color: "#66856a", roughness: 0.98 }),
+      terrainStrata: new THREE.MeshStandardMaterial({ color: "#c0b99d", roughness: 0.92 }),
+      terrainInlay: new THREE.MeshStandardMaterial({ color: "#e1d0a6", roughness: 0.82, metalness: 0.08 }),
       grass: new THREE.MeshStandardMaterial({ color: "#83a878", roughness: 0.96 }),
       terrainCrystal: new THREE.MeshStandardMaterial({
         color: "#55a6a2",
@@ -1253,6 +1256,152 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         minerals.castShadow = true;
         minerals.receiveShadow = true;
         terrainRoot.add(minerals);
+      }
+
+      // 高地頂面依等級加入不同材質語彙：1 級苔痕、2 級岩層線、3 級石板刻線。
+      // 細節使用 InstancedMesh，並在既有塔座／聖地周圍留白，不影響建塔判定。
+      const detailIsClear = (cell: { x: number; z: number }, margin = 1.25) =>
+        !protectedBuildings.some((building) =>
+          Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + margin,
+        );
+      const mossCells = Array.from(tileCells.values()).filter((cell) => {
+        if (cell.h !== 1 || !detailIsClear(cell)) return false;
+        const seed = Math.abs(Math.sin(cell.x * 29.7 + cell.z * 81.3) * 18431.7) % 1;
+        return seed > 0.79;
+      });
+      if (mossCells.length) {
+        const moss = new THREE.InstancedMesh(
+          new THREE.DodecahedronGeometry(0.095, 0),
+          shared.terrainMoss,
+          mossCells.length * 2,
+        );
+        const dummy = new THREE.Object3D();
+        const tint = new THREE.Color();
+        for (let i = 0; i < mossCells.length; i++) {
+          const cell = mossCells[i];
+          const seed = Math.abs(Math.sin(cell.x * 127.1 + cell.z * 311.7) * 43758.5453) % 1;
+          for (let patch = 0; patch < 2; patch++) {
+            const index = i * 2 + patch;
+            const angle = seed * Math.PI * 2 + patch * 1.9;
+            const radius = 0.12 + seed * 0.15;
+            dummy.position.set(
+              cell.x + Math.cos(angle) * radius,
+              groundTop(cell.h) + 0.012,
+              cell.z + Math.sin(angle) * radius,
+            );
+            dummy.rotation.set(0, angle, (seed - 0.5) * 0.08);
+            dummy.scale.set(1.35 + seed * 0.45, 0.14, 0.68 + patch * 0.16);
+            dummy.updateMatrix();
+            moss.setMatrixAt(index, dummy.matrix);
+            tint.set(patch === 0 ? (seed > 0.55 ? "#789875" : "#54775e") : "#91a477");
+            moss.setColorAt(index, tint);
+          }
+        }
+        moss.instanceMatrix.needsUpdate = true;
+        if (moss.instanceColor) moss.instanceColor.needsUpdate = true;
+        moss.castShadow = false;
+        moss.receiveShadow = false;
+        terrainRoot.add(moss);
+      }
+
+      const strataCells = Array.from(tileCells.values()).filter((cell) => {
+        if (cell.h !== 2 || !detailIsClear(cell)) return false;
+        const seed = Math.abs(Math.sin(cell.x * 47.1 + cell.z * 19.7) * 29341.3) % 1;
+        return seed > 0.77;
+      });
+      if (strataCells.length) {
+        const strata = new THREE.InstancedMesh(
+          new THREE.BoxGeometry(0.43, 0.014, 0.024),
+          shared.terrainStrata,
+          strataCells.length * 2,
+        );
+        const dummy = new THREE.Object3D();
+        const tint = new THREE.Color();
+        for (let i = 0; i < strataCells.length; i++) {
+          const cell = strataCells[i];
+          const seed = Math.abs(Math.sin(cell.x * 127.1 + cell.z * 311.7) * 43758.5453) % 1;
+          const angle = seed * Math.PI * 2;
+          for (let line = 0; line < 2; line++) {
+            const offset = (line === 0 ? -1 : 1) * (0.055 + seed * 0.025);
+            dummy.position.set(
+              cell.x + Math.sin(angle) * offset,
+              groundTop(cell.h) + 0.014,
+              cell.z + Math.cos(angle) * offset,
+            );
+            dummy.rotation.set(0, angle, 0);
+            dummy.scale.set(line === 0 ? 1 : 0.72 + seed * 0.16, 1, 1);
+            dummy.updateMatrix();
+            const index = i * 2 + line;
+            strata.setMatrixAt(index, dummy.matrix);
+            tint.set(line === 0 ? "#d1c9ad" : "#9b9b83");
+            strata.setColorAt(index, tint);
+          }
+        }
+        strata.instanceMatrix.needsUpdate = true;
+        if (strata.instanceColor) strata.instanceColor.needsUpdate = true;
+        strata.castShadow = false;
+        strata.receiveShadow = false;
+        terrainRoot.add(strata);
+      }
+
+      const engravedCells = Array.from(tileCells.values()).filter((cell) => {
+        if (cell.h !== 3 || !detailIsClear(cell, 1.45)) return false;
+        const seed = Math.abs(Math.sin(cell.x * 73.9 + cell.z * 37.1) * 31781.9) % 1;
+        return seed > 0.75;
+      });
+      if (engravedCells.length) {
+        // 三段式石板刻線形成開口方框，斜向觀看仍能讀出 3 級平台的精緻岩面。
+        const rails = new THREE.InstancedMesh(
+          new THREE.BoxGeometry(0.46, 0.014, 0.022),
+          shared.terrainInlay,
+          engravedCells.length * 2,
+        );
+        const ends = new THREE.InstancedMesh(
+          new THREE.BoxGeometry(0.022, 0.014, 0.25),
+          shared.terrainInlay,
+          engravedCells.length,
+        );
+        const dummy = new THREE.Object3D();
+        const tint = new THREE.Color();
+        for (let i = 0; i < engravedCells.length; i++) {
+          const cell = engravedCells[i];
+          const seed = Math.abs(Math.sin(cell.x * 127.1 + cell.z * 311.7) * 43758.5453) % 1;
+          const angle = seed * Math.PI * 2;
+          for (let rail = 0; rail < 2; rail++) {
+            const offset = rail === 0 ? -0.13 : 0.13;
+            dummy.position.set(
+              cell.x + Math.sin(angle) * offset,
+              groundTop(cell.h) + 0.016,
+              cell.z + Math.cos(angle) * offset,
+            );
+            dummy.rotation.set(0, angle, 0);
+            dummy.scale.set(0.88 + seed * 0.12, 1, 1);
+            dummy.updateMatrix();
+            rails.setMatrixAt(i * 2 + rail, dummy.matrix);
+            tint.set(rail === 0 ? "#eadbb8" : "#bba982");
+            rails.setColorAt(i * 2 + rail, tint);
+          }
+          const endOffset = 0.205;
+          dummy.position.set(
+            cell.x + Math.cos(angle) * endOffset,
+            groundTop(cell.h) + 0.016,
+            cell.z - Math.sin(angle) * endOffset,
+          );
+          dummy.rotation.set(0, angle, 0);
+          dummy.updateMatrix();
+          ends.setMatrixAt(i, dummy.matrix);
+          tint.set("#d5c49d");
+          ends.setColorAt(i, tint);
+        }
+        rails.instanceMatrix.needsUpdate = true;
+        ends.instanceMatrix.needsUpdate = true;
+        if (rails.instanceColor) rails.instanceColor.needsUpdate = true;
+        if (ends.instanceColor) ends.instanceColor.needsUpdate = true;
+        rails.castShadow = false;
+        rails.receiveShadow = false;
+        ends.castShadow = false;
+        ends.receiveShadow = false;
+        terrainRoot.add(rails, ends);
       }
 
       // 裸露邊緣的層理岩壁：高度差越大，側面越深、越厚。
