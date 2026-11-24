@@ -583,6 +583,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         const lens = new THREE.Mesh(new THREE.TorusGeometry(0.19, 0.035, 8, 28), shared.brightGold);
         lens.position.set(0.48, apexY + 0.52, -0.84);
         root.add(lens);
+        rings.push(lens);
         const lensCore = new THREE.Mesh(new THREE.CircleGeometry(0.145, 20), accent);
         lensCore.position.set(0.48, apexY + 0.52, -0.79);
         root.add(lensCore);
@@ -654,6 +655,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         const halo = new THREE.Mesh(new THREE.TorusGeometry(0.34, 0.035, 8, 40), shared.brightGold);
         halo.position.set(0, apexY + 0.28, -0.9);
         root.add(halo);
+        rings.push(halo);
         for (const side of [-1, 1]) {
           addCrownGem(side * 0.42, apexY + 0.2, -0.86, 0.17);
         }
@@ -663,6 +665,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         const moonRing = new THREE.Mesh(new THREE.TorusGeometry(0.27, 0.035, 8, 36), shared.brightGold);
         moonRing.position.set(0, apexY + 0.16, -0.9);
         root.add(moonRing);
+        rings.push(moonRing);
         addCrownGem(0, apexY + 0.16, -0.82, 0.2);
         addCrownGem(-0.34, apexY - 0.02, -0.86, 0.085, shared.brightGold);
         addCrownGem(0.34, apexY - 0.02, -0.86, 0.085, shared.brightGold);
