@@ -1536,7 +1536,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         terrainRoot.add(rails, ends);
       }
 
-      // 稀疏古代遺跡：只落在可建造的高平台，避開道路、建築與聖地，不改格子資料。
+      // 稀疏古代遺跡：完整地圖只落在障礙格，擴張地圖移至島外淺海，保留所有可建造平台。
       const ruinSites: { x: number; z: number; h: number; seed: number; baseY?: number }[] = [];
       const ruinNeighborOffsets = [
         [0, -1], [1, 0], [0, 1], [-1, 0],
@@ -1597,6 +1597,11 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
           shared.ruinStone,
           ruinSites.length,
         );
+        const runeRings = new THREE.InstancedMesh(
+          new THREE.TorusGeometry(0.65, 0.018, 5, 32),
+          shared.runeGlow,
+          ruinSites.length,
+        );
         const runeLines = new THREE.InstancedMesh(
           new THREE.BoxGeometry(0.15, 0.026, 0.018),
           shared.runeGlow,
@@ -1631,6 +1636,14 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
           plinths.setMatrixAt(i, dummy.matrix);
           tint.set(site.seed > 0.995 ? "#c2b99e" : "#8e927f");
           plinths.setColorAt(i, tint);
+
+          dummy.position.set(site.x, top + 0.145, site.z);
+          dummy.rotation.set(Math.PI / 2, angle, 0);
+          dummy.scale.set(1, 1, 1);
+          dummy.updateMatrix();
+          runeRings.setMatrixAt(i, dummy.matrix);
+          tint.set(site.seed > 0.996 ? "#9ae6ca" : "#5fa99a");
+          runeRings.setColorAt(i, tint);
 
           // 一根完整、一根折斷傾斜的柱身，讓遺跡輪廓不會像整齊排列的複製品。
           const pillarData = [
@@ -1722,10 +1735,10 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
           }
         }
         lintels.count = lintelCount;
-        for (const mesh of [plinths, columns, runeSlabs, runeLines, rubble, lintels, ruinMoss]) {
+        for (const mesh of [plinths, columns, runeSlabs, runeLines, runeRings, rubble, lintels, ruinMoss]) {
           mesh.instanceMatrix.needsUpdate = true;
           if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-          mesh.castShadow = mesh === columns || mesh === runeSlabs;
+          mesh.castShadow = mesh === columns || mesh === runeSlabs || mesh === lintels;
           mesh.receiveShadow = true;
           terrainRoot.add(mesh);
         }
