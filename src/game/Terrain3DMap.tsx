@@ -532,6 +532,142 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       root.add(crest);
       gems.push(crestGem);
 
+      // 塔種專屬冠飾：把元素屬性變成可從遠處辨認的上半部輪廓，不遮住角色 Sprite。
+      const apexY = 3.02 + levelLift * 0.2;
+      const addCrownGem = (x: number, y: number, z: number, size: number, material: any = accent) => {
+        const gem = new THREE.Mesh(new THREE.OctahedronGeometry(size, 1), material);
+        gem.position.set(x, y, z);
+        gem.castShadow = true;
+        root.add(gem);
+        gems.push(gem);
+        return gem;
+      };
+      const addCrownSpire = (x: number, z: number, height: number, width: number, material: any = accent) => {
+        const spire = new THREE.Mesh(new THREE.ConeGeometry(width, height, 6), material);
+        spire.position.set(x, apexY + height * 0.38, z);
+        spire.castShadow = true;
+        root.add(spire);
+        return spire;
+      };
+      const addCrownBeam = (
+        sx: number, sy: number, sz: number,
+        x: number, y: number, z: number,
+        rotationZ = 0, material: any = shared.gold,
+      ) => {
+        const beam = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), material);
+        beam.position.set(x, y, z);
+        beam.rotation.z = rotationZ;
+        beam.castShadow = true;
+        root.add(beam);
+        return beam;
+      };
+
+      if (special === "slow") {
+        // 寒霜：雙側冰晶尖塔，形成冷冽的冠角。
+        addCrownSpire(-0.48, -0.86, 0.62, 0.13);
+        addCrownSpire(0.48, -0.86, 0.62, 0.13);
+        addCrownBeam(0.82, 0.075, 0.1, 0, apexY + 0.28, -0.86, 0, shared.brightGold);
+        addCrownGem(0, apexY + 0.43, -0.86, 0.12);
+      } else if (special === "burn") {
+        // 赤焰：三段火舌向上竄升，中央最高，外側略向外張。
+        const flameHeights = [0.42, 0.68, 0.42];
+        for (let i = 0; i < 3; i++) {
+          const x = (i - 1) * 0.27;
+          const flame = addCrownSpire(x, -0.88, flameHeights[i], i === 1 ? 0.15 : 0.11);
+          flame.rotation.z = (i - 1) * -0.18;
+        }
+        addCrownGem(0, apexY + 0.58, -0.88, 0.09, shared.brightGold);
+      } else if (special === "range") {
+        // 潮歌：望遠鏡式觀測鏡，長桿與透鏡突出射程意象。
+        addCrownBeam(0.11, 0.62, 0.11, 0.48, apexY + 0.2, -0.84, 0, shared.blue);
+        const lens = new THREE.Mesh(new THREE.TorusGeometry(0.19, 0.035, 8, 28), shared.brightGold);
+        lens.position.set(0.48, apexY + 0.52, -0.84);
+        root.add(lens);
+        const lensCore = new THREE.Mesh(new THREE.CircleGeometry(0.145, 20), accent);
+        lensCore.position.set(0.48, apexY + 0.52, -0.79);
+        root.add(lensCore);
+        addCrownGem(0.48, apexY + 0.52, -0.72, 0.075, shared.brightGold);
+      } else if (special === "rapid") {
+        // 疾羽：羽片扇冠，輪廓向兩側展開。
+        for (let i = 0; i < 5; i++) {
+          const offset = i - 2;
+          const feather = addCrownBeam(
+            0.105, 0.56 - Math.abs(offset) * 0.09, 0.075,
+            offset * 0.17, apexY + 0.22 + (2 - Math.abs(offset)) * 0.055, -0.86,
+            offset * -0.16, accent,
+          );
+          feather.rotation.x = offset * 0.08;
+        }
+        addCrownGem(0, apexY + 0.5, -0.86, 0.1, shared.brightGold);
+      } else if (special === "aoe") {
+        // 花繚：六瓣環冠，中心晶體代表擴散核心。
+        for (let i = 0; i < 6; i++) {
+          const angle = (i * Math.PI) / 3;
+          const petal = addCrownGem(
+            Math.cos(angle) * 0.3,
+            apexY + 0.2,
+            -0.86 + Math.sin(angle) * 0.3,
+            0.13,
+          );
+          petal.scale.set(0.78, 1.45, 0.72);
+          petal.rotation.z = Math.cos(angle) * 0.28;
+        }
+        addCrownGem(0, apexY + 0.3, -0.86, 0.14, shared.brightGold);
+      } else if (special === "root") {
+        // 縛影：枝杈向外生長，像古樹根冠。
+        for (const side of [-1, 1]) {
+          const branch = addCrownBeam(0.075, 0.62, 0.075, side * 0.34, apexY + 0.2, -0.86, side * -0.46, shared.blue);
+          branch.scale.set(1, 1, 1);
+          const leaf = addCrownGem(side * 0.52, apexY + 0.47, -0.86, 0.12);
+          leaf.scale.set(0.78, 1.45, 0.72);
+        }
+        addCrownGem(0, apexY + 0.12, -0.86, 0.13, shared.brightGold);
+      } else if (special === "break") {
+        // 聖輝：盾形徽冠，將破盾定位做成穩重、對稱的輪廓。
+        addCrownBeam(0.48, 0.48, 0.09, 0, apexY + 0.19, -0.86, 0, shared.blue);
+        addCrownBeam(0.34, 0.34, 0.055, 0, apexY + 0.19, -0.8, 0, accent);
+        addCrownBeam(0.07, 0.54, 0.07, 0, apexY + 0.2, -0.74, 0, shared.brightGold);
+        addCrownGem(0, apexY + 0.53, -0.86, 0.11, shared.brightGold);
+      } else if (special === "chain") {
+        // 璃鏈：分岔導電桿和節點，暗示能量會向多目標跳躍。
+        addCrownBeam(0.075, 0.58, 0.075, 0, apexY + 0.19, -0.86, 0, shared.gold);
+        for (const side of [-1, 1]) {
+          addCrownBeam(0.065, 0.4, 0.065, side * 0.22, apexY + 0.36, -0.86, side * -0.52, accent);
+          const node = new THREE.Mesh(new THREE.SphereGeometry(0.105, 10, 8), shared.brightGold);
+          node.position.set(side * 0.36, apexY + 0.51, -0.86);
+          root.add(node);
+          gems.push(node);
+        }
+        addCrownGem(0, apexY + 0.52, -0.86, 0.1);
+      } else if (special === "pierce") {
+        // 霞貫：筆直長槍冠，突出直線穿透的方向感。
+        addCrownSpire(0, -0.86, 0.86, 0.095, shared.brightGold);
+        addCrownBeam(0.48, 0.08, 0.08, 0, apexY + 0.08, -0.86, 0, shared.blue);
+        addCrownGem(0, apexY + 0.62, -0.86, 0.09);
+      } else if (special === "execute") {
+        // 背光：交錯雙刃，呈現處決印記。
+        addCrownBeam(0.11, 0.72, 0.07, -0.15, apexY + 0.2, -0.86, -0.42, accent);
+        addCrownBeam(0.11, 0.72, 0.07, 0.15, apexY + 0.2, -0.86, 0.42, shared.brightGold);
+        addCrownGem(0, apexY + 0.18, -0.78, 0.13);
+      } else if (special === "ultimate") {
+        // 究極：光環包覆核心，兩側高階晶體形成冠冕。
+        const halo = new THREE.Mesh(new THREE.TorusGeometry(0.34, 0.035, 8, 40), shared.brightGold);
+        halo.position.set(0, apexY + 0.28, -0.9);
+        root.add(halo);
+        for (const side of [-1, 1]) {
+          addCrownGem(side * 0.42, apexY + 0.2, -0.86, 0.17);
+        }
+        addCrownGem(0, apexY + 0.28, -0.82, 0.22, shared.chargeCrystal);
+      } else {
+        // 銀月：月環托起中央星晶，作為基礎高傷塔的識別冠飾。
+        const moonRing = new THREE.Mesh(new THREE.TorusGeometry(0.27, 0.035, 8, 36), shared.brightGold);
+        moonRing.position.set(0, apexY + 0.16, -0.9);
+        root.add(moonRing);
+        addCrownGem(0, apexY + 0.16, -0.82, 0.2);
+        addCrownGem(-0.34, apexY - 0.02, -0.86, 0.085, shared.brightGold);
+        addCrownGem(0.34, apexY - 0.02, -0.86, 0.085, shared.brightGold);
+      }
+
       // 四根角柱托住角色展示位，頂端以各塔專屬色的水晶標示屬性。
       for (let i = 0; i < 4; i++) {
         const angle = Math.PI / 4 + (i * Math.PI) / 2;
