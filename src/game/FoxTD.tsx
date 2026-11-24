@@ -4359,7 +4359,7 @@ export function FoxTD() {
         const gy = Math.floor(world.y / CELL);
         const why = canPlaceReason(gx, gy);
         const hh = cellHeight(sim.current.heights, gx, gy);
-        if (!why) setHover(`可放置 · 高地 Lv${hh} · 射程 +${hh * 30}`);
+        if (!why) setHover(`可放置 · 地勢 Lv${hh} · 射程 +${hh * 30}`);
         else setHover(`不可放：${why}`);
       }
     };
