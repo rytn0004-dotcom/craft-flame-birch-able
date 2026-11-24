@@ -176,7 +176,11 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         emissive: "#1d6865",
         emissiveIntensity: 0.18,
       }),
-      floor: new THREE.MeshStandardMaterial({ color: "#182d34", roughness: 0.98 }),
+      floor: new THREE.MeshStandardMaterial({ color: "#123b49", metalness: 0.24, roughness: 0.34 }),
+      seaShelf: new THREE.MeshStandardMaterial({ color: "#28636a", metalness: 0.16, roughness: 0.42 }),
+      shoreSand: new THREE.MeshStandardMaterial({ color: "#d9c49a", roughness: 0.94 }),
+      shoreFoam: new THREE.MeshBasicMaterial({ color: "#b9e6d8", transparent: true, opacity: 0.76, depthWrite: false }),
+      cliffLip: new THREE.MeshStandardMaterial({ color: "#c9b58b", roughness: 0.86 }),
       ramp: new THREE.MeshStandardMaterial({ color: "#aeb49c", roughness: 0.9 }),
     };
 
@@ -878,6 +882,100 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         terrainRoot.add(mesh);
       }
 
+      // 雙層海面：近岸較淺、外海較深；全部位於地塊底面以下，不介入地形碰撞或道路判定。
+      const deepWater = new THREE.Mesh(
+        new THREE.PlaneGeometry(COLS + 44, ROWS + 44),
+        shared.floor,
+      );
+      deepWater.rotation.x = -Math.PI / 2;
+      deepWater.position.set(COLS / 2, -0.34, ROWS / 2);
+      deepWater.receiveShadow = false;
+      const shelfWater = new THREE.Mesh(
+        new THREE.PlaneGeometry(COLS + 16, ROWS + 16),
+        shared.seaShelf,
+      );
+      shelfWater.rotation.x = -Math.PI / 2;
+      shelfWater.position.set(COLS / 2, -0.285, ROWS / 2);
+      shelfWater.receiveShadow = false;
+      terrainRoot.add(deepWater, shelfWater);
+
+      // 外露地塊的岸線：沙色石沿收邊，海面再以稀疏泡沫切出水陸交界。
+      // 僅處理已放置地塊的非道路格，並避開現有建築 footprint。
+      const coastDirections = [
+        { dc: 0, dr: -1, dx: 0, dz: -1, rot: 0 },
+        { dc: 1, dr: 0, dx: 1, dz: 0, rot: Math.PI / 2 },
+        { dc: 0, dr: 1, dx: 0, dz: 1, rot: 0 },
+        { dc: -1, dr: 0, dx: -1, dz: 0, rot: Math.PI / 2 },
+      ];
+      const protectedBuildings = data.towers.map((tower) => ({
+        x: tower.x / CELL,
+        z: tower.y / CELL,
+        radius: tower.sanctuary ? 4.4 : 1.18,
+      }));
+      const coastEdges: { x: number; z: number; h: number; dx: number; dz: number; rot: number; seed: number }[] = [];
+      for (const cell of tileCells.values()) {
+        const gx = Math.floor(cell.x);
+        const gy = Math.floor(cell.z);
+        if (!data.blocked.has(gx + "," + gy)) continue;
+        const nearBuilding = protectedBuildings.some((building) =>
+          Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius,
+        );
+        if (nearBuilding) continue;
+        for (const direction of coastDirections) {
+          const neighbor = tileCells.get((gx + direction.dc) + "," + (gy + direction.dr));
+          if (neighbor) continue;
+          const seed = Math.abs(Math.sin(cell.x * 71.3 + cell.z * 43.9 + direction.rot * 13) * 28411.73) % 1;
+          coastEdges.push({
+            x: cell.x, z: cell.z, h: cell.h,
+            dx: direction.dx, dz: direction.dz, rot: direction.rot, seed,
+          });
+        }
+      }
+      if (coastEdges.length) {
+        const sand = new THREE.InstancedMesh(
+          new THREE.BoxGeometry(0.94, 0.032, 0.14),
+          shared.shoreSand,
+          coastEdges.length,
+        );
+        const matrix = new THREE.Matrix4();
+        for (let i = 0; i < coastEdges.length; i++) {
+          const edge = coastEdges[i];
+          matrix.makeRotationY(edge.rot);
+          matrix.setPosition(
+            edge.x + edge.dx * 0.385,
+            groundTop(edge.h) + 0.012,
+            edge.z + edge.dz * 0.385,
+          );
+          sand.setMatrixAt(i, matrix);
+        }
+        sand.instanceMatrix.needsUpdate = true;
+        sand.receiveShadow = true;
+        terrainRoot.add(sand);
+
+        const foamEdges = coastEdges.filter((edge) => edge.seed > 0.38);
+        if (foamEdges.length) {
+          const foam = new THREE.InstancedMesh(
+            new THREE.BoxGeometry(0.42, 0.012, 0.045),
+            shared.shoreFoam,
+            foamEdges.length,
+          );
+          for (let i = 0; i < foamEdges.length; i++) {
+            const edge = foamEdges[i];
+            matrix.makeRotationY(edge.rot);
+            matrix.setPosition(
+              edge.x + edge.dx * 0.635,
+              -0.263,
+              edge.z + edge.dz * 0.635,
+            );
+            foam.setMatrixAt(i, matrix);
+          }
+          foam.instanceMatrix.needsUpdate = true;
+          foam.castShadow = false;
+          foam.receiveShadow = false;
+          terrainRoot.add(foam);
+        }
+      }
+
       // 高地表面散布少量低矮岩屑，破除棋盤格般的單調感，不遮擋道路或建築。
       const rockCells = Array.from(tileCells.values()).filter((cell) => {
         if (cell.h <= 0) return false;
@@ -1013,6 +1111,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         { dc: -1, dr: 0, dx: -0.46, dz: 0, sx: 0.08, sz: 0.94 },
       ];
       const cliffFaces: { x: number; y: number; z: number; sx: number; sy: number; sz: number; bandY: number; upperBandY: number }[] = [];
+      const cliffLedges: { x: number; y: number; z: number; rot: number }[] = [];
       for (const cell of tileCells.values()) {
         if (cell.h <= 0) continue;
         const gx = Math.floor(cell.x), gy = Math.floor(cell.z);
@@ -1032,6 +1131,14 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
             bandY: low + (high - low) * 0.28,
             upperBandY: low + (high - low) * 0.68,
           });
+          if (cell.h >= 2 && neighbor) {
+            cliffLedges.push({
+              x: cell.x + d.dx * 0.84,
+              y: high + 0.012,
+              z: cell.z + d.dz * 0.84,
+              rot: d.dc === 0 ? 0 : Math.PI / 2,
+            });
+          }
         }
       }
       if (cliffFaces.length) {
@@ -1066,6 +1173,23 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         capMesh.castShadow = true;
         capMesh.receiveShadow = true;
         terrainRoot.add(cliffMesh, bandMesh, upperBandMesh, capMesh);
+      }
+      if (cliffLedges.length) {
+        const ledges = new THREE.InstancedMesh(
+          new THREE.BoxGeometry(0.92, 0.026, 0.13),
+          shared.cliffLip,
+          cliffLedges.length,
+        );
+        const matrix = new THREE.Matrix4();
+        for (let i = 0; i < cliffLedges.length; i++) {
+          const ledge = cliffLedges[i];
+          matrix.makeRotationY(ledge.rot);
+          matrix.setPosition(ledge.x, ledge.y, ledge.z);
+          ledges.setMatrixAt(i, matrix);
+        }
+        ledges.instanceMatrix.needsUpdate = true;
+        ledges.receiveShadow = true;
+        terrainRoot.add(ledges);
       }
 
       // 單級坡面連接相鄰平台；道路高度 0 不鋪坡，避免遮住怪物通道。
@@ -1106,14 +1230,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         terrainRoot.add(ramps);
       }
 
-      const floor = new THREE.Mesh(
-        new THREE.PlaneGeometry(COLS + 8, ROWS + 8),
-        shared.floor,
-      );
-      floor.rotation.x = -Math.PI / 2;
-      floor.position.set(COLS / 2, -0.025, ROWS / 2);
-      floor.receiveShadow = true;
-      terrainRoot.add(floor);
+      // 海面已由上方深海／淺灘雙層承接，移除舊的單色底板以露出水域。
     };
 
     const rebuildBuildings = (data: Terrain3DSnapshot, animateTurrets: boolean, animateMainUpgrade: boolean) => {
