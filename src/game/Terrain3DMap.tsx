@@ -191,7 +191,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       const material = new THREE.MeshBasicMaterial({ color: "#ffe2a0", transparent: true, opacity: 0.95, side: THREE.DoubleSide });
       const mesh = new THREE.Mesh(new THREE.TorusGeometry(0.52, 0.045, 8, 32), material);
       mesh.rotation.x = Math.PI / 2;
-      mesh.position.set(x, 2.02, z);
+      mesh.position.set(x, 2.49, z);
       mesh.scale.setScalar(0.2);
       parent.add(mesh);
       installationRings.push({ mesh, material, age: 0, duration: 0.92 });
@@ -311,12 +311,12 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       // 四座角樓先有空砲座；購買火力後才安裝砲塔和炮管
       const corners = [[-2.28, -2.28], [2.28, -2.28], [-2.28, 2.28], [2.28, 2.28]];
       for (const [cx, cz] of corners) {
-        addCylinder(root, 0.56, 0.69, 1.02, cx, 1.12, cz, shared.stone, 10);
-        addCylinder(root, 0.6, 0.66, 0.13, cx, 1.69, cz, shared.gold, 10);
-        addCylinder(root, 0.48, 0.58, 0.2, cx, 1.82, cz, shared.roof, 10);
-        addCylinder(root, 0.53, 0.53, 0.065, cx, 1.94, cz, shared.brightGold, 10);
+        addCylinder(root, 0.56, 0.69, 1.02, cx, 1.59, cz, shared.stone, 10);
+        addCylinder(root, 0.6, 0.66, 0.13, cx, 2.16, cz, shared.gold, 10);
+        addCylinder(root, 0.48, 0.58, 0.2, cx, 2.29, cz, shared.roof, 10);
+        addCylinder(root, 0.53, 0.53, 0.065, cx, 2.41, cz, shared.brightGold, 10);
         const spin = new THREE.Group();
-        spin.position.set(cx, 2.02, cz);
+        spin.position.set(cx, 2.49, cz);
         const runeRing = new THREE.Mesh(new THREE.TorusGeometry(0.45, 0.055, 8, 28), shared.brightGold);
         runeRing.rotation.x = Math.PI / 2;
         spin.add(runeRing);
@@ -329,7 +329,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
 
         if ((tower.hqFireLv ?? 0) >= 1) {
           const mount = new THREE.Group();
-          mount.position.set(cx, 1.72, cz);
+          mount.position.set(cx, 2.19, cz);
           const base = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.46, 0.3, 12), shared.blue);
           base.position.y = 0.18;
           base.castShadow = true;
@@ -345,13 +345,13 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
           const turretIndex = corners.findIndex(([x, z]) => x === cx && z === cz);
           if (animateTurrets) {
             mount.scale.setScalar(0.015);
-            mount.position.y = 2.55;
-            installationAnimations.push({ group: mount, targetY: 1.72, age: 0, duration: 0.88 + turretIndex * 0.06, fromScale: 0.015 });
+            mount.position.y = 3.02;
+            installationAnimations.push({ group: mount, targetY: 2.19, age: 0, duration: 0.88 + turretIndex * 0.06, fromScale: 0.015 });
             addCornerInstallationRing(root, cx, cz);
           }
           turretGroups.push({
             group: mount, tower, index: turretIndex, flash: cannon.userData.muzzleFlash,
-            baseY: 1.72, baseZ: cz,
+            baseY: 2.19, baseZ: cz,
           });
         }
       }
