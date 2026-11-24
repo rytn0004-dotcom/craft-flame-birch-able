@@ -518,8 +518,11 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       const hq = snapshot.towers.find((tower) => tower.sanctuary);
       const centerX = hq ? hq.x / CELL : 10;
       const centerZ = hq ? hq.y / CELL : 10;
+      const gx = Math.max(0, Math.min(COLS - 1, Math.floor(centerX)));
+      const gy = Math.max(0, Math.min(ROWS - 1, Math.floor(centerZ)));
+      const terrainHeight = snapshot.heights[gy * COLS + gx] ?? 0;
       focus(centerX * CELL, centerZ * CELL);
-      camera.position.set(centerX + 5, groundTop(h) + 27, centerZ + 5);
+      camera.position.set(centerX + 5, groundTop(terrainHeight) + 27, centerZ + 5);
       controls.update();
     };
 
