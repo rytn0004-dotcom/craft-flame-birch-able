@@ -153,6 +153,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     sun.shadow.camera.right = 112;
     sun.shadow.camera.top = 112;
     sun.shadow.camera.bottom = -112;
+    sun.shadow.camera.updateProjectionMatrix();
     sun.shadow.bias = -0.00016;
     scene.add(sun);
 
