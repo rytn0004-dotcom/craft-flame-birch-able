@@ -616,9 +616,15 @@ function coreUpgradeCost(lv: number) {
 let __escortSeq = 1;
 
 /** —— 創意玩法：連殺、潮汐事件、奇遇波、背水 —— */
-const COMBO_WINDOW = 1.35;
+const COMBO_WINDOW = 1.25;
 const COMBO_GOLD_PER = 0.06; // 每層連殺額外金幣比例
 const LAST_STAND_LIVES = 3;
+/** 波間空檔：緊湊但夠讀提示／補一塔（秒） */
+const WAVE_GAP_EARLY = 4.4;
+const WAVE_GAP_NORMAL = 5.0;
+const WAVE_GAP_MILESTONE = 5.8;
+const WAVE_GAP_ENDLESS = 3.6;
+const WAVE_GAP_ENDLESS_BOSS = 4.8;
 
 type TideEventId =
   | "gold_rain"
@@ -647,7 +653,7 @@ function waveQuirk(wave: number): WaveQuirk | null {
   if (wave % 5 === 0) {
     const table: WaveQuirk[] = [
       { name: "潮汐祭", tag: "祭典", enemyHp: 1.15, enemySpd: 1.05, gold: 1.2, note: "強敵厚賞" },
-      { name: "裂口狂潮", tag: "裂口", enemyHp: 0.9, enemySpd: 1.22, gold: 1.1, note: "又快又密" },
+      { name: "裂口狂潮", tag: "裂口", enemyHp: 0.92, enemySpd: 1.14, gold: 1.1, note: "又快又密" },
       { name: "沉船遺寶", tag: "遺寶", enemyHp: 1.05, enemySpd: 0.95, gold: 1.45, note: "偏肥的怪" },
     ];
     return table[(wave / 5 - 1) % table.length];
@@ -776,23 +782,25 @@ type Phase = "ready" | "play" | "win" | "lose";
 function spawnPlan(wave: number) {
   const list: { type: number; at: number; route: number }[] = [];
   const lanes = Math.max(1, routes.length);
-  const baseCount = 6 + wave * 2;
-  const count = Math.round(baseCount * (1 + 0.28 * Math.max(0, lanes - 1)));
+  // 略減總量、縮間隔：單波時長更短，同時在場壓力差不多
+  const baseCount = 5 + Math.floor(wave * 1.7);
+  const count = Math.round(baseCount * (1 + 0.22 * Math.max(0, lanes - 1)));
   const base = Math.min(ENEMY_TYPES.length - 2, Math.floor((wave - 1) / 2));
-  let t = 0.4;
+  let t = 0.25;
   for (let i = 0; i < count; i++) {
     let type = base;
     if (Math.random() < 0.22 && type > 0) type -= 1;
     if (Math.random() < 0.18 + wave * 0.02) type = Math.min(ENEMY_TYPES.length - 2, type + 1);
     list.push({ type, at: t, route: i % lanes });
-    t += Math.max(0.26, 0.7 - wave * 0.028 - Math.min(0.12, (lanes - 1) * 0.02));
+    // 下限 0.3：避免後期糊成一團；前期比舊版略密
+    t += Math.max(0.3, 0.58 - wave * 0.022 - Math.min(0.1, (lanes - 1) * 0.018));
   }
   if (wave % 5 === 0) {
-    list.push({ type: Math.min(ENEMY_TYPES.length - 1, 6), at: t + 0.4, route: 0 });
-    list.push({ type: Math.min(ENEMY_TYPES.length - 1, 8), at: t + 1.0, route: Math.min(1, lanes - 1) });
+    list.push({ type: Math.min(ENEMY_TYPES.length - 1, 6), at: t + 0.3, route: 0 });
+    list.push({ type: Math.min(ENEMY_TYPES.length - 1, 8), at: t + 0.75, route: Math.min(1, lanes - 1) });
   }
   if (wave % 4 === 0) {
-    list.push({ type: Math.min(5, 2 + Math.floor(wave / 4)), at: t + 0.6, route: Math.floor(lanes / 2) % lanes });
+    list.push({ type: Math.min(5, 2 + Math.floor(wave / 4)), at: t + 0.45, route: Math.floor(lanes / 2) % lanes });
   }
   return list;
 }
@@ -802,9 +810,9 @@ function endlessPlan(wave: number) {
   const list: { type: number; at: number; route: number }[] = [];
   const lanes = Math.max(1, routes.length);
   const nTypes = Math.max(1, ENEMY_TYPES.length);
-  const fodder = Math.min(18, 7 + Math.floor(wave * 0.35));
+  const fodder = Math.min(16, 6 + Math.floor(wave * 0.32));
   const elites = Math.min(4, Math.floor((wave + 2) / 4));
-  const interval = Math.max(0.32, 0.62 - wave * 0.006);
+  const interval = Math.max(0.34, 0.56 - wave * 0.005);
   let t = 0.35;
   let n = 0;
   const clampType = (i: number) => Math.max(0, Math.min(nTypes - 1, i));
@@ -890,14 +898,14 @@ function queueFromGroups(groups: WaveGroup[], gates: number[], routeCount: numbe
   );
   const picks = usable.length ? usable : [0];
   let spawned = 0;
-  let t = 0.35;
+  let t = 0.22;
   for (const g of groups) {
     const n = Math.max(0, Math.min(40, Math.round(g.count)));
     const type = Math.max(0, Math.min(typeCount - 1, g.type));
     for (let i = 0; i < n; i++) {
       list.push({ type, at: t, route: picks[spawned % picks.length] });
       spawned += 1;
-      t += 0.38;
+      t += 0.34;
     }
   }
   return list;
@@ -2032,11 +2040,11 @@ export function FoxTD() {
             s.bossBanner = {
               name: et.name || "潮潮巨敵",
               skills: labeled,
-              life: 3.6,
+              life: 2.6,
             };
-            s.bossFreezeT = Math.max(s.bossFreezeT, 1.75);
+            s.bossFreezeT = Math.max(s.bossFreezeT, 1.25);
             const bp = posAt(0, job.route ?? 0);
-            s.bossMark = { x: bp.x, y: bp.y, life: 4.5, name: et.name || "Boss" };
+            s.bossMark = { x: bp.x, y: bp.y, life: 3.2, name: et.name || "Boss" };
             {
               const z = s.cam.zoom || 1;
               s.cam.x = bp.x - VIEWW / (2 * z);
@@ -2144,11 +2152,27 @@ export function FoxTD() {
               setHover(`第 ${s.wave} 波結束 · 疆域擴張 · 請選模板後再放到地圖綠格`);
               s.between = 0;
             } else {
-              const gap = endlessRef.current ? (s.wave % 5 === 0 ? 5.5 : 4.2) : 7;
+              const gap = endlessRef.current
+                ? s.wave % 5 === 0
+                  ? WAVE_GAP_ENDLESS_BOSS
+                  : WAVE_GAP_ENDLESS
+                : s.wave % 5 === 0
+                  ? WAVE_GAP_MILESTONE
+                  : s.wave <= 3
+                    ? WAVE_GAP_EARLY
+                    : WAVE_GAP_NORMAL;
               if (s.between > gap) beginWave();
             }
           } else {
-            const gap = endlessRef.current ? (s.wave % 5 === 0 ? 5.5 : 4.2) : 7;
+            const gap = endlessRef.current
+              ? s.wave % 5 === 0
+                ? WAVE_GAP_ENDLESS_BOSS
+                : WAVE_GAP_ENDLESS
+              : s.wave % 5 === 0
+                ? WAVE_GAP_MILESTONE
+                : s.wave <= 3
+                  ? WAVE_GAP_EARLY
+                  : WAVE_GAP_NORMAL;
             if (s.between > gap) beginWave();
           }
         }
@@ -2365,7 +2389,7 @@ export function FoxTD() {
               else if (mp === 0) g = Math.round(g * 1.08); // 退潮：快走多金
             }
             const combo = comboRef.current;
-            combo.t = COMBO_WINDOW + (tide?.id === "blood_tide" ? 0.4 : 0);
+            combo.t = COMBO_WINDOW + (tide?.id === "blood_tide" ? 0.3 : 0);
             combo.n += 1;
             if (combo.n > combo.best) combo.best = combo.n;
             if (combo.n >= 3) g += Math.max(1, Math.round(e.gold * COMBO_GOLD_PER * Math.min(combo.n, 20)));
