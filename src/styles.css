@@ -609,3 +609,11 @@ html, body, #root, #app {
   justify-content: center;
   gap: 8px;
 }
+
+.stage canvas[data-game3d="true"] {
+  cursor: grab;
+  outline: none;
+}
+.stage canvas[data-game3d="true"]:active {
+  cursor: grabbing;
+}
