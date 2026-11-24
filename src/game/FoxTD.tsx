@@ -1431,6 +1431,7 @@ export function FoxTD() {
         return {
           x: tower.x, y: tower.y, gx: tower.gx, gy: tower.gy,
           def: tower.def, level: tower.level, aim: tower.aim,
+          range: tower.range, selected: index === selRef.current,
           stake: tower.stake, sanctuary: tower.sanctuary,
           hqFireLv: tower.hqFireLv, hqFortifyLv: tower.hqFortifyLv,
           hqTurretAtk: tower.hqTurretAtk?.slice(), hqCannonAtk: tower.hqCannonAtk,
