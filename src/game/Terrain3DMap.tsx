@@ -1164,9 +1164,9 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
             const width = 0.18 + faceSeed * 0.12;
             const height = Math.min(vertical * 0.62, 0.16 + faceSeed * 0.17);
             cliffFragments.push({
-              x: cell.x + d.dx * sideDepth + acrossX,
+              x: cell.x + Math.sign(d.dx) * sideDepth + acrossX,
               y: low + vertical * (0.28 + faceSeed * 0.38),
-              z: cell.z + d.dz * sideDepth + acrossZ,
+              z: cell.z + Math.sign(d.dz) * sideDepth + acrossZ,
               rx: (faceSeed - 0.5) * 0.7,
               ry: faceSeed * Math.PI * 2,
               rz: (faceSeed - 0.5) * 0.85,
@@ -1177,9 +1177,9 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
             });
             if (cell.h >= 2 && faceSeed > 0.86) {
               cliffFragments.push({
-                x: cell.x + d.dx * (sideDepth + 0.01) - acrossX * 0.62,
+                x: cell.x + Math.sign(d.dx) * (sideDepth + 0.01) - acrossX * 0.62,
                 y: low + vertical * (0.62 + faceSeed * 0.12),
-                z: cell.z + d.dz * (sideDepth + 0.01) - acrossZ * 0.62,
+                z: cell.z + Math.sign(d.dz) * (sideDepth + 0.01) - acrossZ * 0.62,
                 rx: (faceSeed - 0.5) * 0.95,
                 ry: faceSeed * Math.PI * 2 + 0.7,
                 rz: (faceSeed - 0.5) * 0.9,
