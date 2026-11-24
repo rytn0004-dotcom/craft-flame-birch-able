@@ -636,8 +636,8 @@ const TIDE_TABLE: { id: TideEventId; name: string; desc: string; weight: number;
   { id: "sanctuary_roar", name: "聖地鳴振", desc: "護衛動員免費一次、間隔暫時縮短", weight: 0.9, dur: 20 },
   { id: "mist", name: "海霧", desc: "所有塔射程 -12%，近戰護衛換傷 +25%", weight: 0.85, dur: 999 },
   { id: "still_water", name: "靜水片刻", desc: "敵人 -12% 移速，塔冷卻 -8%", weight: 1, dur: 999 },
-  { id: "dual_moon", name: "雙月高台", desc: "高度 ≥2 的塔傷害 +18%，平地略弱", weight: 0.95, dur: 999 },
-  { id: "cliff_song", name: "峭壁和鳴", desc: "同高度相鄰塔互相加速；首殺觸發短爆發", weight: 0.9, dur: 999 },
+  { id: "dual_moon", name: "雙月高台", desc: "高度 ≥2 的塔傷害 +10%，平地幾乎不懲罰", weight: 0.95, dur: 999 },
+  { id: "cliff_song", name: "峭壁和鳴", desc: "同高度相鄰略加傷；首殺爆發更溫和", weight: 0.9, dur: 999 },
 ];
 
 type WaveQuirk = { name: string; tag: string; enemyHp: number; enemySpd: number; gold: number; note: string };
@@ -1461,21 +1461,21 @@ export function FoxTD() {
             if (!isCellOnBoard(boardRef.current, nc, nr)) return false;
             return !sim.current.blocked.has(cellKey(nc, nr));
           });
-          if (hh >= 3 && Math.random() < 0.16) {
-            amount *= 1.65;
+          if (hh >= 3 && Math.random() < 0.14) {
+            amount *= 1.48;
             float(px, py - 34, "峭擊", "#ffe08a");
             // 峭擊回響：鄰近同高或更矮的塔短暫加速
             for (const o of sim.current.towers) {
               if (o === tw || o.stake || o.sanctuary) continue;
               if (Math.max(Math.abs(o.gx - tw.gx), Math.abs(o.gy - tw.gy)) > 2) continue;
-              o.rateMul = Math.max(o.rateMul || 1, 1.2);
-              o.terrorT = Math.max(o.terrorT || 0, 0.55); // 借 terrorT 作短 buff 計時（無恐懼）
+              o.rateMul = Math.max(o.rateMul || 1, 1.1);
+              o.terrorT = Math.max(o.terrorT || 0, 0.4);
             }
-          } else if (hh === 2 && Math.random() < 0.1) {
-            amount *= 1.4;
+          } else if (hh === 2 && Math.random() < 0.09) {
+            amount *= 1.28;
             float(px, py - 34, "高擊", "#d7f0ff");
           } else if (hh <= 1 && nearRoad) {
-            amount *= 1.12;
+            amount *= 1.08;
           }
           if (hh >= 3 && !e.noslow && Math.random() < 0.22) {
             e.slow = Math.min(e.slow, 0.72);
@@ -1483,8 +1483,9 @@ export function FoxTD() {
           }
           // 潮汐：雙月高台
           if (tideRef.current?.id === "dual_moon") {
-            if (hh >= 2) amount *= 1.18;
-            else amount *= 0.94;
+            // 輕幅：高台略強、平地幾乎不懲罰，避免疊乘爆炸
+            if (hh >= 2) amount *= 1.1;
+            else amount *= 0.97;
           }
           // 同高共鳴：周圍 2 格內同高度 ≥2 座 → 額外傷害
           {
@@ -1495,13 +1496,13 @@ export function FoxTD() {
               if (cellHeight(sim.current.heights, o.gx, o.gy) === hh) mates += 1;
             }
             if (mates >= 2) {
-              amount *= 1.1;
-              if (Math.random() < 0.08) float(px, py - 50, "共鳴", "#b8f0ff");
+              amount *= 1.06;
+              if (Math.random() < 0.06) float(px, py - 50, "共鳴", "#b8f0ff");
             } else if (mates >= 1 && tideRef.current?.id === "cliff_song") {
-              amount *= 1.08;
+              amount *= 1.04;
             }
           }
-          // 隘口伏擊：塔旁 2 格內有路障 → 加傷，偶爾短定身
+          // 隘口伏擊：塔旁 2 格內有路障 → 小幅加傷，偶爾短定身（控場向，不堆爆發）
           {
             let stakesNear = 0;
             for (const o of sim.current.towers) {
@@ -1509,22 +1510,22 @@ export function FoxTD() {
               if (Math.max(Math.abs(o.gx - tw.gx), Math.abs(o.gy - tw.gy)) <= 2) stakesNear += 1;
             }
             if (stakesNear > 0) {
-              amount *= 1.1 + Math.min(0.08, stakesNear * 0.03);
+              amount *= 1.05 + Math.min(0.04, stakesNear * 0.02);
               waveStyleRef.current.stakeAssists += 1;
-              if (!e.noslow && Math.random() < 0.12 + stakesNear * 0.03) {
-                e.rootT = Math.max(e.rootT, 0.35);
-                if (Math.random() < 0.35) float(px, py - 38, "隘口", "#d2c4a8");
+              if (!e.noslow && Math.random() < 0.1 + stakesNear * 0.02) {
+                e.rootT = Math.max(e.rootT, 0.28);
+                if (Math.random() < 0.3) float(px, py - 38, "隘口", "#d2c4a8");
               }
             }
           }
-          // 護衛同陣：附近有護衛 → 輕微加傷
+          // 護衛同陣：附近有護衛 → 極輕加傷
           {
             let guards = 0;
             for (const u of sim.current.escorts) {
               if (u.hp <= 0) continue;
-              if (Math.hypot(u.x - tw.x, u.y - tw.y) < 90) guards += 1;
+              if (Math.hypot(u.x - tw.x, u.y - tw.y) < 80) guards += 1;
             }
-            if (guards > 0) amount *= 1.06;
+            if (guards > 0) amount *= 1.03;
           }
         }
       }
@@ -2060,33 +2061,35 @@ export function FoxTD() {
             const tags: string[] = [];
             // 完璧：本波零漏傷
             if (!style.leaked) {
-              const perfect = 6 + Math.min(14, s.wave);
+              const perfect = 4 + Math.min(10, s.wave);
               clearBonus += perfect;
               tags.push(`完璧 +${perfect}`);
               for (const tw of s.towers) {
                 if (tw.stake || tw.sanctuary) continue;
-                tw.rateMul = Math.max(tw.rateMul || 1, 1.15);
-                tw.terrorT = Math.max(tw.terrorT || 0, 2.5);
+                tw.rateMul = Math.max(tw.rateMul || 1, 1.08);
+                tw.terrorT = Math.max(tw.terrorT || 0, 1.6);
               }
             }
-            // 連殺殘潮
-            if (comboRef.current.best >= 8) {
-              const streak = 4 + Math.min(10, Math.floor(comboRef.current.best / 2));
+            // 連殺殘潮（門檻略高、獎勵收斂）
+            if (comboRef.current.best >= 10) {
+              const streak = 3 + Math.min(6, Math.floor(comboRef.current.best / 3));
               clearBonus += streak;
               tags.push(`連殺殘潮 +${streak}`);
             }
             // 高台狩獵
-            if (style.highlandKills >= 5) {
-              const hunt = 5 + Math.min(8, Math.floor(style.highlandKills / 3));
+            if (style.highlandKills >= 6) {
+              const hunt = 3 + Math.min(6, Math.floor(style.highlandKills / 4));
               clearBonus += hunt;
               tags.push(`高台狩獵 +${hunt}`);
-              hqBuffRef.current.blueprints += style.highlandKills >= 12 ? 1 : 0;
-              if (style.highlandKills >= 12) tags.push("潮紋圖紙");
+              if (style.highlandKills >= 15) {
+                hqBuffRef.current.blueprints += 1;
+                tags.push("潮紋圖紙");
+              }
             }
             // 隘口佈局
-            if (style.stakeAssists >= 8) {
-              clearBonus += 5;
-              tags.push("隘口有功 +5");
+            if (style.stakeAssists >= 10) {
+              clearBonus += 3;
+              tags.push("隘口有功 +3");
             }
             goldRef.current += clearBonus;
             setGold(goldRef.current);
@@ -2296,7 +2299,11 @@ export function FoxTD() {
           const slow = e.noslow ? 1 : e.slowT > 0 ? e.slow : 1;
           {
           const laneSoft = 1 - Math.min(0.18, Math.max(0, routes.length - 1) * 0.045);
-          e.dist += e.speed * 0.88 * laneSoft * slow * e.aiSpeed * e.hasteMul * (e.rage ? 1.12 : 1) * dt;
+          {
+            const mp = (s as { moonPhase?: number }).moonPhase ?? 2;
+            const moonSpd = mp === 0 ? 1.05 : mp === 3 ? 0.97 : 1; // 退潮快走、望月略慢
+            e.dist += e.speed * 0.88 * laneSoft * slow * e.aiSpeed * e.hasteMul * (e.rage ? 1.12 : 1) * moonSpd * dt;
+          }
         }
         }
         if (e.dist >= routeLen(e.route)) {
@@ -2352,6 +2359,11 @@ export function FoxTD() {
             const tide = tideRef.current;
             let g = e.gold;
             if (tide?.id === "gold_rain") g = Math.round(g * 1.35);
+            {
+              const mp = (s as { moonPhase?: number }).moonPhase ?? 2;
+              if (mp === 1) g = Math.round(g * 1.06); // 潮漲
+              else if (mp === 0) g = Math.round(g * 1.08); // 退潮：快走多金
+            }
             const combo = comboRef.current;
             combo.t = COMBO_WINDOW + (tide?.id === "blood_tide" ? 0.4 : 0);
             combo.n += 1;
@@ -2372,13 +2384,13 @@ export function FoxTD() {
             // 首殺潮：本波第一隻擊殺 → 短爆發 + 小額獎金
             if (waveFirstKillRef.current) {
               waveFirstKillRef.current = false;
-              const bonus = 4 + Math.min(12, Math.floor(s.wave / 2));
+              const bonus = 3 + Math.min(8, Math.floor(s.wave / 3));
               g += bonus;
               float(p.x, p.y - 44, "首殺潮", "#ffe8a0");
               for (const tw of s.towers) {
                 if (tw.stake || tw.sanctuary) continue;
-                tw.rateMul = Math.max(tw.rateMul || 1, tideRef.current?.id === "cliff_song" ? 1.35 : 1.22);
-                tw.terrorT = Math.max(tw.terrorT || 0, tideRef.current?.id === "cliff_song" ? 2.2 : 1.4);
+                tw.rateMul = Math.max(tw.rateMul || 1, tideRef.current?.id === "cliff_song" ? 1.18 : 1.1);
+                tw.terrorT = Math.max(tw.terrorT || 0, tideRef.current?.id === "cliff_song" ? 1.6 : 1.1);
               }
               s.rings.push({ x: p.x, y: p.y, r: 14, max: 120, life: 0.4, color: "#ffe8a0" });
             }
@@ -2395,18 +2407,34 @@ export function FoxTD() {
               float(p.x, p.y - 36, "潮紋圖紙 +1", "#9ad7ff");
             }
             if (combo.n >= 5 && combo.n % 5 === 0) float(p.x, p.y - 14, `連殺 ×${combo.n}`, "#ff9ecd");
+            // 過殺餘波：超量擊殺在路徑上留一層薄霧減速（控場、不直接加傷）
+            {
+              const over = Math.max(0, -e.hp);
+              if (over > e.maxHp * 0.2) {
+                for (const o of s.enemies) {
+                  if (o === e || o.hp <= 0) continue;
+                  const op = posAt(o.dist, o.route);
+                  if (Math.hypot(op.x - p.x, op.y - p.y) > 70) continue;
+                  if (!o.noslow) {
+                    o.slow = Math.min(o.slow, 0.78);
+                    o.slowT = Math.max(o.slowT, 0.45);
+                  }
+                }
+                if (Math.random() < 0.25) float(p.x, p.y - 22, "餘波", "#c8e8ff");
+              }
+            }
             // 連殺潮鳴：附近敵人短暫停頓，鼓勵把火力集中在一條線
-            if (combo.n === 8 || combo.n === 16) {
+            if (combo.n === 10 || combo.n === 20) {
               for (const o of s.enemies) {
                 const op = posAt(o.dist, o.route);
-                if (Math.hypot(op.x - p.x, op.y - p.y) > 150) continue;
+                if (Math.hypot(op.x - p.x, op.y - p.y) > 120) continue;
                 if (!o.noslow) {
-                  o.slow = Math.min(o.slow, 0.45);
-                  o.slowT = Math.max(o.slowT, 1.1);
+                  o.slow = Math.min(o.slow, 0.55);
+                  o.slowT = Math.max(o.slowT, 0.75);
                 }
               }
               float(p.x, p.y - 48, "潮鳴", "#9ad7ff");
-              s.rings.push({ x: p.x, y: p.y, r: 12, max: 150, life: 0.45, color: "#9ad7ff" });
+              s.rings.push({ x: p.x, y: p.y, r: 12, max: 120, life: 0.35, color: "#9ad7ff" });
             }
             float(p.x, p.y, `+${g}`, combo.n >= 3 ? "#ffe08a" : "#ffd27a");
             if (combo.n >= 3) bumpFlavor();
@@ -3016,7 +3044,11 @@ export function FoxTD() {
       comboRef.current.t = 0;
       waveFirstKillRef.current = true;
       waveStyleRef.current = { leaked: false, highlandKills: 0, stakeAssists: 0 };
-      let msg = `第 ${s.wave} 波`;
+      // 月相：每 4 波一輪，只動金幣／移速幾個百分點，不當主力數值
+      const moonPhase = s.wave % 4;
+      const moonName = moonPhase === 1 ? "潮漲" : moonPhase === 2 ? "平潮" : moonPhase === 3 ? "望月" : "退潮";
+      (s as { moonPhase?: number }).moonPhase = moonPhase;
+      let msg = `第 ${s.wave} 波 · ${moonName}`;
       if (quirk) msg += ` · ${quirk.name}（${quirk.note}）`;
       if (tide) msg += ` · 潮汐「${tide.name}」：${tide.desc}`;
       setHover(msg);
@@ -5262,10 +5294,23 @@ export function FoxTD() {
     const refund = sellRefund(tw.spent || TOWERS[tw.def].cost);
     goldRef.current += refund;
     setGold(goldRef.current);
+    // 潮息換位：拆塔留下短時薄霧，方便重佈時擋一下線
+    {
+      const sx = tw.x;
+      const sy = tw.y;
+      for (const e of sim.current.enemies) {
+        if (e.hp <= 0 || e.noslow) continue;
+        const ep = posAt(e.dist, e.route);
+        if (Math.hypot(ep.x - sx, ep.y - sy) > 85) continue;
+        e.slow = Math.min(e.slow, 0.7);
+        e.slowT = Math.max(e.slowT, 0.9);
+      }
+      sim.current.rings.push({ x: sx, y: sy, r: 10, max: 85, life: 0.4, color: "#a8d4ff" });
+    }
     sim.current.towers.splice(idx, 1);
     selRef.current = null;
     setSel(null);
-    setHover(`賣出 +${refund}`);
+    setHover(`賣出 +${refund} · 潮息薄霧`);
   }
 
 
