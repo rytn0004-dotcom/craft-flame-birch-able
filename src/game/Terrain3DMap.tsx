@@ -93,8 +93,39 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     let lastTime = 0;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color("#10232c");
-    scene.fog = new THREE.Fog("#10232c", 70, 245);
+    scene.background = null;
+    scene.fog = new THREE.Fog("#718f86", 82, 270);
+
+    // 柔和的海天漸層穹頂：由深海青過渡到暖霧色，再到高空藍綠。
+    const skyGeometry = new THREE.SphereGeometry(360, 40, 24);
+    const skyPositions = skyGeometry.getAttribute("position");
+    const skyColors = new Float32Array(skyPositions.count * 3);
+    const skyBottom = new THREE.Color("#173e4b");
+    const skyHorizon = new THREE.Color("#9ab7a4");
+    const skyZenith = new THREE.Color("#365c72");
+    const skyColor = new THREE.Color();
+    for (let i = 0; i < skyPositions.count; i++) {
+      const height = THREE.MathUtils.clamp((skyPositions.getY(i) / 360 + 1) * 0.5, 0, 1);
+      if (height < 0.5) skyColor.lerpColors(skyBottom, skyHorizon, height * 2);
+      else skyColor.lerpColors(skyHorizon, skyZenith, (height - 0.5) * 2);
+      skyColors[i * 3] = skyColor.r;
+      skyColors[i * 3 + 1] = skyColor.g;
+      skyColors[i * 3 + 2] = skyColor.b;
+    }
+    skyGeometry.setAttribute("color", new THREE.BufferAttribute(skyColors, 3));
+    const skyMaterial = new THREE.MeshBasicMaterial({
+      vertexColors: true,
+      side: THREE.BackSide,
+      fog: false,
+      depthWrite: false,
+      toneMapped: false,
+    });
+    const skyDome = new THREE.Mesh(skyGeometry, skyMaterial);
+    skyDome.position.set(COLS / 2, -10, ROWS / 2);
+    skyDome.renderOrder = -1000;
+    skyDome.frustumCulled = false;
+    scene.add(skyDome);
+
     const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 500);
     const terrainRoot = new THREE.Group();
     const buildingRoot = new THREE.Group();
@@ -102,11 +133,15 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     const effectRoot = new THREE.Group();
     scene.add(terrainRoot, buildingRoot, actorRoot, effectRoot);
 
-    scene.add(new THREE.HemisphereLight("#e6f4ed", "#31433b", 1.55));
-    scene.add(new THREE.AmbientLight("#9dbbb6", 0.48));
-    const sun = new THREE.DirectionalLight("#ffe3b5", 2.35);
+    scene.add(new THREE.HemisphereLight("#e6f4ed", "#31433b", 1.52));
+    scene.add(new THREE.AmbientLight("#9dbbb6", 0.38));
+    const sun = new THREE.DirectionalLight("#ffe2b8", 2.25);
     sun.position.set(-32, 48, 28);
     sun.castShadow = true;
+    sun.shadow.radius = 4;
+    sun.shadow.normalBias = 0.022;
+    sun.shadow.camera.near = 1;
+    sun.shadow.camera.far = 190;
     sun.shadow.mapSize.set(2048, 2048);
     sun.shadow.camera.left = -115;
     sun.shadow.camera.right = 115;
@@ -114,6 +149,10 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     sun.shadow.camera.bottom = -115;
     sun.shadow.bias = -0.0003;
     scene.add(sun);
+    const seaFill = new THREE.DirectionalLight("#79cbd0", 0.46);
+    seaFill.position.set(42, 22, -36);
+    seaFill.castShadow = false;
+    scene.add(seaFill);
 
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
@@ -137,6 +176,9 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     };
     const rings: any[] = [];
     const gems: any[] = [];
+    const waterRippleEntries: { x: number; z: number; phase: number; speed: number }[] = [];
+    let waterRippleMesh: any = null;
+    const waterRippleDummy = new THREE.Object3D();
     const turretGroups: { group: any; tower: Terrain3DTower; index: number; flash: any; baseY: number; baseZ: number }[] = [];
     const installationAnimations: { group: any; targetY: number; age: number; duration: number; fromScale: number }[] = [];
     const installationRings: { mesh: any; material: any; age: number; duration: number }[] = [];
@@ -180,6 +222,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       seaShelf: new THREE.MeshStandardMaterial({ color: "#28636a", metalness: 0.16, roughness: 0.42 }),
       shoreSand: new THREE.MeshStandardMaterial({ color: "#d9c49a", roughness: 0.94 }),
       shoreFoam: new THREE.MeshBasicMaterial({ color: "#b9e6d8", transparent: true, opacity: 0.76, depthWrite: false }),
+      waterRipple: new THREE.MeshBasicMaterial({ color: "#c7eee0", transparent: true, opacity: 0.16, depthWrite: false, side: THREE.DoubleSide }),
       cliffLip: new THREE.MeshStandardMaterial({ color: "#c9b58b", roughness: 0.86 }),
       cliffFacet: new THREE.MeshStandardMaterial({ color: "#718071", roughness: 0.96 }),
       ramp: new THREE.MeshStandardMaterial({ color: "#aeb49c", roughness: 0.9 }),
@@ -828,6 +871,8 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
 
     const rebuildTerrain = (data: Terrain3DSnapshot) => {
       clearGroup(terrainRoot);
+      waterRippleMesh = null;
+      waterRippleEntries.length = 0;
       const byHeight: { x: number; z: number; h: number }[][] = [[], [], [], []];
       const tileCells = new Map<string, { x: number; z: number; h: number }>();
 
@@ -987,6 +1032,31 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
           foam.castShadow = false;
           foam.receiveShadow = false;
           terrainRoot.add(foam);
+        }
+
+        // 少量潮汐微光環沿岸緩慢擴散；集中在單一 InstancedMesh，不逐個建立動畫物件。
+        const rippleCandidates = coastEdges.filter((edge) => edge.seed > 0.72);
+        const rippleCount = Math.min(18, rippleCandidates.length);
+        if (rippleCount > 0) {
+          waterRippleMesh = new THREE.InstancedMesh(
+            new THREE.TorusGeometry(0.2, 0.009, 5, 28),
+            shared.waterRipple,
+            rippleCount,
+          );
+          waterRippleMesh.frustumCulled = false;
+          for (let i = 0; i < rippleCount; i++) {
+            const edge = rippleCandidates[Math.min(
+              rippleCandidates.length - 1,
+              Math.floor(((i + 0.5) * rippleCandidates.length) / rippleCount),
+            )];
+            waterRippleEntries.push({
+              x: edge.x + edge.dx * 1.22,
+              z: edge.z + edge.dz * 1.22,
+              phase: edge.seed,
+              speed: 0.72 + edge.seed * 0.42,
+            });
+          }
+          terrainRoot.add(waterRippleMesh);
         }
       }
 
@@ -1365,6 +1435,22 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       // 海面已由上方深海／淺灘雙層承接，移除舊的單色底板以露出水域。
     };
 
+    const updateWaterRipples = (time: number) => {
+      if (!waterRippleMesh || !waterRippleEntries.length) return;
+      for (let i = 0; i < waterRippleEntries.length; i++) {
+        const ripple = waterRippleEntries[i];
+        const phase = (time * 0.00013 * ripple.speed + ripple.phase) % 1;
+        const scale = 0.42 + phase * 1.42;
+        waterRippleDummy.position.set(ripple.x, -0.259, ripple.z);
+        waterRippleDummy.rotation.set(-Math.PI / 2, 0, ripple.phase * Math.PI);
+        waterRippleDummy.scale.set(scale, scale, scale);
+        waterRippleDummy.updateMatrix();
+        waterRippleMesh.setMatrixAt(i, waterRippleDummy.matrix);
+      }
+      waterRippleMesh.instanceMatrix.needsUpdate = true;
+      shared.waterRipple.opacity = 0.11 + (Math.sin(time * 0.0011) * 0.5 + 0.5) * 0.09;
+    };
+
     const rebuildBuildings = (data: Terrain3DSnapshot, animateTurrets: boolean, animateMainUpgrade: boolean) => {
       for (const effect of installationRings) effect.material.dispose();
       for (const effect of buildFlashEffects) effect.material.dispose();
@@ -1686,6 +1772,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
 
       updateActors(data, time);
       updateEffects(data);
+      updateWaterRipples(time);
       const dt = lastTime ? Math.min(0.05, (time - lastTime) / 1000) : 0;
       lastTime = time;
       for (const ring of rings) ring.rotation.y += dt * 0.42;
@@ -1766,6 +1853,10 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       }
       selectedRangeMaterial.dispose();
       clearGroup(effectRoot);
+      scene.remove(skyDome);
+      skyGeometry.dispose();
+      skyMaterial.dispose();
+      shared.waterRipple.dispose();
       for (const texture of textureCache.values()) texture.dispose();
       for (const material of towerAccentMaterials.values()) material.dispose();
       renderer.dispose();
