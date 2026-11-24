@@ -216,6 +216,8 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       terrainInlay: new THREE.MeshStandardMaterial({ color: "#e1d0a6", roughness: 0.82, metalness: 0.08 }),
       roadPaver: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.94 }),
       roadEdge: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.9 }),
+      foundationStone: new THREE.MeshStandardMaterial({ color: "#b5b29f", roughness: 0.9 }),
+      foundationGold: new THREE.MeshStandardMaterial({ color: "#c5a56c", metalness: 0.58, roughness: 0.38 }),
       grass: new THREE.MeshStandardMaterial({ color: "#83a878", roughness: 0.96 }),
       terrainCrystal: new THREE.MeshStandardMaterial({
         color: "#55a6a2",
@@ -399,6 +401,21 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       addBox(root, 1.1, 0.1, 0.2, 0, 0.6, 2.81, shared.stone);
       addBox(root, 1.18, 0.09, 0.18, 0, 0.51, 2.94, shared.stone);
 
+      // 本陣基座外緣加上三面石刻邊飾；入口側保留完整石階與通行視線。
+      for (const sign of [-1, 1]) {
+        addBox(root, 0.22, 0.045, 0.46, sign * 2.6, 0.635, -2.6, shared.foundationStone);
+        addBox(root, 0.22, 0.045, 0.46, sign * 2.6, 0.635, 2.6, shared.foundationStone);
+        addBox(root, 0.5, 0.045, 0.22, 0, 0.635, -2.6, shared.foundationStone);
+        const sideInlay = addBox(root, 0.055, 0.018, 0.28, sign * 2.6, 0.669, -2.6, shared.foundationGold);
+        sideInlay.castShadow = false;
+      }
+      for (const x of [-2.6, 2.6]) {
+        const cornerSeal = new THREE.Mesh(new THREE.OctahedronGeometry(0.085, 0), shared.foundationGold);
+        cornerSeal.position.set(x, 0.69, -2.6);
+        cornerSeal.scale.set(1.1, 0.42, 1.1);
+        root.add(cornerSeal);
+      }
+
       // 中央聖殿、藍色穹頂和高聳水晶尖塔
       addCylinder(root, 1.03, 1.18, 1.52, 0, 1.64, -0.28, shared.ivory, 12);
       addCylinder(root, 1.12, 1.12, 0.18, 0, 2.46, -0.28, shared.gold, 12);
@@ -525,6 +542,11 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     const createStake = (tower: Terrain3DTower, heights: number[]) => {
       const root = new THREE.Group();
       root.position.set(tower.x / CELL, groundTop(heights[tower.gy * COLS + tower.gx] ?? 0), tower.y / CELL);
+      addBox(root, 0.96, 0.075, 0.96, 0, 0.0375, 0, shared.foundationStone);
+      const stakeSeal = new THREE.Mesh(new THREE.TorusGeometry(0.54, 0.026, 6, 24), shared.foundationGold);
+      stakeSeal.rotation.x = Math.PI / 2;
+      stakeSeal.position.y = 0.08;
+      root.add(stakeSeal);
       addBox(root, 0.78, 0.16, 0.78, 0, 0.08, 0, shared.gold);
       addCylinder(root, 0.22, 0.34, 0.72, 0, 0.48, 0, shared.stone, 8);
       const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.25, 0), shared.crystal);
@@ -542,6 +564,25 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       const special = definition?.special ?? "high";
       const levelLift = Math.min(0.18, (level - 1) * 0.026);
       const radius = 0.66 + Math.min(0.08, (level - 1) * 0.012);
+
+      // 塔座下方加一圈薄石造承台，只露出建築底緣，避免擴張到相鄰格。
+      const foundation = addCylinder(root, 0.83, 0.91, 0.08, 0, 0.04, 0, shared.foundationStone, 12);
+      foundation.receiveShadow = true;
+      const foundationTrim = new THREE.Mesh(new THREE.TorusGeometry(0.85, 0.022, 6, 36), shared.foundationGold);
+      foundationTrim.rotation.x = Math.PI / 2;
+      foundationTrim.position.y = 0.083;
+      root.add(foundationTrim);
+      for (const [x, z, rot] of [[0.86, 0, 0], [-0.86, 0, 0], [0, 0.86, Math.PI / 2], [0, -0.86, Math.PI / 2]] as const) {
+        const anchorStone = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.045, 0.11), shared.foundationStone);
+        anchorStone.position.set(x, 0.087, z);
+        anchorStone.rotation.y = rot;
+        anchorStone.castShadow = false;
+        root.add(anchorStone);
+        const bolt = new THREE.Mesh(new THREE.OctahedronGeometry(0.045, 0), shared.foundationGold);
+        bolt.position.set(x, 0.119, z);
+        bolt.scale.set(1, 0.48, 1);
+        root.add(bolt);
+      }
 
       // 分層八角底座：深藍承重層、金屬壓邊、淺石平台。
       addCylinder(root, radius, radius + 0.16, 0.2, 0, 0.1, 0, shared.blue, 12);
