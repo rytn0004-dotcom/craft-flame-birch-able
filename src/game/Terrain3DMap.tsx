@@ -7,7 +7,7 @@ import { TILE, type PlacedTile } from "./tiles";
 export type Terrain3DTower = {
   x: number; y: number; gx: number; gy: number; def: number; level: number; aim: number;
   stake?: boolean; sanctuary?: boolean; hqFireLv?: number; hqFortifyLv?: number;
-  hqTurretAtk?: number[]; hqCannonAtk?: number;
+  hqTurretAtk?: number[]; hqCannonAtk?: number[]; hqCharge?: number; hqBuildFlash?: number;
   hp: number; maxHp: number; image?: HTMLImageElement | null;
 };
 
@@ -119,7 +119,11 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     const textureCache = new Map<HTMLImageElement, any>();
     const rings: any[] = [];
     const gems: any[] = [];
-    const turretGroups: { group: any; tower: Terrain3DTower; index: number; flash: any }[] = [];
+    const turretGroups: { group: any; tower: Terrain3DTower; index: number; flash: any; baseY: number; baseZ: number }[] = [];
+    const installationAnimations: { group: any; targetY: number; age: number; duration: number; fromScale: number }[] = [];
+    const installationRings: { mesh: any; material: any; age: number; duration: number }[] = [];
+    const buildFlashEffects: { mesh: any; material: any; tower: Terrain3DTower }[] = [];
+    const chargeCores: { mesh: any; material: any; tower: Terrain3DTower }[] = [];
     const towerSprites: any[] = [];
     const enemySprites: any[] = [];
     const shotNodes: any[] = [];
@@ -139,6 +143,9 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         new THREE.MeshStandardMaterial({ color: MATERIALS.mid, roughness: 0.9 }),
         new THREE.MeshStandardMaterial({ color: MATERIALS.high, roughness: 0.88 }),
       ],
+      cliff: new THREE.MeshStandardMaterial({ color: "#354b59", roughness: 0.97 }),
+      cliffBand: new THREE.MeshStandardMaterial({ color: "#91a3a8", roughness: 0.84 }),
+      ramp: new THREE.MeshStandardMaterial({ color: "#9aabb0", roughness: 0.9 }),
     };
 
     const getTexture = (image: HTMLImageElement) => {
@@ -177,6 +184,16 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       parent.add(mesh);
       gems.push(mesh);
       return mesh;
+    };
+
+    const addCornerInstallationRing = (parent: any, x: number, z: number) => {
+      const material = new THREE.MeshBasicMaterial({ color: "#ffe2a0", transparent: true, opacity: 0.95, side: THREE.DoubleSide });
+      const mesh = new THREE.Mesh(new THREE.TorusGeometry(0.52, 0.045, 8, 32), material);
+      mesh.rotation.x = Math.PI / 2;
+      mesh.position.set(x, 1.72, z);
+      mesh.scale.setScalar(0.2);
+      parent.add(mesh);
+      installationRings.push({ mesh, material, age: 0, duration: 0.92 });
     };
 
     const makeCannon = (parent: any, scale = 1) => {
