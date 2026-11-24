@@ -444,7 +444,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       const centerX = hq ? hq.x / CELL : 10;
       const centerZ = hq ? hq.y / CELL : 10;
       focus(centerX * CELL, centerZ * CELL);
-      camera.position.set(centerX + 10, 46, centerZ + 10);
+      camera.position.set(centerX + 5, groundTop(h) + 27, centerZ + 5);
       controls.update();
     };
 
@@ -503,7 +503,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       const centerZ = hq ? hq.y / CELL : 10;
       const h = hq ? snapshot.heights[hq.gy * COLS + hq.gx] ?? 0 : 0;
       controls.target.set(centerX, groundTop(h), centerZ);
-      camera.position.set(centerX + 10, groundTop(h) + 46, centerZ + 10);
+      camera.position.set(centerX + 5, groundTop(h) + 27, centerZ + 5);
       controls.update();
 
       apiRef.current = { screenToWorld, focus, reset };
@@ -546,8 +546,12 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         lastBuildAt = time;
         let heightHash = 2166136261;
         for (let i = 0; i < data.heights.length; i++) heightHash = Math.imul(heightHash ^ (data.heights[i] ?? 0), 16777619);
+        let blockedHash = 2166136261;
+        for (const key of data.blocked) {
+          for (let i = 0; i < key.length; i++) blockedHash = Math.imul(blockedHash ^ key.charCodeAt(i), 16777619);
+        }
         const placedKey = data.placed.map((tile) => [tile.tc, tile.tr, tile.templateId, tile.rot].join(",")).join("|");
-        const terrainKey = data.mapMode + "|" + placedKey + "|" + heightHash + "|" + data.blocked.size;
+        const terrainKey = data.mapMode + "|" + placedKey + "|" + heightHash + "|" + blockedHash;
         if (terrainKey !== lastTerrainKey) {
           rebuildTerrain(data);
           lastTerrainKey = terrainKey;
