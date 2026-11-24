@@ -46,7 +46,7 @@ type Props = {
   apiRef: { current: Terrain3DApi | null };
 };
 
-const HEIGHT_STEP = 0.36;
+const HEIGHT_STEP = 0.42;
 const MATERIALS = {
   road: "#344b5d",
   low: "#687c86",
@@ -146,7 +146,11 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         new THREE.MeshStandardMaterial({ color: MATERIALS.high, roughness: 0.88 }),
       ],
       cliff: new THREE.MeshStandardMaterial({ color: "#354b59", roughness: 0.97 }),
-      cliffBand: new THREE.MeshStandardMaterial({ color: "#91a3a8", roughness: 0.84 }),
+      cliffBand: new THREE.MeshStandardMaterial({ color: "#71858a", roughness: 0.88 }),
+      cliffBandLight: new THREE.MeshStandardMaterial({ color: "#aab9b5", roughness: 0.82 }),
+      cliffCap: new THREE.MeshStandardMaterial({ color: "#c2cbc3", roughness: 0.76 }),
+      rockDetail: new THREE.MeshStandardMaterial({ color: "#89999a", roughness: 0.96 }),
+      floor: new THREE.MeshStandardMaterial({ color: "#10283a", roughness: 0.98 }),
       ramp: new THREE.MeshStandardMaterial({ color: "#9aabb0", roughness: 0.9 }),
     };
 
@@ -205,12 +209,34 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       base.position.y = 0.17 * scale;
       base.castShadow = true;
       cannon.add(base);
+
+      // 炮尾能源匣、炮身護軌與金屬束環，讓主炮和角樓炮塔都有明確的機械結構。
+      const breech = new THREE.Mesh(new THREE.CylinderGeometry(0.25 * scale, 0.29 * scale, 0.3 * scale, 14), shared.blue);
+      breech.rotation.x = Math.PI / 2;
+      breech.position.set(0, 0.47 * scale, -0.2 * scale);
+      breech.castShadow = true;
+      cannon.add(breech);
+      for (const side of [-1, 1]) {
+        const rail = new THREE.Mesh(new THREE.BoxGeometry(0.095 * scale, 0.12 * scale, 0.64 * scale), shared.brightGold);
+        rail.position.set(side * 0.235 * scale, 0.39 * scale, 0.34 * scale);
+        rail.castShadow = true;
+        cannon.add(rail);
+        const powerCell = new THREE.Mesh(new THREE.OctahedronGeometry(0.075 * scale, 0), shared.crystal);
+        powerCell.position.set(side * 0.29 * scale, 0.37 * scale, 0.5 * scale);
+        cannon.add(powerCell);
+      }
       const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.16 * scale, 0.23 * scale, 1.08 * scale, 14), shared.gold);
       barrel.rotation.x = Math.PI / 2;
       barrel.position.set(0, 0.47 * scale, 0.34 * scale);
       barrel.castShadow = true;
       cannon.add(barrel);
-      const muzzle = new THREE.Mesh(new THREE.TorusGeometry(0.17 * scale, 0.055 * scale, 8, 18), shared.brightGold);
+      for (const z of [0.02, 0.34, 0.66]) {
+        const band = new THREE.Mesh(new THREE.TorusGeometry(0.19 * scale, 0.032 * scale, 7, 18), shared.brightGold);
+        band.rotation.x = Math.PI / 2;
+        band.position.set(0, 0.47 * scale, z * scale);
+        cannon.add(band);
+      }
+      const muzzle = new THREE.Mesh(new THREE.TorusGeometry(0.22 * scale, 0.055 * scale, 8, 20), shared.brightGold);
       muzzle.rotation.x = Math.PI / 2;
       muzzle.position.set(0, 0.47 * scale, 0.88 * scale);
       cannon.add(muzzle);
@@ -263,6 +289,33 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       addBox(root, 0.52, 0.47, 0.035, 0, 0.98, 2.55, shared.gold);
       addBox(root, 0.33, 0.37, 0.035, 0, 0.98, 2.58, shared.glass);
 
+      // 牆面金屬收邊、窗框、立柱與石階，避免近距離環視時只看到大塊方形牆體。
+      for (const sign of [-1, 1]) {
+        addBox(root, 4.55, 0.055, 0.36, 0, 0.78, sign * 2.26, shared.gold);
+        addBox(root, 4.55, 0.045, 0.36, 0, 1.43, sign * 2.26, shared.gold);
+        addBox(root, 0.36, 0.055, 4.55, sign * 2.26, 0.78, 0, shared.gold);
+        addBox(root, 0.36, 0.045, 4.55, sign * 2.26, 1.43, 0, shared.gold);
+
+        for (const offset of [-1.25, 1.25]) {
+          addBox(root, 0.29, 0.42, 0.07, offset, 1.13, sign * 2.44, shared.gold);
+          addBox(root, 0.19, 0.29, 0.025, offset, 1.13, sign * 2.49, shared.glass);
+          addBox(root, 0.34, 0.045, 0.10, offset, 0.9, sign * 2.45, shared.brightGold);
+
+          addBox(root, 0.07, 0.42, 0.29, sign * 2.44, 1.13, offset, shared.gold);
+          addBox(root, 0.025, 0.29, 0.19, sign * 2.49, 1.13, offset, shared.glass);
+          addBox(root, 0.10, 0.045, 0.34, sign * 2.45, 0.9, offset, shared.brightGold);
+        }
+        for (const offset of [-1.92, 1.92]) {
+          addBox(root, 0.16, 0.82, 0.14, offset, 1.08, sign * 2.43, shared.blue);
+          addBox(root, 0.2, 0.08, 0.18, offset, 1.52, sign * 2.43, shared.brightGold);
+          addBox(root, 0.14, 0.82, 0.16, sign * 2.43, 1.08, offset, shared.blue);
+          addBox(root, 0.18, 0.08, 0.2, sign * 2.43, 1.52, offset, shared.brightGold);
+        }
+      }
+      addBox(root, 1.0, 0.12, 0.2, 0, 0.7, 2.62, shared.ivory);
+      addBox(root, 1.1, 0.1, 0.2, 0, 0.6, 2.81, shared.stone);
+      addBox(root, 1.18, 0.09, 0.18, 0, 0.51, 2.94, shared.stone);
+
       // 中央聖殿、藍色穹頂和高聳水晶尖塔
       addCylinder(root, 1.03, 1.18, 1.52, 0, 1.64, -0.28, shared.ivory, 12);
       addCylinder(root, 1.12, 1.12, 0.18, 0, 2.46, -0.28, shared.gold, 12);
@@ -291,9 +344,9 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
 
       // 主炮始終存在，使用金屬炮身＋藍色晶體砲口
       const mainGunMount = new THREE.Group();
-      mainGunMount.position.set(0, 1.86, 0.82);
+      mainGunMount.position.set(0, 1.92, 0.82);
       mainGunMount.rotation.y = Math.atan2(Math.cos(tower.aim), Math.sin(tower.aim));
-      const mainCannon = makeCannon(mainGunMount, (tower.hqFireLv ?? 0) >= 2 ? 1.38 : 1.08);
+      const mainCannon = makeCannon(mainGunMount, (tower.hqFireLv ?? 0) >= 2 ? 1.52 : 1.2);
       mainCannon.position.y = 0.12;
       if (animateMainUpgrade) {
         mainCannon.scale.setScalar(0.72);
@@ -302,12 +355,12 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       root.add(mainGunMount);
       turretGroups.push({
         group: mainGunMount, tower, index: -1, flash: mainCannon.userData.muzzleFlash,
-        baseY: 1.86, baseZ: 0.82,
+        baseY: 1.92, baseZ: 0.82,
       });
 
       const mainRing = new THREE.Group();
-      mainRing.position.set(0, 2.02, 0.82);
-      const ringMesh = new THREE.Mesh(new THREE.TorusGeometry((tower.hqFireLv ?? 0) >= 2 ? 0.92 : 0.76, 0.065, 10, 44), shared.brightGold);
+      mainRing.position.set(0, 2.08, 0.82);
+      const ringMesh = new THREE.Mesh(new THREE.TorusGeometry((tower.hqFireLv ?? 0) >= 2 ? 1.08 : 0.88, 0.065, 10, 48), shared.brightGold);
       ringMesh.rotation.x = Math.PI / 2;
       mainRing.add(ringMesh);
       root.add(mainRing);
@@ -328,6 +381,12 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         const gem = new THREE.Mesh(new THREE.OctahedronGeometry(0.13, 0), shared.crystal);
         gem.position.y = 0.06;
         spin.add(gem);
+        for (let mark = 0; mark < 4; mark++) {
+          const angle = (mark * Math.PI) / 2;
+          const rune = new THREE.Mesh(new THREE.OctahedronGeometry(0.055, 0), shared.brightGold);
+          rune.position.set(Math.cos(angle) * 0.35, 0.018, Math.sin(angle) * 0.35);
+          spin.add(rune);
+        }
         root.add(spin);
         rings.push(spin);
         gems.push(gem);
@@ -471,6 +530,38 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         terrainRoot.add(mesh);
       }
 
+      // 高地表面散布少量低矮岩屑，破除棋盤格般的單調感，不遮擋道路或建築。
+      const rockCells = Array.from(tileCells.values()).filter((cell) => {
+        if (cell.h <= 0) return false;
+        const seed = Math.abs(Math.sin(cell.x * 91.7 + cell.z * 43.3) * 24634.6345) % 1;
+        return seed > 0.86;
+      });
+      if (rockCells.length) {
+        const rocks = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(0.075, 0), shared.rockDetail, rockCells.length);
+        const dummy = new THREE.Object3D();
+        const tint = new THREE.Color();
+        for (let i = 0; i < rockCells.length; i++) {
+          const cell = rockCells[i];
+          const seed = Math.abs(Math.sin(cell.x * 127.1 + cell.z * 311.7) * 43758.5453) % 1;
+          dummy.position.set(
+            cell.x + (seed - 0.5) * 0.62,
+            groundTop(cell.h) + 0.025,
+            cell.z + (Math.abs(Math.sin(seed * 83.1)) - 0.5) * 0.62,
+          );
+          dummy.rotation.set(seed * 0.7, seed * Math.PI * 2, seed * 0.45);
+          dummy.scale.setScalar(0.55 + seed * 0.55);
+          dummy.updateMatrix();
+          rocks.setMatrixAt(i, dummy.matrix);
+          tint.set(seed > 0.55 ? "#aab6ae" : "#687d83");
+          rocks.setColorAt(i, tint);
+        }
+        rocks.instanceMatrix.needsUpdate = true;
+        if (rocks.instanceColor) rocks.instanceColor.needsUpdate = true;
+        rocks.castShadow = true;
+        rocks.receiveShadow = true;
+        terrainRoot.add(rocks);
+      }
+
       // 裸露邊緣的層理岩壁：高度差越大，側面越深、越厚。
       const cliffDirections = [
         { dc: 0, dr: -1, dx: 0, dz: -0.46, sx: 0.94, sz: 0.08 },
@@ -478,7 +569,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         { dc: 0, dr: 1, dx: 0, dz: 0.46, sx: 0.94, sz: 0.08 },
         { dc: -1, dr: 0, dx: -0.46, dz: 0, sx: 0.08, sz: 0.94 },
       ];
-      const cliffFaces: { x: number; y: number; z: number; sx: number; sy: number; sz: number; bandY: number }[] = [];
+      const cliffFaces: { x: number; y: number; z: number; sx: number; sy: number; sz: number; bandY: number; upperBandY: number }[] = [];
       for (const cell of tileCells.values()) {
         if (cell.h <= 0) continue;
         const gx = Math.floor(cell.x), gy = Math.floor(cell.z);
@@ -496,12 +587,15 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
             sy: high - low,
             sz: d.sz,
             bandY: low + (high - low) * 0.28,
+            upperBandY: low + (high - low) * 0.68,
           });
         }
       }
       if (cliffFaces.length) {
         const cliffMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), shared.cliff, cliffFaces.length);
         const bandMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), shared.cliffBand, cliffFaces.length);
+        const upperBandMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), shared.cliffBandLight, cliffFaces.length);
+        const capMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), shared.cliffCap, cliffFaces.length);
         const matrix = new THREE.Matrix4();
         for (let i = 0; i < cliffFaces.length; i++) {
           const face = cliffFaces[i];
@@ -511,13 +605,24 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
           matrix.makeScale(face.sx, 0.035, Math.max(face.sz, 0.11));
           matrix.setPosition(face.x, face.bandY, face.z);
           bandMesh.setMatrixAt(i, matrix);
+          matrix.makeScale(face.sx, 0.032, Math.max(face.sz, 0.11));
+          matrix.setPosition(face.x, face.upperBandY, face.z);
+          upperBandMesh.setMatrixAt(i, matrix);
+          matrix.makeScale(face.sx * 1.04, 0.055, Math.max(face.sz * 1.18, 0.12));
+          matrix.setPosition(face.x, face.y + face.sy / 2 - 0.015, face.z);
+          capMesh.setMatrixAt(i, matrix);
         }
         cliffMesh.instanceMatrix.needsUpdate = true;
         bandMesh.instanceMatrix.needsUpdate = true;
+        upperBandMesh.instanceMatrix.needsUpdate = true;
+        capMesh.instanceMatrix.needsUpdate = true;
         cliffMesh.castShadow = true;
         cliffMesh.receiveShadow = true;
         bandMesh.receiveShadow = true;
-        terrainRoot.add(cliffMesh, bandMesh);
+        upperBandMesh.receiveShadow = true;
+        capMesh.castShadow = true;
+        capMesh.receiveShadow = true;
+        terrainRoot.add(cliffMesh, bandMesh, upperBandMesh, capMesh);
       }
 
       // 單級坡面連接相鄰平台；道路高度 0 不鋪坡，避免遮住怪物通道。
@@ -560,7 +665,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
 
       const floor = new THREE.Mesh(
         new THREE.PlaneGeometry(COLS + 8, ROWS + 8),
-        new THREE.MeshStandardMaterial({ color: "#10283a", roughness: 0.98 }),
+        shared.floor,
       );
       floor.rotation.x = -Math.PI / 2;
       floor.position.set(COLS / 2, -0.025, ROWS / 2);
