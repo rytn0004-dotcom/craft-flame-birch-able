@@ -1537,36 +1537,48 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       }
 
       // 稀疏古代遺跡：只落在可建造的高平台，避開道路、建築與聖地，不改格子資料。
-      const ruinSites: { x: number; z: number; h: number; seed: number }[] = [];
+      const ruinSites: { x: number; z: number; h: number; seed: number; baseY?: number }[] = [];
       const ruinNeighborOffsets = [
         [0, -1], [1, 0], [0, 1], [-1, 0],
         [-1, -1], [1, -1], [1, 1], [-1, 1],
       ];
-      for (const cell of tileCells.values()) {
-        if (cell.h < 2) continue;
-        const gx = Math.floor(cell.x);
-        const gy = Math.floor(cell.z);
-        const key = gx + "," + gy;
-        if (data.mapMode === "layout" && data.blocked.has(key)) continue;
-        const seed = Math.abs(Math.sin(cell.x * 39.7 + cell.z * 83.1) * 31871.23) % 1;
-        if (seed < 0.9915) continue;
-        const tooCloseToBuilding = protectedBuildings.some((building) =>
-          Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 2.65,
-        );
-        if (tooCloseToBuilding) continue;
-        const neighbors = ruinNeighborOffsets.map(([dc, dr]) =>
-          tileCells.get((gx + dc) + "," + (gy + dr)),
-        );
-        if (neighbors.filter((neighbor) => neighbor && neighbor.h >= cell.h - 0).length < 3) continue;
-        const nearRoad = data.mapMode === "expand" && neighbors.some((neighbor, index) => {
-          if (!neighbor) return false;
-          const [dc, dr] = ruinNeighborOffsets[index];
-          return !data.blocked.has((gx + dc) + "," + (gy + dr));
-        });
-        if (nearRoad) continue;
-        if (ruinSites.some((site) => Math.hypot(cell.x - site.x, cell.z - site.z) < 6.4)) continue;
-        ruinSites.push({ x: cell.x, z: cell.z, h: cell.h, seed });
-        if (ruinSites.length >= 18) break;
+
+      if (data.mapMode === "layout") {
+        // 自訂／完整關卡只把遺跡放在 blocked 障礙格，保留所有可建造平台的空間。
+        for (const cell of tileCells.values()) {
+          if (cell.h < 2) continue;
+          const gx = Math.floor(cell.x);
+          const gy = Math.floor(cell.z);
+          const key = gx + "," + gy;
+          if (!data.blocked.has(key)) continue;
+          const seed = Math.abs(Math.sin(cell.x * 39.7 + cell.z * 83.1) * 31871.23) % 1;
+          if (seed < 0.9915) continue;
+          const tooCloseToBuilding = protectedBuildings.some((building) =>
+            Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 2.65,
+          );
+          if (tooCloseToBuilding) continue;
+          const neighbors = ruinNeighborOffsets.map(([dc, dr]) =>
+            tileCells.get((gx + dc) + "," + (gy + dr)),
+          );
+          if (neighbors.filter((neighbor) => neighbor && neighbor.h >= cell.h).length < 3) continue;
+          if (ruinSites.some((site) => Math.hypot(cell.x - site.x, cell.z - site.z) < 5.4)) continue;
+          ruinSites.push({ x: cell.x, z: cell.z, h: cell.h, seed });
+          if (ruinSites.length >= 22) break;
+        }
+      } else {
+        // 擴張模式的陸地幾乎全是可建格；古遺跡改放在島外淺海，避免佔住任何可建造高地。
+        const offshoreCandidates = coastEdges.filter((edge) => edge.seed > 0.57);
+        for (const edge of offshoreCandidates) {
+          const x = edge.x + edge.dx * 1.62 + edge.dz * (edge.seed - 0.5) * 0.28;
+          const z = edge.z + edge.dz * 1.62 + edge.dx * (edge.seed - 0.5) * 0.28;
+          const tooCloseToBuilding = protectedBuildings.some((building) =>
+            Math.hypot(x - building.x, z - building.z) < building.radius + 2.2,
+          );
+          if (tooCloseToBuilding) continue;
+          if (ruinSites.some((site) => Math.hypot(x - site.x, z - site.z) < 5.6)) continue;
+          ruinSites.push({ x, z, h: 0, baseY: -0.34, seed: edge.seed });
+          if (ruinSites.length >= 14) break;
+        }
       }
 
       if (ruinSites.length) {
@@ -1595,11 +1607,22 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
           shared.ruinShadow,
           ruinSites.length * 3,
         );
+        const lintels = new THREE.InstancedMesh(
+          new THREE.BoxGeometry(0.82, 0.13, 0.22),
+          shared.ruinStone,
+          ruinSites.length,
+        );
+        const ruinMoss = new THREE.InstancedMesh(
+          new THREE.ConeGeometry(0.045, 0.12, 5),
+          shared.grass,
+          ruinSites.length * 4,
+        );
+        let lintelCount = 0;
         const dummy = new THREE.Object3D();
         const tint = new THREE.Color();
         for (let i = 0; i < ruinSites.length; i++) {
           const site = ruinSites[i];
-          const top = groundTop(site.h);
+          const top = site.baseY ?? groundTop(site.h);
           const angle = site.seed * Math.PI * 2;
           dummy.position.set(site.x, top + 0.065, site.z);
           dummy.rotation.set(0, angle, 0);
@@ -1628,6 +1651,17 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
             columns.setMatrixAt(index, dummy.matrix);
             tint.set(pillar.tint);
             columns.setColorAt(index, tint);
+          }
+
+          if (site.seed > 0.995) {
+            dummy.position.set(site.x, top + 1.18, site.z);
+            dummy.rotation.set(0, angle - Math.atan2(0.28, 0.77), (site.seed - 0.5) * 0.06);
+            dummy.scale.set(1, 1, 1);
+            dummy.updateMatrix();
+            lintels.setMatrixAt(lintelCount, dummy.matrix);
+            tint.set("#b5ad98");
+            lintels.setColorAt(lintelCount, tint);
+            lintelCount++;
           }
 
           // 符文石面向略偏外側；三道青綠刻痕以微弱自發光辨識古代遺跡。
@@ -1669,8 +1703,26 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
             dummy.updateMatrix();
             rubble.setMatrixAt(rockIndex, dummy.matrix);
           }
+
+          for (let tuft = 0; tuft < 4; tuft++) {
+            const tuftIndex = i * 4 + tuft;
+            const tuftAngle = angle + tuft * (Math.PI / 2) + 0.32;
+            const tuftRadius = 0.73;
+            dummy.position.set(
+              site.x + Math.cos(tuftAngle) * tuftRadius,
+              top + 0.12,
+              site.z + Math.sin(tuftAngle) * tuftRadius,
+            );
+            dummy.rotation.set(Math.cos(tuftAngle) * 0.18, tuftAngle, Math.sin(tuftAngle) * -0.18);
+            dummy.scale.set(0.82, 0.62 + (tuft % 2) * 0.12, 0.82);
+            dummy.updateMatrix();
+            ruinMoss.setMatrixAt(tuftIndex, dummy.matrix);
+            tint.set(tuft % 2 ? "#8da77a" : "#6d9274");
+            ruinMoss.setColorAt(tuftIndex, tint);
+          }
         }
-        for (const mesh of [plinths, columns, runeSlabs, runeLines, rubble]) {
+        lintels.count = lintelCount;
+        for (const mesh of [plinths, columns, runeSlabs, runeLines, rubble, lintels, ruinMoss]) {
           mesh.instanceMatrix.needsUpdate = true;
           if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
           mesh.castShadow = mesh === columns || mesh === runeSlabs;
@@ -1987,9 +2039,11 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
           for (let i = 0; i < stairRamps.length; i++) {
             const ramp = stairRamps[i];
             for (let step = 0; step < 3; step++) {
-              const z = (step - 1) * 0.28;
-              const heightAlongRamp = HEIGHT_STEP * (0.5 - z / 0.92) + 0.025;
-              stairDummy.position.set(ramp.x, ramp.y + heightAlongRamp, ramp.z);
+              const localZ = (step - 1) * 0.28;
+              const heightAlongRamp = HEIGHT_STEP * (0.5 - localZ / 0.92) + 0.025;
+              const worldX = ramp.x + Math.sin(ramp.rot) * localZ;
+              const worldZ = ramp.z + Math.cos(ramp.rot) * localZ;
+              stairDummy.position.set(worldX, ramp.y + heightAlongRamp, worldZ);
               stairDummy.rotation.set(0, ramp.rot, 0);
               stairDummy.scale.set(1, 1, 1);
               stairDummy.updateMatrix();
