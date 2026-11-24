@@ -1629,12 +1629,13 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
           const site = ruinSites[i];
           const top = site.baseY ?? groundTop(site.h);
           const angle = site.seed * Math.PI * 2;
+          const variant = Math.abs(Math.sin(site.x * 17.1 + site.z * 31.7) * 29171.3) % 1;
           dummy.position.set(site.x, top + 0.065, site.z);
           dummy.rotation.set(0, angle, 0);
           dummy.scale.set(1, 1, 1);
           dummy.updateMatrix();
           plinths.setMatrixAt(i, dummy.matrix);
-          tint.set(site.seed > 0.995 ? "#c2b99e" : "#8e927f");
+          tint.set(variant > 0.72 ? "#c2b99e" : "#8e927f");
           plinths.setColorAt(i, tint);
 
           dummy.position.set(site.x, top + 0.145, site.z);
@@ -1642,13 +1643,13 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
           dummy.scale.set(1, 1, 1);
           dummy.updateMatrix();
           runeRings.setMatrixAt(i, dummy.matrix);
-          tint.set(site.seed > 0.996 ? "#9ae6ca" : "#5fa99a");
+          tint.set(variant > 0.82 ? "#9ae6ca" : "#5fa99a");
           runeRings.setColorAt(i, tint);
 
           // 一根完整、一根折斷傾斜的柱身，讓遺跡輪廓不會像整齊排列的複製品。
           const pillarData = [
-            { x: -0.38, z: -0.12, height: 1.12, lean: 0.035, tint: "#b8b09a" },
-            { x: 0.39, z: 0.16, height: 0.62, lean: 0.34, tint: "#8e9586" },
+            { x: -0.38, z: -0.12, height: 0.98 + variant * 0.24, lean: 0.035, tint: "#b8b09a" },
+            { x: 0.39, z: 0.16, height: 0.42 + variant * 0.3, lean: 0.18 + variant * 0.2, tint: "#8e9586" },
           ];
           for (let p = 0; p < pillarData.length; p++) {
             const pillar = pillarData[p];
@@ -1666,7 +1667,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
             columns.setColorAt(index, tint);
           }
 
-          if (site.seed > 0.995) {
+          if (variant > 0.58) {
             dummy.position.set(site.x, top + 1.18, site.z);
             dummy.rotation.set(0, angle - Math.atan2(0.28, 0.77), (site.seed - 0.5) * 0.06);
             dummy.scale.set(1, 1, 1);
