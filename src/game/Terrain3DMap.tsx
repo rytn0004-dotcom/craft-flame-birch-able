@@ -238,6 +238,17 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         emissiveIntensity: 0.36,
       }),
       driftwood: new THREE.MeshStandardMaterial({ color: "#796c59", roughness: 0.98 }),
+      ridgePeak: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.96 }),
+      caveShadow: new THREE.MeshBasicMaterial({
+        color: "#102c34",
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.92,
+        depthWrite: false,
+      }),
+      caveRim: new THREE.MeshStandardMaterial({ color: "#68786e", roughness: 0.98 }),
+      bridgeStone: new THREE.MeshStandardMaterial({ color: "#c0b69b", roughness: 0.9 }),
+      bridgeTrim: new THREE.MeshStandardMaterial({ color: "#b99560", metalness: 0.46, roughness: 0.44 }),
       grass: new THREE.MeshStandardMaterial({ color: "#83a878", roughness: 0.96 }),
       terrainCrystal: new THREE.MeshStandardMaterial({
         color: "#55a6a2",
@@ -1396,6 +1407,43 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         }
       }
 
+        // 外海偶爾露出高聳海蝕柱，補足島嶼外輪廓；固定最多 12 組。
+        const seaStackEdges = coastEdges.filter((edge) => edge.seed > 0.982).slice(0, 12);
+        if (seaStackEdges.length) {
+          const seaStacks = new THREE.InstancedMesh(
+            new THREE.DodecahedronGeometry(0.34, 0),
+            shared.reefRock,
+            seaStackEdges.length * 2,
+          );
+          const dummy = new THREE.Object3D();
+          const tint = new THREE.Color();
+          for (let i = 0; i < seaStackEdges.length; i++) {
+            const edge = seaStackEdges[i];
+            const x = edge.x + edge.dx * 1.82;
+            const z = edge.z + edge.dz * 1.82;
+            dummy.position.set(x, -0.05, z);
+            dummy.rotation.set(edge.seed * 0.32, edge.seed * Math.PI * 2, (edge.seed - 0.5) * 0.18);
+            dummy.scale.set(1.05, 1.85 + edge.seed * 0.55, 0.92);
+            dummy.updateMatrix();
+            seaStacks.setMatrixAt(i * 2, dummy.matrix);
+            tint.set("#4e6e6d");
+            seaStacks.setColorAt(i * 2, tint);
+
+            dummy.position.set(x + edge.dz * 0.22, 0.28, z - edge.dx * 0.22);
+            dummy.rotation.set(edge.seed * 0.24, edge.seed * Math.PI * 2 + 0.6, 0.16);
+            dummy.scale.set(0.74, 0.92 + edge.seed * 0.32, 0.72);
+            dummy.updateMatrix();
+            seaStacks.setMatrixAt(i * 2 + 1, dummy.matrix);
+            tint.set("#71877c");
+            seaStacks.setColorAt(i * 2 + 1, tint);
+          }
+          seaStacks.instanceMatrix.needsUpdate = true;
+          if (seaStacks.instanceColor) seaStacks.instanceColor.needsUpdate = true;
+          seaStacks.castShadow = false;
+          seaStacks.receiveShadow = false;
+          terrainRoot.add(seaStacks);
+        }
+
       // 高地表面散布少量低矮岩屑，破除棋盤格般的單調感，不遮擋道路或建築。
       const rockCells = Array.from(tileCells.values()).filter((cell) => {
         if (cell.h <= 0) return false;
@@ -1685,6 +1733,60 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         terrainRoot.add(veins);
       }
 
+      // 石灰岩山脊的尖峰露頭：只在高地與石灰岩區出現，保持低於防禦塔輪廓。
+      const peakCells = Array.from(tileCells.values()).filter((cell) => {
+        if (cell.h < 2 || terrainRegion(cell) !== "limestone" || !detailIsClear(cell, 1.9)) return false;
+        const seed = Math.abs(Math.sin(cell.x * 87.1 + cell.z * 53.9) * 23817.3) % 1;
+        return seed > 0.965;
+      }).slice(0, 96);
+      if (peakCells.length) {
+        const peaks = new THREE.InstancedMesh(
+          new THREE.ConeGeometry(0.14, 0.72, 5),
+          shared.ridgePeak,
+          peakCells.length * 2,
+        );
+        const peakBases = new THREE.InstancedMesh(
+          new THREE.DodecahedronGeometry(0.18, 0),
+          shared.cliffFacet,
+          peakCells.length,
+        );
+        const dummy = new THREE.Object3D();
+        const tint = new THREE.Color();
+        for (let i = 0; i < peakCells.length; i++) {
+          const cell = peakCells[i];
+          const seed = Math.abs(Math.sin(cell.x * 127.1 + cell.z * 311.7) * 43758.5453) % 1;
+          const angle = seed * Math.PI * 2;
+          for (let spire = 0; spire < 2; spire++) {
+            const index = i * 2 + spire;
+            const height = (spire === 0 ? 0.48 : 0.3) + seed * (spire === 0 ? 0.28 : 0.2);
+            const radius = spire === 0 ? 0.12 : 0.21;
+            const x = cell.x + Math.cos(angle + spire * 2.2) * radius;
+            const z = cell.z + Math.sin(angle + spire * 2.2) * radius;
+            dummy.position.set(x, groundTop(cell.h) + height * 0.5, z);
+            dummy.rotation.set((seed - 0.5) * 0.14, angle + spire, (seed - 0.5) * 0.18);
+            dummy.scale.set(0.82 + seed * 0.34, height / 0.72, 0.82 + seed * 0.28);
+            dummy.updateMatrix();
+            peaks.setMatrixAt(index, dummy.matrix);
+            tint.set(spire === 0 ? (seed > 0.55 ? "#e3ddc9" : "#c9c6b4") : "#aeb5a8");
+            peaks.setColorAt(index, tint);
+          }
+          dummy.position.set(cell.x, groundTop(cell.h) + 0.055, cell.z);
+          dummy.rotation.set(seed * 0.25, angle, (seed - 0.5) * 0.2);
+          dummy.scale.set(1.2, 0.42 + seed * 0.25, 1.05);
+          dummy.updateMatrix();
+          peakBases.setMatrixAt(i, dummy.matrix);
+          tint.set("#899187");
+          peakBases.setColorAt(i, tint);
+        }
+        peaks.instanceMatrix.needsUpdate = true;
+        peakBases.instanceMatrix.needsUpdate = true;
+        if (peaks.instanceColor) peaks.instanceColor.needsUpdate = true;
+        if (peakBases.instanceColor) peakBases.instanceColor.needsUpdate = true;
+        peaks.castShadow = true;
+        peakBases.castShadow = false;
+        terrainRoot.add(peaks, peakBases);
+      }
+
       const engravedCells = Array.from(tileCells.values()).filter((cell) => {
         if (cell.h !== 3 || terrainRegion(cell) !== "limestone" || !detailIsClear(cell, 1.45)) return false;
         const seed = Math.abs(Math.sin(cell.x * 73.9 + cell.z * 37.1) * 31781.9) % 1;
@@ -1858,12 +1960,18 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
           shared.ruinStone,
           ruinSites.length,
         );
+        const gateArches = new THREE.InstancedMesh(
+          new THREE.TorusGeometry(0.58, 0.065, 7, 24, Math.PI),
+          shared.ruinStone,
+          ruinSites.length,
+        );
         const ruinMoss = new THREE.InstancedMesh(
           new THREE.ConeGeometry(0.045, 0.12, 5),
           shared.grass,
           ruinSites.length * 4,
         );
         let lintelCount = 0;
+        let gateCount = 0;
         const dummy = new THREE.Object3D();
         const tint = new THREE.Color();
         for (let i = 0; i < ruinSites.length; i++) {
@@ -1906,6 +2014,17 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
             columns.setMatrixAt(index, dummy.matrix);
             tint.set(pillar.tint);
             columns.setColorAt(index, tint);
+          }
+
+          if (site.baseY === undefined && variant > 0.68) {
+            dummy.position.set(site.x, top + 0.78, site.z);
+            dummy.rotation.set(0, angle, 0);
+            dummy.scale.set(1, 1, 1);
+            dummy.updateMatrix();
+            gateArches.setMatrixAt(gateCount, dummy.matrix);
+            tint.set(variant > 0.86 ? "#d1c6a9" : "#969889");
+            gateArches.setColorAt(gateCount, tint);
+            gateCount++;
           }
 
           if (variant > 0.58) {
@@ -1977,10 +2096,135 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
           }
         }
         lintels.count = lintelCount;
-        for (const mesh of [plinths, columns, runeSlabs, runeLines, runeRings, rubble, lintels, ruinMoss]) {
+        gateArches.count = gateCount;
+        for (const mesh of [plinths, columns, runeSlabs, runeLines, runeRings, rubble, lintels, gateArches, ruinMoss]) {
           mesh.instanceMatrix.needsUpdate = true;
           if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
           mesh.castShadow = mesh === columns || mesh === runeSlabs || mesh === lintels;
+          mesh.receiveShadow = true;
+          terrainRoot.add(mesh);
+        }
+      }
+
+      // 古代石橋只生成在完整／自訂地圖的障礙地形上；道路與可建造格一律不會被覆蓋。
+      const bridgeSites: { x: number; z: number; rot: number; deckY: number; lowY: number }[] = [];
+      if (data.mapMode === "layout") {
+        const bridgeAxes = [
+          { dc: 1, dr: 0, rot: 0 },
+          { dc: 0, dr: 1, rot: Math.PI / 2 },
+        ];
+        for (const cell of tileCells.values()) {
+          const gx = Math.floor(cell.x);
+          const gy = Math.floor(cell.z);
+          const centerKey = gx + "," + gy;
+          if (!data.blocked.has(centerKey) || cell.h > 1) continue;
+          const nearBuilding = protectedBuildings.some((building) =>
+            Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 2.2,
+          );
+          if (nearBuilding) continue;
+          for (const axis of bridgeAxes) {
+            const aKey = (gx - axis.dc) + "," + (gy - axis.dr);
+            const bKey = (gx + axis.dc) + "," + (gy + axis.dr);
+            const a = tileCells.get(aKey);
+            const b = tileCells.get(bKey);
+            if (!a || !b || !data.blocked.has(aKey) || !data.blocked.has(bKey)) continue;
+            if (a.h < 2 || a.h !== b.h) continue;
+            if (bridgeSites.some((site) => Math.hypot(cell.x - site.x, cell.z - site.z) < 9)) continue;
+            bridgeSites.push({
+              x: cell.x,
+              z: cell.z,
+              rot: axis.rot,
+              deckY: groundTop(a.h) + 0.06,
+              lowY: groundTop(cell.h),
+            });
+            if (bridgeSites.length >= 5) break;
+          }
+          if (bridgeSites.length >= 5) break;
+        }
+      }
+      if (bridgeSites.length) {
+        const decks = new THREE.InstancedMesh(
+          new THREE.BoxGeometry(2.62, 0.14, 0.92),
+          shared.bridgeStone,
+          bridgeSites.length,
+        );
+        const parapets = new THREE.InstancedMesh(
+          new THREE.BoxGeometry(2.58, 0.18, 0.085),
+          shared.ruinStone,
+          bridgeSites.length * 2,
+        );
+        const supports = new THREE.InstancedMesh(
+          new THREE.BoxGeometry(0.24, 1, 0.24),
+          shared.cliff,
+          bridgeSites.length * 2,
+        );
+        const trim = new THREE.InstancedMesh(
+          new THREE.BoxGeometry(2.42, 0.025, 0.035),
+          shared.bridgeTrim,
+          bridgeSites.length * 2,
+        );
+        const planks = new THREE.InstancedMesh(
+          new THREE.BoxGeometry(0.11, 0.022, 0.78),
+          shared.foundationStone,
+          bridgeSites.length * 7,
+        );
+        const dummy = new THREE.Object3D();
+        for (let i = 0; i < bridgeSites.length; i++) {
+          const site = bridgeSites[i];
+          dummy.position.set(site.x, site.deckY - 0.07, site.z);
+          dummy.rotation.set(0, site.rot, 0);
+          dummy.scale.set(1, 1, 1);
+          dummy.updateMatrix();
+          decks.setMatrixAt(i, dummy.matrix);
+
+          for (let side = 0; side < 2; side++) {
+            const sign = side === 0 ? -1 : 1;
+            dummy.position.set(
+              site.x + Math.sin(site.rot) * sign * 0.38,
+              site.deckY + 0.09,
+              site.z + Math.cos(site.rot) * sign * 0.38,
+            );
+            dummy.rotation.set(0, site.rot, 0);
+            dummy.updateMatrix();
+            parapets.setMatrixAt(i * 2 + side, dummy.matrix);
+
+            dummy.position.set(
+              site.x + Math.cos(site.rot) * 0.92,
+              site.lowY + (site.deckY - site.lowY) * 0.5,
+              site.z - Math.sin(site.rot) * 0.92,
+            );
+            dummy.scale.set(1, Math.max(0.08, site.deckY - site.lowY), 1);
+            dummy.rotation.set(0, site.rot, 0);
+            dummy.updateMatrix();
+            supports.setMatrixAt(i * 2 + side, dummy.matrix);
+
+            dummy.position.set(
+              site.x + Math.sin(site.rot) * sign * 0.385,
+              site.deckY + 0.185,
+              site.z + Math.cos(site.rot) * sign * 0.385,
+            );
+            dummy.scale.set(1, 1, 1);
+            dummy.rotation.set(0, site.rot, 0);
+            dummy.updateMatrix();
+            trim.setMatrixAt(i * 2 + side, dummy.matrix);
+          }
+
+          for (let plank = 0; plank < 7; plank++) {
+            const along = (plank - 3) * 0.33;
+            dummy.position.set(
+              site.x + Math.cos(site.rot) * along,
+              site.deckY + 0.014,
+              site.z - Math.sin(site.rot) * along,
+            );
+            dummy.rotation.set(0, site.rot, 0);
+            dummy.scale.set(1, 1, 1);
+            dummy.updateMatrix();
+            planks.setMatrixAt(i * 7 + plank, dummy.matrix);
+          }
+        }
+        for (const mesh of [decks, parapets, supports, trim, planks]) {
+          mesh.instanceMatrix.needsUpdate = true;
+          mesh.castShadow = mesh === decks || mesh === parapets;
           mesh.receiveShadow = true;
           terrainRoot.add(mesh);
         }
@@ -1994,6 +2238,8 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         { dc: -1, dr: 0, dx: -0.46, dz: 0, sx: 0.08, sz: 0.94 },
       ];
       const cliffFaces: { x: number; y: number; z: number; sx: number; sy: number; sz: number; bandY: number; upperBandY: number }[] = [];
+      const caveEntrances: { x: number; y: number; z: number; rot: number; scale: number }[] = [];
+      const cliffRibs: { x: number; y: number; z: number; rot: number; height: number; tint: string }[] = [];
       const cliffLedges: { x: number; y: number; z: number; rot: number }[] = [];
       const heightRims: { x: number; y: number; z: number; rot: number; width: number; depth: number; tint: string }[] = [];
       const cliffFragments: {
@@ -2082,6 +2328,36 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
             }
           }
 
+          const verticalFace = high - low;
+          const caveSeed = Math.abs(Math.sin(cell.x * 31.7 + cell.z * 73.1 + d.dc * 11.3 + d.dr * 19.7) * 29713.91) % 1;
+          if (
+            cell.h >= 2 &&
+            verticalFace >= 0.82 &&
+            caveSeed > 0.945 &&
+            caveEntrances.length < 28 &&
+            !protectedBuildings.some((building) =>
+              Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 1.6,
+            )
+          ) {
+            caveEntrances.push({
+              x: cell.x + d.dx * 0.515,
+              y: low + verticalFace * 0.48,
+              z: cell.z + d.dz * 0.515,
+              rot: Math.atan2(d.dx, d.dz),
+              scale: Math.min(1, verticalFace / 1.1),
+            });
+          }
+          if (cell.h >= 3 && verticalFace >= 0.82 && faceSeed > 0.93 && cliffRibs.length < 120) {
+            cliffRibs.push({
+              x: cell.x + d.dx * 0.525,
+              y: low + verticalFace * 0.52,
+              z: cell.z + d.dz * 0.525,
+              rot: Math.atan2(d.dx, d.dz),
+              height: verticalFace * (0.72 + faceSeed * 0.16),
+              tint: faceSeed > 0.97 ? "#c2b69a" : "#758176",
+            });
+          }
+
           if (neighbor && neighbor.h > 0 && cell.h >= neighbor.h + 1) {
             // 低側平台只在非道路格留下少量崩落碎石，並避開塔座和聖地周圍。
             const rubbleSeed = Math.abs(Math.sin(cell.x * 17.9 + cell.z * 61.3 + d.dc * 9.1 + d.dr * 21.7) * 17281.91) % 1;
@@ -2147,6 +2423,65 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         capMesh.receiveShadow = true;
         terrainRoot.add(cliffMesh, bandMesh, upperBandMesh, capMesh);
       }
+      if (caveEntrances.length) {
+        const caveMouths = new THREE.InstancedMesh(
+          new THREE.CircleGeometry(0.255, 24),
+          shared.caveShadow,
+          caveEntrances.length,
+        );
+        const caveArches = new THREE.InstancedMesh(
+          new THREE.TorusGeometry(0.29, 0.055, 7, 24, Math.PI),
+          shared.caveRim,
+          caveEntrances.length,
+        );
+        const dummy = new THREE.Object3D();
+        for (let i = 0; i < caveEntrances.length; i++) {
+          const cave = caveEntrances[i];
+          dummy.position.set(cave.x + Math.sin(cave.rot) * 0.012, cave.y, cave.z + Math.cos(cave.rot) * 0.012);
+          dummy.rotation.set(0, cave.rot, 0);
+          dummy.scale.setScalar(cave.scale);
+          dummy.updateMatrix();
+          caveMouths.setMatrixAt(i, dummy.matrix);
+          dummy.position.set(cave.x + Math.sin(cave.rot) * 0.024, cave.y, cave.z + Math.cos(cave.rot) * 0.024);
+          dummy.rotation.set(0, cave.rot, 0);
+          dummy.scale.setScalar(cave.scale);
+          dummy.updateMatrix();
+          caveArches.setMatrixAt(i, dummy.matrix);
+        }
+        caveMouths.instanceMatrix.needsUpdate = true;
+        caveArches.instanceMatrix.needsUpdate = true;
+        caveMouths.castShadow = false;
+        caveMouths.receiveShadow = false;
+        caveArches.castShadow = true;
+        caveArches.receiveShadow = true;
+        terrainRoot.add(caveMouths, caveArches);
+      }
+
+      if (cliffRibs.length) {
+        const ribs = new THREE.InstancedMesh(
+          new THREE.BoxGeometry(0.17, 1, 0.13),
+          shared.cliffFacet,
+          cliffRibs.length,
+        );
+        const dummy = new THREE.Object3D();
+        const tint = new THREE.Color();
+        for (let i = 0; i < cliffRibs.length; i++) {
+          const rib = cliffRibs[i];
+          dummy.position.set(rib.x, rib.y, rib.z);
+          dummy.rotation.set(0, rib.rot, 0);
+          dummy.scale.set(1, rib.height, 1);
+          dummy.updateMatrix();
+          ribs.setMatrixAt(i, dummy.matrix);
+          tint.set(rib.tint);
+          ribs.setColorAt(i, tint);
+        }
+        ribs.instanceMatrix.needsUpdate = true;
+        if (ribs.instanceColor) ribs.instanceColor.needsUpdate = true;
+        ribs.castShadow = true;
+        ribs.receiveShadow = true;
+        terrainRoot.add(ribs);
+      }
+
       if (cliffFragments.length) {
         const fragments = new THREE.InstancedMesh(
           new THREE.DodecahedronGeometry(0.22, 0),
