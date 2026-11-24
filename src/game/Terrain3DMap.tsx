@@ -395,19 +395,20 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
 
     const rebuildTerrain = (data: Terrain3DSnapshot) => {
       clearGroup(terrainRoot);
-      const byHeight: { x: number; z: number }[][] = [[], [], [], []];
-      const cells = new Set<string>();
+      const byHeight: { x: number; z: number; h: number }[][] = [[], [], [], []];
+      const tileCells = new Map<string, { x: number; z: number; h: number }>();
 
       const addCell = (gx: number, gy: number) => {
         const key = gx + "," + gy;
-        if (cells.has(key)) return;
-        cells.add(key);
+        if (tileCells.has(key)) return;
         const blocked = data.blocked.has(key);
         let h = data.heights[gy * COLS + gx] ?? 0;
         if (!data.placed.length && blocked && h === 0) h = 1;
         if (!blocked) h = 0;
         h = Math.max(0, Math.min(3, h | 0));
-        byHeight[h].push({ x: gx + 0.5, z: gy + 0.5 });
+        const cell = { x: gx + 0.5, z: gy + 0.5, h };
+        tileCells.set(key, cell);
+        byHeight[h].push(cell);
       };
 
       if (data.mapMode === "expand" && data.placed.length) {
@@ -420,6 +421,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) addCell(c, r);
       }
 
+      // 每格岩面保留些微色差，讓平台表面不再像單色網格。
       for (let h = 0; h <= 3; h++) {
         const list = byHeight[h];
         if (!list.length) continue;
@@ -430,15 +432,109 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
           list.length,
         );
         const matrix = new THREE.Matrix4();
+        const tint = new THREE.Color();
         for (let i = 0; i < list.length; i++) {
-          matrix.makeTranslation(list[i].x, top / 2, list[i].z);
+          const cell = list[i];
+          const seed = Math.abs(Math.sin(cell.x * 127.1 + cell.z * 311.7) * 43758.5453) % 1;
+          const shade = 0.92 + seed * 0.1;
+          matrix.makeTranslation(cell.x, top / 2, cell.z);
           mesh.setMatrixAt(i, matrix);
+          tint.setRGB(shade, shade, shade);
+          mesh.setColorAt(i, tint);
         }
         mesh.instanceMatrix.needsUpdate = true;
+        if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
         mesh.castShadow = h > 0;
         mesh.receiveShadow = true;
         mesh.frustumCulled = false;
         terrainRoot.add(mesh);
+      }
+
+      // 裸露邊緣的層理岩壁：高度差越大，側面越深、越厚。
+      const cliffDirections = [
+        { dc: 0, dr: -1, dx: 0, dz: -0.46, sx: 0.94, sz: 0.08 },
+        { dc: 1, dr: 0, dx: 0.46, dz: 0, sx: 0.08, sz: 0.94 },
+        { dc: 0, dr: 1, dx: 0, dz: 0.46, sx: 0.94, sz: 0.08 },
+        { dc: -1, dr: 0, dx: -0.46, dz: 0, sx: 0.08, sz: 0.94 },
+      ];
+      const cliffFaces: { x: number; y: number; z: number; sx: number; sy: number; sz: number; bandY: number }[] = [];
+      for (const cell of tileCells.values()) {
+        if (cell.h <= 0) continue;
+        const gx = Math.floor(cell.x), gy = Math.floor(cell.z);
+        for (const d of cliffDirections) {
+          const neighbor = tileCells.get((gx + d.dc) + "," + (gy + d.dr));
+          const neighborH = neighbor?.h ?? 0;
+          if (neighborH >= cell.h) continue;
+          const high = groundTop(cell.h);
+          const low = groundTop(neighborH);
+          cliffFaces.push({
+            x: cell.x + d.dx,
+            y: (high + low) / 2,
+            z: cell.z + d.dz,
+            sx: d.sx,
+            sy: high - low,
+            sz: d.sz,
+            bandY: low + (high - low) * 0.28,
+          });
+        }
+      }
+      if (cliffFaces.length) {
+        const cliffMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), shared.cliff, cliffFaces.length);
+        const bandMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), shared.cliffBand, cliffFaces.length);
+        const matrix = new THREE.Matrix4();
+        for (let i = 0; i < cliffFaces.length; i++) {
+          const face = cliffFaces[i];
+          matrix.makeScale(face.sx, face.sy, face.sz);
+          matrix.setPosition(face.x, face.y, face.z);
+          cliffMesh.setMatrixAt(i, matrix);
+          matrix.makeScale(face.sx, 0.035, Math.max(face.sz, 0.11));
+          matrix.setPosition(face.x, face.bandY, face.z);
+          bandMesh.setMatrixAt(i, matrix);
+        }
+        cliffMesh.instanceMatrix.needsUpdate = true;
+        bandMesh.instanceMatrix.needsUpdate = true;
+        cliffMesh.castShadow = true;
+        cliffMesh.receiveShadow = true;
+        bandMesh.receiveShadow = true;
+        terrainRoot.add(cliffMesh, bandMesh);
+      }
+
+      // 單級坡面連接相鄰平台；道路高度 0 不鋪坡，避免遮住怪物通道。
+      const rampDirections = [
+        { dc: 0, dr: -1, rot: 0 },
+        { dc: 1, dr: 0, rot: -Math.PI / 2 },
+        { dc: 0, dr: 1, rot: Math.PI },
+        { dc: -1, dr: 0, rot: Math.PI / 2 },
+      ];
+      const rampGeometry = new THREE.BufferGeometry();
+      rampGeometry.setAttribute("position", new THREE.Float32BufferAttribute([
+        -0.46, HEIGHT_STEP, -0.46, 0.46, HEIGHT_STEP, -0.46,
+        -0.46, 0, 0.46, 0.46, 0, 0.46,
+      ], 3));
+      rampGeometry.setIndex([0, 2, 1, 1, 2, 3]);
+      rampGeometry.computeVertexNormals();
+      const rampCells: { x: number; y: number; z: number; rot: number }[] = [];
+      for (const cell of tileCells.values()) {
+        if (cell.h <= 0) continue;
+        const gx = Math.floor(cell.x), gy = Math.floor(cell.z);
+        const higher = rampDirections.find((d) => {
+          const neighbor = tileCells.get((gx + d.dc) + "," + (gy + d.dr));
+          return !!neighbor && neighbor.h === cell.h + 1;
+        });
+        if (higher) rampCells.push({ x: cell.x, y: groundTop(cell.h) + 0.012, z: cell.z, rot: higher.rot });
+      }
+      if (rampCells.length) {
+        const ramps = new THREE.InstancedMesh(rampGeometry, shared.ramp, rampCells.length);
+        const matrix = new THREE.Matrix4();
+        for (let i = 0; i < rampCells.length; i++) {
+          const ramp = rampCells[i];
+          matrix.makeRotationY(ramp.rot);
+          matrix.setPosition(ramp.x, ramp.y, ramp.z);
+          ramps.setMatrixAt(i, matrix);
+        }
+        ramps.instanceMatrix.needsUpdate = true;
+        ramps.receiveShadow = true;
+        terrainRoot.add(ramps);
       }
 
       const floor = new THREE.Mesh(
