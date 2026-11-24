@@ -16,6 +16,9 @@ declare module "three" {
   export const Vector3: any;
   export const Plane: any;
   export const Raycaster: any;
+  export const BufferGeometry: any;
+  export const Float32BufferAttribute: any;
+  export const DoubleSide: any;
   export const Matrix4: any;
   export const BoxGeometry: any;
   export const PlaneGeometry: any;
