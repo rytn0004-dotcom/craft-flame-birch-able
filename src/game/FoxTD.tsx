@@ -779,72 +779,162 @@ function AlivePortrait({ frames }: { frames: string[] }) {
 
 type Phase = "ready" | "play" | "win" | "lose";
 
-function spawnPlan(wave: number) {
-  const list: { type: number; at: number; route: number }[] = [];
+type SpawnJob = { type: number; at: number; route: number };
+
+/** 分線負載平衡：優先補最空的路，避免精英全擠同一入口 */
+function makeLanePicker(lanes: number) {
+  const load = Array.from({ length: Math.max(1, lanes) }, () => 0);
+  let rr = 0;
+  const n = Math.max(1, lanes);
+  return {
+    next(weight = 1) {
+      let best = 0;
+      for (let i = 1; i < n; i++) if (load[i] < load[best]) best = i;
+      const floor = load[best];
+      const ties: number[] = [];
+      for (let i = 0; i < n; i++) if (load[i] === floor) ties.push(i);
+      const pick = ties[rr++ % ties.length];
+      load[pick] += weight;
+      return pick;
+    },
+  };
+}
+
+function clampSpawnType(i: number, hiExclusive?: number) {
+  const hi = hiExclusive ?? ENEMY_TYPES.length;
+  return Math.max(0, Math.min(Math.max(0, hi - 1), i | 0));
+}
+
+/** 一般波基礎間距：有下限，多線略加快但不塌成牆 */
+function spawnBaseGap(wave: number, lanes: number) {
+  return Math.max(0.3, 0.56 - wave * 0.02 - Math.min(0.08, Math.max(0, lanes - 1) * 0.015));
+}
+
+/**
+ * 標準出怪：偵查 → 主波（微叢集）→ 壓力尾
+ * - 類型曲線穩定，隨機只做小幅抖動
+ * - 路線用負載平衡，Boss／拆塔優先走空線
+ */
+function spawnPlan(wave: number): SpawnJob[] {
+  const list: SpawnJob[] = [];
   const lanes = Math.max(1, routes.length);
-  // 略減總量、縮間隔：單波時長更短，同時在場壓力差不多
-  const baseCount = 5 + Math.floor(wave * 1.7);
-  const count = Math.round(baseCount * (1 + 0.22 * Math.max(0, lanes - 1)));
-  const base = Math.min(ENEMY_TYPES.length - 2, Math.floor((wave - 1) / 2));
-  let t = 0.25;
-  for (let i = 0; i < count; i++) {
-    let type = base;
-    if (Math.random() < 0.22 && type > 0) type -= 1;
-    if (Math.random() < 0.18 + wave * 0.02) type = Math.min(ENEMY_TYPES.length - 2, type + 1);
-    list.push({ type, at: t, route: i % lanes });
-    // 下限 0.3：避免後期糊成一團；前期比舊版略密
-    t += Math.max(0.3, 0.58 - wave * 0.022 - Math.min(0.1, (lanes - 1) * 0.018));
+  const lane = makeLanePicker(lanes);
+  const nTypes = Math.max(1, ENEMY_TYPES.length);
+  // 主波不直接抽 Boss 槽（索引 4、5、9 等）；壓力段再放
+  const fodderHi = Math.min(nTypes, 4);
+  const tier = Math.min(fodderHi - 1, Math.max(0, Math.floor((wave - 1) / 2)));
+  const gap = spawnBaseGap(wave, lanes);
+
+  const mainCount = 5 + Math.floor(wave * 1.55);
+  const lanePad = Math.round(mainCount * 0.16 * Math.max(0, lanes - 1));
+  const totalMain = mainCount + lanePad;
+
+  let t = 0.2;
+
+  // 1) 偵查：弱體先探路，讓玩家對準火力
+  const scouts = wave <= 2 ? 2 : 3;
+  for (let i = 0; i < scouts; i++) {
+    list.push({
+      type: clampSpawnType(Math.max(0, tier - (i === 0 ? 1 : 0)), fodderHi),
+      at: t,
+      route: lane.next(1),
+    });
+    t += gap * 0.8;
   }
-  if (wave % 5 === 0) {
-    list.push({ type: Math.min(ENEMY_TYPES.length - 1, 6), at: t + 0.3, route: 0 });
-    list.push({ type: Math.min(ENEMY_TYPES.length - 1, 8), at: t + 0.75, route: Math.min(1, lanes - 1) });
+  t += gap * 0.35;
+
+  // 2) 主波：每 4 隻一個微叢集（密→略疏），可讀可反應
+  for (let i = 0; i < totalMain; i++) {
+    let type = tier;
+    if (Math.random() < 0.18 && type > 0) type -= 1;
+    if (Math.random() < 0.1 + wave * 0.012) type = Math.min(fodderHi - 1, type + 1);
+    list.push({ type: clampSpawnType(type, fodderHi), at: t, route: lane.next(1) });
+    const mod = i % 4;
+    if (mod === 3) t += gap * 0.55;
+    else if (mod === 0 && i > 0) t += gap * 1.2;
+    else t += gap;
   }
-  if (wave % 4 === 0) {
-    list.push({ type: Math.min(5, 2 + Math.floor(wave / 4)), at: t + 0.45, route: Math.floor(lanes / 2) % lanes });
+
+  // 3) 壓力尾：拆塔／疾行等，錯開路線
+  if (wave >= 4 && wave % 4 === 0) {
+    t += gap * 0.7;
+    const melee = clampSpawnType(6);
+    list.push({ type: melee, at: t, route: lane.next(2) });
+    if (wave >= 8) {
+      list.push({ type: melee, at: t + gap * 0.85, route: lane.next(2) });
+      t += gap * 0.85;
+    }
   }
+  if (wave >= 5 && wave % 5 === 0) {
+    t += gap * 1.0;
+    list.push({ type: clampSpawnType(6), at: t, route: lane.next(2) });
+    list.push({ type: clampSpawnType(8), at: t + gap * 0.65, route: lane.next(2) });
+  }
+  // 中後期偶發疾潮，不與 Boss 波重疊
+  if (wave >= 9 && wave % 5 !== 0 && wave % 3 === 0) {
+    t += gap * 0.5;
+    list.push({ type: clampSpawnType(8), at: t, route: lane.next(1) });
+  }
+
+  list.sort((a, b) => a.at - b.at || a.route - b.route);
   return list;
 }
 
-/** 無盡：有精英／Boss，數量與屬性保守，避免後期打不過 */
-function endlessPlan(wave: number) {
-  const list: { type: number; at: number; route: number }[] = [];
+/** 無盡：分段編隊 + 分線平衡，Boss 前留呼吸 */
+function endlessPlan(wave: number): SpawnJob[] {
+  const list: SpawnJob[] = [];
   const lanes = Math.max(1, routes.length);
+  const lane = makeLanePicker(lanes);
   const nTypes = Math.max(1, ENEMY_TYPES.length);
-  const fodder = Math.min(16, 6 + Math.floor(wave * 0.32));
-  const elites = Math.min(4, Math.floor((wave + 2) / 4));
-  const interval = Math.max(0.34, 0.56 - wave * 0.005);
-  let t = 0.35;
-  let n = 0;
-  const clampType = (i: number) => Math.max(0, Math.min(nTypes - 1, i));
-  const pickFodder = () => clampType(Math.floor(Math.random() * (Math.min(3, 1 + Math.floor(wave / 6)) + 1)));
+  const clampType = (i: number) => clampSpawnType(i, nTypes);
+  const fodder = Math.min(15, 6 + Math.floor(wave * 0.3));
+  const elites = Math.min(3, Math.floor((wave + 1) / 5));
+  const interval = Math.max(0.34, 0.55 - wave * 0.0045);
+
+  const pickFodder = () => {
+    const span = Math.min(3, 1 + Math.floor(wave / 7));
+    return clampType(Math.floor(Math.random() * (span + 1)));
+  };
   const pickElite = () => {
     const pool = [2, 3, 6, 7, 8].map(clampType);
     return pool[Math.floor(Math.random() * pool.length)];
   };
   const pickBoss = () => {
-    if (wave >= 25 && Math.random() < 0.25) return clampType(9);
-    if (wave >= 15 && Math.random() < 0.45) return clampType(5);
+    if (wave >= 25 && Math.random() < 0.22) return clampType(9);
+    if (wave >= 15 && Math.random() < 0.4) return clampType(5);
     return clampType(4);
   };
-  for (let i = 0; i < fodder; i++) {
-    list.push({ type: pickFodder(), at: t, route: n % lanes });
-    n += 1;
-    t += interval * (0.85 + Math.random() * 0.4);
+
+  let t = 0.22;
+  // 偵查
+  for (let i = 0; i < 2; i++) {
+    list.push({ type: pickFodder(), at: t, route: lane.next(1) });
+    t += interval * 0.75;
   }
+  t += interval * 0.3;
+  // 主雜兵（微叢集）
+  for (let i = 0; i < fodder; i++) {
+    list.push({ type: pickFodder(), at: t, route: lane.next(1) });
+    t += interval * (i % 4 === 3 ? 0.6 : i % 4 === 0 && i > 0 ? 1.15 : 0.9 + Math.random() * 0.25);
+  }
+  // 精英錯線
   for (let i = 0; i < elites; i++) {
-    list.push({ type: pickElite(), at: t, route: Math.floor(Math.random() * lanes) });
-    t += interval * 1.35;
+    t += interval * 0.5;
+    list.push({ type: pickElite(), at: t, route: lane.next(2) });
+    t += interval * 1.25;
   }
   if (wave > 0 && wave % 5 === 0) {
-    list.push({ type: pickBoss(), at: t + 0.6, route: Math.floor(Math.random() * lanes) });
-    const guards = Math.min(4, 2 + Math.floor(wave / 15));
+    t += interval * 1.4; // Boss 前清空視野
+    list.push({ type: pickBoss(), at: t, route: lane.next(3) });
+    const guards = Math.min(3, 1 + Math.floor(wave / 18));
     for (let g = 0; g < guards; g++) {
-      list.push({ type: pickFodder(), at: t + 0.9 + g * 0.35, route: g % lanes });
+      list.push({ type: pickFodder(), at: t + 0.7 + g * 0.32, route: lane.next(1) });
     }
   } else if (wave > 0 && wave % 3 === 0) {
-    list.push({ type: pickElite(), at: t + 0.4, route: n % lanes });
+    t += interval * 0.45;
+    list.push({ type: pickElite(), at: t, route: lane.next(2) });
   }
-  list.sort((a, b) => a.at - b.at);
+  list.sort((a, b) => a.at - b.at || a.route - b.route);
   return list;
 }
 
@@ -860,14 +950,18 @@ function defaultWaves(): WaveDef[] {
   const n = stockBestiary().length;
   return Array.from({ length: MAX_WAVE }, (_, i) => {
     const wave = i + 1;
-    const base = Math.min(n - 1, Math.floor((wave - 1) / 2));
-    const spawns: WaveGroup[] = [{ type: Math.min(base, 4), count: 6 + wave }];
-    if (wave > 2) spawns.push({ type: Math.max(0, base - 1), count: 3 });
-    if (wave % 4 === 0) spawns.push({ type: 6, count: 2 });
-    if (wave % 5 === 0) spawns.push({ type: 5, count: 1 });
-    if (wave > 8) spawns.push({ type: 7, count: 2 });
-    if (wave > 12) spawns.push({ type: 8, count: 3 });
-    if (wave >= 18) spawns.push({ type: 9, count: 1 });
+    const base = Math.min(3, Math.floor((wave - 1) / 2));
+    // 主波略瘦 + 偵查型前置，時間軸由 queueFromGroups 展開
+    const spawns: WaveGroup[] = [
+      { type: Math.max(0, base - 1), count: wave <= 2 ? 2 : 3 },
+      { type: Math.min(base, 3), count: 5 + Math.floor(wave * 0.9) },
+    ];
+    if (wave > 3) spawns.push({ type: Math.max(0, base - 1), count: 2 });
+    if (wave % 4 === 0) spawns.push({ type: Math.min(6, n - 1), count: wave >= 8 ? 2 : 1 });
+    if (wave % 5 === 0) spawns.push({ type: Math.min(5, n - 1), count: 1 });
+    if (wave > 8) spawns.push({ type: Math.min(7, n - 1), count: 1 });
+    if (wave > 12) spawns.push({ type: Math.min(8, n - 1), count: 2 });
+    if (wave >= 18) spawns.push({ type: Math.min(9, n - 1), count: 1 });
     return { spawns, gates: [] };
   });
 }
@@ -892,22 +986,27 @@ function normalizeWaves(raw: unknown): WaveDef[] | null {
 }
 
 function queueFromGroups(groups: WaveGroup[], gates: number[], routeCount: number, typeCount: number) {
-  const list: { type: number; at: number; route: number }[] = [];
+  const list: SpawnJob[] = [];
   const usable = (gates.length ? gates : Array.from({ length: Math.max(1, routeCount) }, (_, i) => i)).filter(
     (i) => i >= 0 && i < Math.max(1, routeCount),
   );
   const picks = usable.length ? usable : [0];
-  let spawned = 0;
-  let t = 0.22;
+  const lane = makeLanePicker(picks.length);
+  let t = 0.2;
   for (const g of groups) {
     const n = Math.max(0, Math.min(40, Math.round(g.count)));
     const type = Math.max(0, Math.min(typeCount - 1, g.type));
+    // 高階／Boss 型在時間軸上留白，雜兵可略密
+    const threat = type / Math.max(1, typeCount - 1);
+    const step = 0.28 + threat * 0.22;
+    t += threat > 0.55 ? 0.35 : 0.08;
     for (let i = 0; i < n; i++) {
-      list.push({ type, at: t, route: picks[spawned % picks.length] });
-      spawned += 1;
-      t += 0.34;
+      const li = lane.next(1 + (threat > 0.55 ? 1 : 0));
+      list.push({ type, at: t, route: picks[li] ?? picks[0] });
+      t += step * (i % 4 === 3 ? 0.7 : 1);
     }
   }
+  list.sort((a, b) => a.at - b.at);
   return list;
 }
 
