@@ -1399,7 +1399,7 @@ export function FoxTD() {
     towerAtkFrames: [] as HTMLImageElement[][],
     sheets: {} as Record<string, HTMLImageElement[]>,
     scene: {} as Record<string, HTMLImageElement>,
-    pointer: { x: 0, y: 0, down: false },
+    pointer: { x: 0, y: 0, down: false, inside: false },
     blocked: new Set<string>(),
     heights: heightsRef.current,
     cam: {
@@ -1414,10 +1414,32 @@ export function FoxTD() {
   terrain3DSnapshotRef.current = () => {
     const current = sim.current;
     const now = performance.now() / 1000;
+    const placementActive =
+      current.pointer.inside &&
+      phaseRef.current === "play" &&
+      pickRef.current !== null &&
+      !stakeRef.current &&
+      !shrinePlaceRef.current &&
+      !tileOfferRef.current;
+    let placement: Terrain3DSnapshot["placement"] = null;
+    if (placementActive) {
+      const rawGx = Math.floor(current.pointer.x / CELL);
+      const rawGy = Math.floor(current.pointer.y / CELL);
+      const snapped = snapPlaceCell(rawGx, rawGy);
+      const target = snapped ?? { gx: rawGx, gy: rawGy };
+      placement = {
+        gx: target.gx,
+        gy: target.gy,
+        height: cellHeight(current.heights, target.gx, target.gy),
+        valid: !!snapped,
+        snapped: !!snapped && (snapped.gx !== rawGx || snapped.gy !== rawGy),
+      };
+    }
     return {
       placed: boardRef.current.placed,
       heights: current.heights,
       blocked: current.blocked,
+      placement,
       mapMode: mapModeRef.current,
       towers: current.towers.map((tower, index) => {
         const idle = current.towerFrames[tower.def] || [];
@@ -4304,9 +4326,12 @@ export function FoxTD() {
       (ev.target as HTMLElement | null)?.closest?.("canvas[data-game3d='true']") != null;
 
     const onMove = (ev: PointerEvent) => {
-      if (!isGameSurface(ev)) return;
+      if (!isGameSurface(ev)) {
+        sim.current.pointer.inside = false;
+        return;
+      }
       const world = local(ev);
-      sim.current.pointer = { ...world, down: sim.current.pointer.down };
+      sim.current.pointer = { ...world, down: sim.current.pointer.down, inside: true };
       // 擴張預覽：游標移到最新接口時提示可否放置
       if (tileOfferRef.current && pickTemplateRef.current && phaseRef.current === "play") {
         const tid = pickTemplateRef.current;
@@ -4341,10 +4366,14 @@ export function FoxTD() {
     const onUp = () => {
       sim.current.pointer.down = false;
     };
+    const onLeave = () => {
+      sim.current.pointer.down = false;
+      sim.current.pointer.inside = false;
+    };
     const onDown = (ev: PointerEvent) => {
       if (!isGameSurface(ev) || ev.button !== 0 || ev.altKey) return;
       const p = local(ev);
-      sim.current.pointer = { ...p, down: true };
+      sim.current.pointer = { ...p, down: true, inside: true };
       if (phaseRef.current !== "play") {
         if (!workshopRef.current) return;
         // 工房工具：入口／出口
@@ -4583,6 +4612,7 @@ export function FoxTD() {
     inputSurface.addEventListener("pointerdown", onDown);
     inputSurface.addEventListener("pointerup", onUp);
     inputSurface.addEventListener("pointercancel", onUp);
+    inputSurface.addEventListener("pointerleave", onLeave);
     inputSurface.addEventListener("contextmenu", onContext);
     return () => {
       cancelAnimationFrame(raf);
@@ -4590,6 +4620,7 @@ export function FoxTD() {
       inputSurface.removeEventListener("pointerdown", onDown);
       inputSurface.removeEventListener("pointerup", onUp);
       inputSurface.removeEventListener("pointercancel", onUp);
+      inputSurface.removeEventListener("pointerleave", onLeave);
       inputSurface.removeEventListener("contextmenu", onContext);
     };
   }, []);
@@ -4746,22 +4777,21 @@ export function FoxTD() {
   }
 
   /**
-   * 建塔規則（兩種地圖語意不同）：
-   * - 潮汐擴張（isExpandBoard）：blocked = 非道路高地 → 只能放在 blocked 上
-   * - 完整關卡／自訂：blocked = 障礙／路障 → 只能放在「非 blocked」空地
-   * 高度 0～3 皆可建（擴張模式高地視覺模組）；聖地／出入口不可建
+   * 地表可建性：高度 0、1、2、3 都能放塔，高度只提供射程加成。
+   * 擴張模式的 blocked=true 代表非道路高地；完整地圖的 blocked=true 代表障礙。
    */
+  function isBuildableSurface(gx: number, gy: number) {
+    const blocked = sim.current.blocked.has(cellKey(gx, gy));
+    return isExpandBoard(boardRef.current) ? blocked : !blocked;
+  }
+
   function canPlace(gx: number, gy: number) {
     if (gx < 0 || gy < 0 || gx >= COLS || gy >= ROWS) return false;
     if (!isCellOnBoard(boardRef.current, gx, gy)) return false;
     if (gateHere(gx, gy)) return false;
     if (isSanctuaryFootprint(gx, gy)) return false;
-    const key = cellKey(gx, gy);
-    if (isExpandBoard(boardRef.current)) {
-      if (!sim.current.blocked.has(key)) return false;
-    } else {
-      if (sim.current.blocked.has(key)) return false;
-    }
+    // 不用高度值當作禁建條件：1～3 級高地同樣可建，並保留高地射程優勢。
+    if (!isBuildableSurface(gx, gy)) return false;
     if (sim.current.towers.some((t) => t.gx === gx && t.gy === gy)) return false;
     return true;
   }
@@ -4798,11 +4828,8 @@ export function FoxTD() {
     if (!isCellOnBoard(boardRef.current, gx, gy)) return "未解鎖地塊";
     if (gateHere(gx, gy)) return "出入口不可建";
     if (isSanctuaryFootprint(gx, gy)) return "聖地範圍不可建";
-    const key = cellKey(gx, gy);
-    if (isExpandBoard(boardRef.current)) {
-      if (!sim.current.blocked.has(key)) return "道路不可建，請點高地";
-    } else {
-      if (sim.current.blocked.has(key)) return "障礙／路障不可建";
+    if (!isBuildableSurface(gx, gy)) {
+      return isExpandBoard(boardRef.current) ? "道路不可建，請點高地" : "障礙／路障不可建";
     }
     if (sim.current.towers.some((t) => t.gx === gx && t.gy === gy)) return "此格已有建築";
     return null;
