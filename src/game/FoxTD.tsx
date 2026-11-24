@@ -1200,6 +1200,8 @@ export function FoxTD() {
     blocked: new Set<string>(),
     towers: [],
     enemies: [],
+    shots: [],
+    rings: [],
     mapMode: "expand",
   }));
   const [gold, setGold] = useState(START_GOLD);
