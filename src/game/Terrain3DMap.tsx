@@ -2340,18 +2340,18 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
             )
           ) {
             caveEntrances.push({
-              x: cell.x + d.dx * 0.515,
+              x: cell.x + d.dx * 1.12,
               y: low + verticalFace * 0.48,
-              z: cell.z + d.dz * 0.515,
+              z: cell.z + d.dz * 1.12,
               rot: Math.atan2(d.dx, d.dz),
               scale: Math.min(1, verticalFace / 1.1),
             });
           }
           if (cell.h >= 3 && verticalFace >= 0.82 && faceSeed > 0.93 && cliffRibs.length < 120) {
             cliffRibs.push({
-              x: cell.x + d.dx * 0.525,
+              x: cell.x + d.dx * 1.14,
               y: low + verticalFace * 0.52,
-              z: cell.z + d.dz * 0.525,
+              z: cell.z + d.dz * 1.14,
               rot: Math.atan2(d.dx, d.dz),
               height: verticalFace * (0.72 + faceSeed * 0.16),
               tint: faceSeed > 0.97 ? "#c2b69a" : "#758176",
