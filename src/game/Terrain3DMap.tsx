@@ -770,6 +770,58 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         terrainRoot.add(rocks);
       }
 
+      // 高地縫隙長出零星短草，採固定種子分布並避開塔座／聖地，讓地貌有生命感但不干擾戰鬥辨識。
+      const grassCells = Array.from(tileCells.values()).filter((cell) => {
+        if (cell.h <= 0) return false;
+        const seed = Math.abs(Math.sin(cell.x * 63.7 + cell.z * 29.3) * 18341.73) % 1;
+        if (seed < 0.965) return false;
+        return !data.towers.some((tower) => {
+          const tx = tower.x / CELL;
+          const tz = tower.y / CELL;
+          const clearance = tower.sanctuary ? 4.1 : 1.05;
+          return Math.hypot(cell.x - tx, cell.z - tz) < clearance;
+        });
+      });
+      if (grassCells.length) {
+        const bladeCount = grassCells.length * 3;
+        const grass = new THREE.InstancedMesh(
+          new THREE.ConeGeometry(0.052, 0.22, 5),
+          new THREE.MeshStandardMaterial({ color: "#83a878", roughness: 0.96 }),
+          bladeCount,
+        );
+        const dummy = new THREE.Object3D();
+        const tint = new THREE.Color();
+        for (let i = 0; i < grassCells.length; i++) {
+          const cell = grassCells[i];
+          const seed = Math.abs(Math.sin(cell.x * 127.1 + cell.z * 311.7) * 43758.5453) % 1;
+          for (let blade = 0; blade < 3; blade++) {
+            const index = i * 3 + blade;
+            const angle = seed * Math.PI * 2 + blade * (Math.PI * 2 / 3);
+            const radius = 0.08 + seed * 0.08;
+            dummy.position.set(
+              cell.x + Math.cos(angle) * radius,
+              groundTop(cell.h) + 0.12,
+              cell.z + Math.sin(angle) * radius,
+            );
+            dummy.rotation.set(
+              Math.cos(angle) * 0.16,
+              angle,
+              Math.sin(angle) * -0.16,
+            );
+            dummy.scale.set(0.82 + seed * 0.3, 0.72 + blade * 0.12, 0.82 + seed * 0.3);
+            dummy.updateMatrix();
+            grass.setMatrixAt(index, dummy.matrix);
+            tint.set(blade === 1 ? "#a0b879" : seed > 0.5 ? "#78966b" : "#648c70");
+            grass.setColorAt(index, tint);
+          }
+        }
+        grass.instanceMatrix.needsUpdate = true;
+        if (grass.instanceColor) grass.instanceColor.needsUpdate = true;
+        grass.castShadow = false;
+        grass.receiveShadow = true;
+        terrainRoot.add(grass);
+      }
+
       // 高台邊緣偶爾露出低矮的海蝕礦晶，密度刻意偏低，避免水元素搶過建築主體。
       const mineralCells = Array.from(tileCells.values()).filter((cell) => {
         if (cell.h < 2) return false;
@@ -1339,11 +1391,11 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       ) : (
         <>
           <div className="pointer-events-none absolute left-3 top-3 z-10 rounded-lg border border-[#8ec8ee55] bg-[#061525cc] px-3 py-2 text-xs text-[#d7ecff] shadow-lg">
-            <b className="block text-[#ffe0a0]">3D 戰場</b>
+            <b className="block text-[#f2d89b]">潮汐遺跡・3D 戰場</b>
             Alt＋左鍵旋轉 · 右鍵平移 · 滾輪縮放
           </div>
           <div className="pointer-events-none absolute bottom-3 left-3 z-10 rounded-lg border border-[#8ec8ee33] bg-[#061525cc] px-3 py-2 text-[11px] text-[#9ec4de]">
-            角色動畫沿用現有素材 · 高地具實際高度
+            海岸奇幻風格 · 角色動畫沿用現有素材
           </div>
           <button
             type="button"
