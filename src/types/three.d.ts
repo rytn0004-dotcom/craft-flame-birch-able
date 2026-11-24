@@ -25,6 +25,7 @@ declare module "three" {
   export const TorusGeometry: any;
   export const OctahedronGeometry: any;
   export const MeshStandardMaterial: any;
+  export const MeshBasicMaterial: any;
   export const MOUSE: any;
   export const SRGBColorSpace: any;
   export const PCFSoftShadowMap: any;
