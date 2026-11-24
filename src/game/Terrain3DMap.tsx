@@ -228,6 +228,16 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         emissiveIntensity: 0.72,
       }),
       rampStep: new THREE.MeshStandardMaterial({ color: "#c0b69b", roughness: 0.92 }),
+      coastGrass: new THREE.MeshStandardMaterial({ color: "#86a98b", roughness: 0.97 }),
+      limestoneVein: new THREE.MeshStandardMaterial({ color: "#d7d0b9", roughness: 0.88 }),
+      ancientEtch: new THREE.MeshStandardMaterial({
+        color: "#8acdc0",
+        metalness: 0.12,
+        roughness: 0.42,
+        emissive: "#165c57",
+        emissiveIntensity: 0.36,
+      }),
+      driftwood: new THREE.MeshStandardMaterial({ color: "#796c59", roughness: 0.98 }),
       grass: new THREE.MeshStandardMaterial({ color: "#83a878", roughness: 0.96 }),
       terrainCrystal: new THREE.MeshStandardMaterial({
         color: "#55a6a2",
@@ -973,7 +983,56 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       const mapWidth = Number.isFinite(minX) ? Math.max(1, maxX - minX) : TILE;
       const mapDepth = Number.isFinite(minZ) ? Math.max(1, maxZ - minZ) : TILE;
 
-      // 每格岩面保留些微色差，讓平台表面不再像單色網格。
+      // 以地塊外緣、海岸距離與低頻座標場分出四種區域，整張地圖保持固定且可重現。
+      const edgeCellKeys = new Set<string>();
+      const coastBandKeys = new Set<string>();
+      const biomeDirections = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+      for (const cell of tileCells.values()) {
+        const gx = Math.floor(cell.x);
+        const gy = Math.floor(cell.z);
+        const key = gx + "," + gy;
+        if (biomeDirections.some(([dc, dr]) => !tileCells.has((gx + dc) + "," + (gy + dr)))) {
+          edgeCellKeys.add(key);
+          coastBandKeys.add(key);
+        }
+      }
+      for (const key of edgeCellKeys) {
+        const [gx, gy] = key.split(",").map(Number);
+        for (const [dc, dr] of biomeDirections) {
+          const neighborKey = (gx + dc) + "," + (gy + dr);
+          if (tileCells.has(neighborKey)) coastBandKeys.add(neighborKey);
+        }
+      }
+      const terrainRegion = (cell: { x: number; z: number; h: number }) => {
+        const key = Math.floor(cell.x) + "," + Math.floor(cell.z);
+        if (cell.h > 0 && coastBandKeys.has(key)) return "coast";
+        const nx = (cell.x - mapCenterX) / mapWidth;
+        const nz = (cell.z - mapCenterZ) / mapDepth;
+        const mossField =
+          Math.sin(nx * 13.1 + nz * 5.3 + 0.7) * 0.5 +
+          Math.cos(nz * 12.4 - nx * 4.8) * 0.5;
+        const ridgeField =
+          Math.sin(nx * 8.2 - nz * 12.6 + 1.2) * 0.5 +
+          Math.cos((nx + nz) * 10.5) * 0.5;
+        const relicField =
+          Math.sin(nx * 10.6 + nz * 9.4 + 2.2) * 0.5 +
+          Math.cos(nx * 7.1 - nz * 13.7) * 0.5;
+        if (cell.h >= 2 && relicField > 0.48) return "ancient";
+        if (cell.h >= 2 && ridgeField > -0.05) return "limestone";
+        if (cell.h >= 1 && mossField > -0.2) return "moss";
+        return "meadow";
+      };
+
+      // 每格岩面依區域加入微色偏：海岸偏沙金、苔地偏冷綠、石灰岩偏暖白、遺跡偏灰青。
+      const regionTint: Record<string, [number, number, number]> = {
+        coast: [1.055, 1.015, 0.9],
+        moss: [0.9, 1.065, 0.89],
+        limestone: [1.075, 1.035, 0.94],
+        ancient: [0.94, 0.96, 0.91],
+        meadow: [0.985, 1.0, 0.96],
+      };
+
+      // 每格岩面保留些微色差，讓平台不再像單色網格。
       for (let h = 0; h <= 3; h++) {
         const list = byHeight[h];
         if (!list.length) continue;
@@ -989,9 +1048,10 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
           const cell = list[i];
           const seed = Math.abs(Math.sin(cell.x * 127.1 + cell.z * 311.7) * 43758.5453) % 1;
           const shade = 0.92 + seed * 0.1;
+          const palette = regionTint[terrainRegion(cell)] ?? regionTint.meadow;
           matrix.makeTranslation(cell.x, top / 2, cell.z);
           mesh.setMatrixAt(i, matrix);
-          tint.setRGB(shade, shade, shade);
+          tint.setRGB(shade * palette[0], shade * palette[1], shade * palette[2]);
           mesh.setColorAt(i, tint);
         }
         mesh.instanceMatrix.needsUpdate = true;
@@ -1261,6 +1321,68 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
           }
           terrainRoot.add(waterRippleMesh);
         }
+
+        // 海岸補少量漂流木與岸邊草簇，固定上限避免沿線物件過密。
+        const driftwoodEdges = coastEdges.filter((edge) => edge.seed > 0.94).slice(0, 22);
+        if (driftwoodEdges.length) {
+          const driftwood = new THREE.InstancedMesh(
+            new THREE.CylinderGeometry(0.035, 0.055, 0.58, 6),
+            shared.driftwood,
+            driftwoodEdges.length,
+          );
+          const dummy = new THREE.Object3D();
+          for (let i = 0; i < driftwoodEdges.length; i++) {
+            const edge = driftwoodEdges[i];
+            const along = (edge.seed - 0.5) * 0.46;
+            dummy.position.set(
+              edge.x + edge.dx * 1.06 + (edge.dz !== 0 ? along : 0),
+              -0.235,
+              edge.z + edge.dz * 1.06 + (edge.dx !== 0 ? along : 0),
+            );
+            dummy.rotation.set(Math.PI / 2 + (edge.seed - 0.5) * 0.18, edge.rot, edge.seed * 0.25);
+            dummy.scale.set(0.78 + edge.seed * 0.5, 0.9 + edge.seed * 0.35, 0.78 + edge.seed * 0.3);
+            dummy.updateMatrix();
+            driftwood.setMatrixAt(i, dummy.matrix);
+          }
+          driftwood.instanceMatrix.needsUpdate = true;
+          driftwood.castShadow = false;
+          driftwood.receiveShadow = false;
+          terrainRoot.add(driftwood);
+        }
+
+        const shoreReedEdges = coastEdges.filter((edge) => edge.seed > 0.86).slice(0, 140);
+        if (shoreReedEdges.length) {
+          const reeds = new THREE.InstancedMesh(
+            new THREE.ConeGeometry(0.045, 0.2, 5),
+            shared.coastGrass,
+            shoreReedEdges.length * 2,
+          );
+          const dummy = new THREE.Object3D();
+          const tint = new THREE.Color();
+          for (let i = 0; i < shoreReedEdges.length; i++) {
+            const edge = shoreReedEdges[i];
+            for (let blade = 0; blade < 2; blade++) {
+              const index = i * 2 + blade;
+              const side = blade === 0 ? -1 : 1;
+              dummy.position.set(
+                edge.x - edge.dx * 0.33 + edge.dz * side * 0.13,
+                groundTop(edge.h) + 0.09,
+                edge.z - edge.dz * 0.33 + edge.dx * side * 0.13,
+              );
+              dummy.rotation.set(edge.dz * 0.18, edge.seed * Math.PI * 2 + blade, -edge.dx * 0.18);
+              dummy.scale.set(0.78 + edge.seed * 0.32, 0.72 + blade * 0.15, 0.78 + edge.seed * 0.32);
+              dummy.updateMatrix();
+              reeds.setMatrixAt(index, dummy.matrix);
+              tint.set(blade === 0 ? "#a0b78d" : "#6c967d");
+              reeds.setColorAt(index, tint);
+            }
+          }
+          reeds.instanceMatrix.needsUpdate = true;
+          if (reeds.instanceColor) reeds.instanceColor.needsUpdate = true;
+          reeds.castShadow = false;
+          reeds.receiveShadow = false;
+          terrainRoot.add(reeds);
+        }
       }
 
       // 高地表面散布少量低矮岩屑，破除棋盤格般的單調感，不遮擋道路或建築。
@@ -1397,9 +1519,9 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
           Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + margin,
         );
       const mossCells = Array.from(tileCells.values()).filter((cell) => {
-        if (cell.h !== 1 || !detailIsClear(cell)) return false;
+        if (cell.h !== 1 || terrainRegion(cell) !== "moss" || !detailIsClear(cell)) return false;
         const seed = Math.abs(Math.sin(cell.x * 29.7 + cell.z * 81.3) * 18431.7) % 1;
-        return seed > 0.79;
+        return seed > 0.76;
       });
       if (mossCells.length) {
         const moss = new THREE.InstancedMesh(
@@ -1436,10 +1558,49 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         terrainRoot.add(moss);
       }
 
+      // 苔地補少量扇形蕨葉，保持低矮並限制數量，不遮住塔身與角色。
+      const fernCells = Array.from(tileCells.values()).filter((cell) => {
+        if (cell.h !== 1 || terrainRegion(cell) !== "moss" || !detailIsClear(cell, 1.35)) return false;
+        const seed = Math.abs(Math.sin(cell.x * 83.1 + cell.z * 27.9) * 31917.7) % 1;
+        return seed > 0.972;
+      }).slice(0, 420);
+      if (fernCells.length) {
+        const ferns = new THREE.InstancedMesh(
+          new THREE.ConeGeometry(0.042, 0.23, 5),
+          shared.coastGrass,
+          fernCells.length * 3,
+        );
+        const dummy = new THREE.Object3D();
+        const tint = new THREE.Color();
+        for (let i = 0; i < fernCells.length; i++) {
+          const cell = fernCells[i];
+          const seed = Math.abs(Math.sin(cell.x * 127.1 + cell.z * 311.7) * 43758.5453) % 1;
+          for (let leaf = 0; leaf < 3; leaf++) {
+            const angle = seed * Math.PI * 2 + leaf * (Math.PI * 2 / 3);
+            dummy.position.set(
+              cell.x + Math.cos(angle) * 0.18,
+              groundTop(cell.h) + 0.105,
+              cell.z + Math.sin(angle) * 0.18,
+            );
+            dummy.rotation.set(Math.cos(angle) * 0.22, angle, Math.sin(angle) * -0.22);
+            dummy.scale.set(0.78 + seed * 0.25, 0.72 + leaf * 0.1, 0.78 + seed * 0.25);
+            dummy.updateMatrix();
+            ferns.setMatrixAt(i * 3 + leaf, dummy.matrix);
+            tint.set(leaf === 1 ? "#a6b985" : seed > 0.5 ? "#719b75" : "#5c8468");
+            ferns.setColorAt(i * 3 + leaf, tint);
+          }
+        }
+        ferns.instanceMatrix.needsUpdate = true;
+        if (ferns.instanceColor) ferns.instanceColor.needsUpdate = true;
+        ferns.castShadow = false;
+        ferns.receiveShadow = false;
+        terrainRoot.add(ferns);
+      }
+
       const strataCells = Array.from(tileCells.values()).filter((cell) => {
-        if (cell.h !== 2 || !detailIsClear(cell)) return false;
+        if (cell.h !== 2 || terrainRegion(cell) !== "limestone" || !detailIsClear(cell)) return false;
         const seed = Math.abs(Math.sin(cell.x * 47.1 + cell.z * 19.7) * 29341.3) % 1;
-        return seed > 0.77;
+        return seed > 0.73;
       });
       if (strataCells.length) {
         const strata = new THREE.InstancedMesh(
@@ -1476,10 +1637,47 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         terrainRoot.add(strata);
       }
 
+      // 石灰岩區補細長白色礦脈，貼近地表且只在高地出現，形成明確的岩脊紋理。
+      const veinCells = Array.from(tileCells.values()).filter((cell) => {
+        if (cell.h < 2 || terrainRegion(cell) !== "limestone" || !detailIsClear(cell, 1.4)) return false;
+        const seed = Math.abs(Math.sin(cell.x * 57.3 + cell.z * 71.9) * 27391.11) % 1;
+        return seed > 0.93;
+      }).slice(0, 360);
+      if (veinCells.length) {
+        const veins = new THREE.InstancedMesh(
+          new THREE.BoxGeometry(0.58, 0.012, 0.026),
+          shared.limestoneVein,
+          veinCells.length,
+        );
+        const dummy = new THREE.Object3D();
+        const tint = new THREE.Color();
+        for (let i = 0; i < veinCells.length; i++) {
+          const cell = veinCells[i];
+          const seed = Math.abs(Math.sin(cell.x * 127.1 + cell.z * 311.7) * 43758.5453) % 1;
+          const angle = seed * Math.PI * 2;
+          dummy.position.set(
+            cell.x + Math.cos(angle) * 0.08,
+            groundTop(cell.h) + 0.018,
+            cell.z + Math.sin(angle) * 0.08,
+          );
+          dummy.rotation.y = angle;
+          dummy.scale.set(0.65 + seed * 0.5, 1, 0.75 + seed * 0.35);
+          dummy.updateMatrix();
+          veins.setMatrixAt(i, dummy.matrix);
+          tint.set(seed > 0.55 ? "#e5dfca" : "#b9c4b0");
+          veins.setColorAt(i, tint);
+        }
+        veins.instanceMatrix.needsUpdate = true;
+        if (veins.instanceColor) veins.instanceColor.needsUpdate = true;
+        veins.castShadow = false;
+        veins.receiveShadow = false;
+        terrainRoot.add(veins);
+      }
+
       const engravedCells = Array.from(tileCells.values()).filter((cell) => {
-        if (cell.h !== 3 || !detailIsClear(cell, 1.45)) return false;
+        if (cell.h !== 3 || terrainRegion(cell) !== "limestone" || !detailIsClear(cell, 1.45)) return false;
         const seed = Math.abs(Math.sin(cell.x * 73.9 + cell.z * 37.1) * 31781.9) % 1;
-        return seed > 0.75;
+        return seed > 0.72;
       });
       if (engravedCells.length) {
         // 三段式石板刻線形成開口方框，斜向觀看仍能讀出 3 級平台的精緻岩面。
@@ -1534,6 +1732,38 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         ends.castShadow = false;
         ends.receiveShadow = false;
         terrainRoot.add(rails, ends);
+      }
+
+      // 古代區的淺刻符文嵌在石面上，幾乎與地表齊平，不阻擋建塔或單位移動。
+      const etchCells = Array.from(tileCells.values()).filter((cell) => {
+        if (cell.h < 2 || terrainRegion(cell) !== "ancient" || !detailIsClear(cell, 1.55)) return false;
+        const seed = Math.abs(Math.sin(cell.x * 67.1 + cell.z * 41.7) * 22817.9) % 1;
+        return seed > 0.975;
+      }).slice(0, 72);
+      if (etchCells.length) {
+        const etches = new THREE.InstancedMesh(
+          new THREE.TorusGeometry(0.2, 0.009, 4, 24),
+          shared.ancientEtch,
+          etchCells.length,
+        );
+        const dummy = new THREE.Object3D();
+        const tint = new THREE.Color();
+        for (let i = 0; i < etchCells.length; i++) {
+          const cell = etchCells[i];
+          const seed = Math.abs(Math.sin(cell.x * 127.1 + cell.z * 311.7) * 43758.5453) % 1;
+          dummy.position.set(cell.x, groundTop(cell.h) + 0.016, cell.z);
+          dummy.rotation.set(Math.PI / 2, seed * Math.PI * 2, 0);
+          dummy.scale.set(0.72 + seed * 0.55, 0.72 + seed * 0.55, 0.72 + seed * 0.55);
+          dummy.updateMatrix();
+          etches.setMatrixAt(i, dummy.matrix);
+          tint.set(seed > 0.55 ? "#a0e0c9" : "#6eaea0");
+          etches.setColorAt(i, tint);
+        }
+        etches.instanceMatrix.needsUpdate = true;
+        if (etches.instanceColor) etches.instanceColor.needsUpdate = true;
+        etches.castShadow = false;
+        etches.receiveShadow = false;
+        terrainRoot.add(etches);
       }
 
       // 稀疏古代遺跡：完整地圖只落在障礙格，擴張地圖移至島外淺海，保留所有可建造平台。
