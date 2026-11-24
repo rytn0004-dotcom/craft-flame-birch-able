@@ -1429,9 +1429,17 @@ export function FoxTD() {
           def: tower.def, level: tower.level, aim: tower.aim,
           stake: tower.stake, sanctuary: tower.sanctuary,
           hqFireLv: tower.hqFireLv, hqFortifyLv: tower.hqFortifyLv,
+          hqTurretAtk: tower.hqTurretAtk?.slice(), hqCannonAtk: tower.hqCannonAtk,
           hp: tower.hp, maxHp: tower.maxHp, image,
         };
       }),
+      shots: current.shots.map((shot) => ({
+        x: shot.x, y: shot.y, tx: shot.tx, ty: shot.ty, color: shot.color,
+        sanctuary: shot.fromTower != null && !!current.towers[shot.fromTower]?.sanctuary,
+      })),
+      rings: current.rings.map((ring) => ({
+        x: ring.x, y: ring.y, r: ring.r, max: ring.max, color: ring.color, life: ring.life,
+      })),
       enemies: current.enemies.map((enemy) => {
         const book = bestiaryRef.current[enemy.type] ?? bestiaryRef.current[0];
         const setName = (book?.sprite as string) || (enemy.boss ? "boss" : enemy.type <= 1 ? "imp" : enemy.type <= 3 ? "brute" : "boss");
@@ -1809,6 +1817,17 @@ export function FoxTD() {
         age: 0,
         scale: special === "aoe" || special === "ultimate" ? 1.35 * aoeMul : 0.85,
       });
+      // 聖地命中專屬金色震波；只增加視覺回饋，不影響傷害判定。
+      if (fromTower != null && sim.current.towers[fromTower]?.sanctuary) {
+        sim.current.rings.push({
+          x: px,
+          y: py,
+          r: 7,
+          max: e.boss ? 72 : 52,
+          color: "#ffd27a",
+          life: e.boss ? 0.46 : 0.36,
+        });
+      }
 
       if (special === "aoe" || special === "ultimate") {
         const maxR = (special === "ultimate" ? 96 : 74) * aoeMul;
@@ -1951,6 +1970,7 @@ export function FoxTD() {
           sim.current.rings.push({ x: ox, y: oy, r: 6, max: 28, color: "rgba(255,220,140,0.5)", life: 0.25 });
           float(ox, oy - 22, "聖砲", "#ffe08a");
         } else if (fireLv >= 1) {
+          tw.hqCannonAtk = 0;
           // 選最靠近目標的角樓開火
           let bestI = 0;
           let bestD = 1e9;
@@ -1982,6 +2002,8 @@ export function FoxTD() {
           burst(c.x, c.y, "#ffd2a8", 5, 1.5);
           float(c.x, c.y - 16, "角樓", "#ffd2a8");
         } else {
+          // 初始中央主炮：保留較小威力，但 3D 模型會有明確炮口閃光
+          tw.hqCannonAtk = 0.62;
           // 初始小兵器：主殿微光彈
           sim.current.shots.push({
             x: tw.x,
