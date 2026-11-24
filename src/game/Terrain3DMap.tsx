@@ -7,7 +7,16 @@ import { TILE, type PlacedTile } from "./tiles";
 export type Terrain3DTower = {
   x: number; y: number; gx: number; gy: number; def: number; level: number; aim: number;
   stake?: boolean; sanctuary?: boolean; hqFireLv?: number; hqFortifyLv?: number;
+  hqTurretAtk?: number[]; hqCannonAtk?: number;
   hp: number; maxHp: number; image?: HTMLImageElement | null;
+};
+
+export type Terrain3DShot = {
+  x: number; y: number; tx: number; ty: number; color: string; sanctuary?: boolean;
+};
+
+export type Terrain3DRing = {
+  x: number; y: number; r: number; max: number; color: string; life: number;
 };
 
 export type Terrain3DEnemy = {
@@ -21,6 +30,8 @@ export type Terrain3DSnapshot = {
   blocked: Set<string>;
   towers: Terrain3DTower[];
   enemies: Terrain3DEnemy[];
+  shots: Terrain3DShot[];
+  rings: Terrain3DRing[];
   mapMode: "expand" | "layout";
 };
 
@@ -86,7 +97,8 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     const terrainRoot = new THREE.Group();
     const buildingRoot = new THREE.Group();
     const actorRoot = new THREE.Group();
-    scene.add(terrainRoot, buildingRoot, actorRoot);
+    const effectRoot = new THREE.Group();
+    scene.add(terrainRoot, buildingRoot, actorRoot, effectRoot);
 
     scene.add(new THREE.HemisphereLight("#dff2ff", "#24394a", 1.8));
     scene.add(new THREE.AmbientLight("#91b7d5", 0.42));
@@ -107,9 +119,11 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     const textureCache = new Map<HTMLImageElement, any>();
     const rings: any[] = [];
     const gems: any[] = [];
-    const turretGroups: { group: any; tower: Terrain3DTower }[] = [];
+    const turretGroups: { group: any; tower: Terrain3DTower; index: number; flash: any }[] = [];
     const towerSprites: any[] = [];
     const enemySprites: any[] = [];
+    const shotNodes: any[] = [];
+    const ringNodes: any[] = [];
     const shared = {
       stone: new THREE.MeshStandardMaterial({ color: MATERIALS.stone, roughness: 0.76 }),
       ivory: new THREE.MeshStandardMaterial({ color: MATERIALS.ivory, roughness: 0.63 }),
@@ -184,6 +198,14 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       const muzzleCore = new THREE.Mesh(new THREE.SphereGeometry(0.105 * scale, 10, 8), shared.crystal);
       muzzleCore.position.set(0, 0.47 * scale, 0.9 * scale);
       cannon.add(muzzleCore);
+      const flash = new THREE.Mesh(
+        new THREE.SphereGeometry(0.23 * scale, 10, 8),
+        new THREE.MeshBasicMaterial({ color: "#fff0b2", transparent: true, opacity: 0.9 }),
+      );
+      flash.position.set(0, 0.47 * scale, 1.02 * scale);
+      flash.visible = false;
+      cannon.add(flash);
+      cannon.userData.muzzleFlash = flash;
       return cannon;
     };
 
@@ -228,7 +250,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       const mainCannon = makeCannon(mainGunMount, (tower.hqFireLv ?? 0) >= 2 ? 1.28 : 1.08);
       mainCannon.position.y = 0.12;
       root.add(mainGunMount);
-      turretGroups.push({ group: mainGunMount, tower });
+      turretGroups.push({ group: mainGunMount, tower, index: -1, flash: mainCannon.userData.muzzleFlash });
 
       const mainRing = new THREE.Group();
       mainRing.position.set(0, 1.79, 0.72);
@@ -270,7 +292,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
           cannon.position.y = 0.28;
           mount.rotation.y = Math.atan2(Math.cos(tower.aim), Math.sin(tower.aim));
           root.add(mount);
-          turretGroups.push({ group: mount, tower });
+          turretGroups.push({ group: mount, tower, index: corners.findIndex(([x, z]) => x === cx && z === cz), flash: cannon.userData.muzzleFlash });
         }
       }
 
@@ -421,6 +443,57 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       for (let i = data.enemies.length; i < enemySprites.length; i++) enemySprites[i].visible = false;
     };
 
+    const updateEffects = (data: Terrain3DSnapshot) => {
+      for (let i = 0; i < data.shots.length; i++) {
+        const shot = data.shots[i];
+        if (!shotNodes[i]) {
+          const group = new THREE.Group();
+          const material = new THREE.MeshStandardMaterial({ color: shot.color, emissive: shot.color, emissiveIntensity: 1.1, roughness: 0.28 });
+          const core = new THREE.Mesh(new THREE.OctahedronGeometry(0.16, 0), material);
+          core.castShadow = false;
+          group.add(core);
+          const trail = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.055, 0.48), material);
+          trail.position.z = -0.28;
+          group.add(trail);
+          effectRoot.add(group);
+          shotNodes[i] = group;
+        }
+        const node = shotNodes[i];
+        node.visible = true;
+        const dx = (shot.tx - shot.x) / CELL;
+        const dz = (shot.ty - shot.y) / CELL;
+        const length = Math.hypot(dx, dz) || 1;
+        const gx = Math.max(0, Math.min(COLS - 1, Math.floor(shot.x / CELL)));
+        const gy = Math.max(0, Math.min(ROWS - 1, Math.floor(shot.y / CELL)));
+        const h = data.heights[gy * COLS + gx] ?? 0;
+        node.position.set(shot.x / CELL, groundTop(h) + 0.72, shot.y / CELL);
+        node.rotation.y = Math.atan2(dx / length, dz / length);
+        node.scale.setScalar(shot.sanctuary ? 1.28 : 1);
+      }
+      for (let i = data.shots.length; i < shotNodes.length; i++) shotNodes[i].visible = false;
+
+      for (let i = 0; i < data.rings.length; i++) {
+        const ring = data.rings[i];
+        if (!ringNodes[i]) {
+          const material = new THREE.MeshBasicMaterial({ color: "#ffd27a", transparent: true, opacity: 0.88, side: THREE.DoubleSide });
+          const mesh = new THREE.Mesh(new THREE.TorusGeometry(1, 0.055, 8, 36), material);
+          mesh.rotation.x = Math.PI / 2;
+          effectRoot.add(mesh);
+          ringNodes[i] = mesh;
+        }
+        const mesh = ringNodes[i];
+        const gx = Math.max(0, Math.min(COLS - 1, Math.floor(ring.x / CELL)));
+        const gy = Math.max(0, Math.min(ROWS - 1, Math.floor(ring.y / CELL)));
+        const h = data.heights[gy * COLS + gx] ?? 0;
+        mesh.visible = true;
+        mesh.position.set(ring.x / CELL, groundTop(h) + 0.08, ring.y / CELL);
+        mesh.scale.setScalar(Math.max(0.08, ring.r / CELL));
+        mesh.material.opacity = Math.max(0, Math.min(0.9, ring.life * 2.5));
+        mesh.material.color.set(ring.color.startsWith("#") ? ring.color : "#ffd27a");
+      }
+      for (let i = data.rings.length; i < ringNodes.length; i++) ringNodes[i].visible = false;
+    };
+
     const resize = () => {
       if (!renderer || !host) return;
       const width = Math.max(1, host.clientWidth);
@@ -566,6 +639,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       }
 
       updateActors(data, time);
+      updateEffects(data);
       const dt = lastTime ? Math.min(0.05, (time - lastTime) / 1000) : 0;
       lastTime = time;
       for (const ring of rings) ring.rotation.y += dt * 0.42;
@@ -573,7 +647,15 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         const pulse = 1 + Math.sin(time * 0.0022) * 0.045;
         gem.scale.setScalar(pulse);
       }
-      for (const turret of turretGroups) turret.group.rotation.y = Math.atan2(Math.cos(turret.tower.aim), Math.sin(turret.tower.aim));
+      for (const turret of turretGroups) {
+        turret.group.rotation.y = Math.atan2(Math.cos(turret.tower.aim), Math.sin(turret.tower.aim));
+        const flash = turret.index < 0
+          ? turret.tower.hqCannonAtk ?? 0
+          : turret.tower.hqTurretAtk?.[turret.index] ?? 0;
+        turret.flash.visible = flash > 0.06;
+        turret.flash.scale.setScalar(0.72 + flash * 1.8);
+        turret.flash.material.opacity = Math.min(1, flash * 1.25);
+      }
       controls.update();
       renderer.render(scene, camera);
     };
@@ -596,6 +678,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       clearGroup(terrainRoot);
       clearGroup(buildingRoot);
       clearGroup(actorRoot);
+      clearGroup(effectRoot);
       for (const texture of textureCache.values()) texture.dispose();
       renderer.dispose();
       renderer.domElement.remove();
