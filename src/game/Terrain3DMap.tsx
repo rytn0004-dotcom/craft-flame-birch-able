@@ -190,7 +190,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       const material = new THREE.MeshBasicMaterial({ color: "#ffe2a0", transparent: true, opacity: 0.95, side: THREE.DoubleSide });
       const mesh = new THREE.Mesh(new THREE.TorusGeometry(0.52, 0.045, 8, 32), material);
       mesh.rotation.x = Math.PI / 2;
-      mesh.position.set(x, 1.72, z);
+      mesh.position.set(x, 2.02, z);
       mesh.scale.setScalar(0.2);
       parent.add(mesh);
       installationRings.push({ mesh, material, age: 0, duration: 0.92 });
@@ -315,7 +315,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         addCylinder(root, 0.48, 0.58, 0.2, cx, 1.82, cz, shared.roof, 10);
         addCylinder(root, 0.53, 0.53, 0.065, cx, 1.94, cz, shared.brightGold, 10);
         const spin = new THREE.Group();
-        spin.position.set(cx, 1.64, cz);
+        spin.position.set(cx, 2.02, cz);
         const runeRing = new THREE.Mesh(new THREE.TorusGeometry(0.45, 0.055, 8, 28), shared.brightGold);
         runeRing.rotation.x = Math.PI / 2;
         spin.add(runeRing);
@@ -403,7 +403,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         if (tileCells.has(key)) return;
         const blocked = data.blocked.has(key);
         let h = data.heights[gy * COLS + gx] ?? 0;
-        if (!data.placed.length && blocked && h === 0) h = 1;
+        if (data.mapMode === "expand" && !data.placed.length && blocked && h === 0) h = 1;
         if (!blocked) h = 0;
         h = Math.max(0, Math.min(3, h | 0));
         const cell = { x: gx + 0.5, z: gy + 0.5, h };
