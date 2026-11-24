@@ -226,6 +226,8 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       waterRipple: new THREE.MeshBasicMaterial({ color: "#c7eee0", transparent: true, opacity: 0.16, depthWrite: false, side: THREE.DoubleSide }),
       cliffLip: new THREE.MeshStandardMaterial({ color: "#c9b58b", roughness: 0.86 }),
       cliffFacet: new THREE.MeshStandardMaterial({ color: "#718071", roughness: 0.96 }),
+      reefRock: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.94 }),
+      reefCoral: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.78 }),
       heightRim: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.84 }),
       ramp: new THREE.MeshStandardMaterial({ color: "#aeb49c", roughness: 0.9 }),
     };
@@ -1012,6 +1014,69 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         sand.instanceMatrix.needsUpdate = true;
         sand.receiveShadow = true;
         terrainRoot.add(sand);
+
+        // 礁岩與淺海珊瑚沿岸稀疏分布，只是遠景環境物件，不加入建造格或路徑資料。
+        const reefEdges = coastEdges.filter((edge) => edge.seed > 0.54);
+        if (reefEdges.length) {
+          const reefRocks = new THREE.InstancedMesh(
+            new THREE.DodecahedronGeometry(0.24, 0),
+            shared.reefRock,
+            reefEdges.length,
+          );
+          const coralEdges = reefEdges.filter((edge) => edge.seed > 0.79);
+          const reefCorals = coralEdges.length
+            ? new THREE.InstancedMesh(
+                new THREE.ConeGeometry(0.085, 0.26, 5),
+                shared.reefCoral,
+                coralEdges.length,
+              )
+            : null;
+          const dummy = new THREE.Object3D();
+          const tint = new THREE.Color();
+          for (let i = 0; i < reefEdges.length; i++) {
+            const edge = reefEdges[i];
+            const along = (edge.seed - 0.5) * 0.38;
+            dummy.position.set(
+              edge.x + edge.dx * (1.32 + edge.seed * 0.2) + (edge.dz !== 0 ? along : 0),
+              -0.22,
+              edge.z + edge.dz * (1.32 + edge.seed * 0.2) + (edge.dx !== 0 ? along : 0),
+            );
+            dummy.rotation.set(edge.seed * 0.16, edge.seed * Math.PI * 2, (edge.seed - 0.5) * 0.2);
+            dummy.scale.set(0.62 + edge.seed * 0.48, 0.58 + edge.seed * 0.42, 0.62 + edge.seed * 0.38);
+            dummy.updateMatrix();
+            reefRocks.setMatrixAt(i, dummy.matrix);
+            tint.set(edge.seed > 0.78 ? "#718e7b" : "#496c6b");
+            reefRocks.setColorAt(i, tint);
+          }
+          reefRocks.instanceMatrix.needsUpdate = true;
+          if (reefRocks.instanceColor) reefRocks.instanceColor.needsUpdate = true;
+          reefRocks.castShadow = false;
+          reefRocks.receiveShadow = false;
+          terrainRoot.add(reefRocks);
+
+          if (reefCorals) {
+            for (let i = 0; i < coralEdges.length; i++) {
+              const edge = coralEdges[i];
+              const along = (edge.seed - 0.5) * 0.3;
+              dummy.position.set(
+                edge.x + edge.dx * 1.12 + (edge.dz !== 0 ? along : 0),
+                -0.105,
+                edge.z + edge.dz * 1.12 + (edge.dx !== 0 ? along : 0),
+              );
+              dummy.rotation.set(0, edge.seed * Math.PI * 2, (edge.seed - 0.5) * 0.28);
+              dummy.scale.set(0.78 + edge.seed * 0.2, 0.76 + edge.seed * 0.34, 0.78 + edge.seed * 0.2);
+              dummy.updateMatrix();
+              reefCorals.setMatrixAt(i, dummy.matrix);
+              tint.set(edge.seed > 0.9 ? "#d69b84" : "#a87880");
+              reefCorals.setColorAt(i, tint);
+            }
+            reefCorals.instanceMatrix.needsUpdate = true;
+            if (reefCorals.instanceColor) reefCorals.instanceColor.needsUpdate = true;
+            reefCorals.castShadow = false;
+            reefCorals.receiveShadow = false;
+            terrainRoot.add(reefCorals);
+          }
+        }
 
         const foamEdges = coastEdges.filter((edge) => edge.seed > 0.38);
         if (foamEdges.length) {
