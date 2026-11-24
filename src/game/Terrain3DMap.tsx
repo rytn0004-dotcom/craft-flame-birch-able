@@ -33,6 +33,7 @@ export type Terrain3DSnapshot = {
   enemies: Terrain3DEnemy[];
   shots: Terrain3DShot[];
   rings: Terrain3DRing[];
+  placement?: { gx: number; gy: number; height: number; valid: boolean; snapped?: boolean } | null;
   mapMode: "expand" | "layout";
 };
 
@@ -51,9 +52,9 @@ const HEIGHT_STEP = 0.42;
 // 美術方向：海岸奇幻 × 魔導遺跡。地形偏自然暖色，建築以深海藍、青綠晶體與柔金作識別。
 const MATERIALS = {
   road: "#405968",
-  low: "#718b79",
-  mid: "#91a28a",
-  high: "#b2b18f",
+  low: "#6d8c72",
+  mid: "#91a58a",
+  high: "#c7b78e",
   stone: "#ded7c3",
   ivory: "#f0e8d4",
   blue: "#17475a",
@@ -225,6 +226,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       waterRipple: new THREE.MeshBasicMaterial({ color: "#c7eee0", transparent: true, opacity: 0.16, depthWrite: false, side: THREE.DoubleSide }),
       cliffLip: new THREE.MeshStandardMaterial({ color: "#c9b58b", roughness: 0.86 }),
       cliffFacet: new THREE.MeshStandardMaterial({ color: "#718071", roughness: 0.96 }),
+      heightRim: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.84 }),
       ramp: new THREE.MeshStandardMaterial({ color: "#aeb49c", roughness: 0.9 }),
     };
 
@@ -1196,6 +1198,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       ];
       const cliffFaces: { x: number; y: number; z: number; sx: number; sy: number; sz: number; bandY: number; upperBandY: number }[] = [];
       const cliffLedges: { x: number; y: number; z: number; rot: number }[] = [];
+      const heightRims: { x: number; y: number; z: number; rot: number; width: number; depth: number; tint: string }[] = [];
       const cliffFragments: {
         x: number; y: number; z: number;
         rx: number; ry: number; rz: number;
@@ -1222,6 +1225,27 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
             bandY: low + (high - low) * 0.28,
             upperBandY: low + (high - low) * 0.68,
           });
+
+          // 依高度做出 1／2／3 層不同的岩台外沿：層數就是高度等級，岩沿逐層向外挑出。
+          const rimRot = d.dc === 0 ? 0 : Math.PI / 2;
+          for (let layer = 0; layer < cell.h; layer++) {
+            const levelTint =
+              cell.h === 1
+                ? "#789477"
+                : cell.h === 2
+                  ? (layer === 0 ? "#d1bd91" : "#788d79")
+                  : (layer === 0 ? "#ead6a9" : layer === 1 ? "#b39f79" : "#627d70");
+            const offset = 0.445 + layer * 0.032;
+            heightRims.push({
+              x: cell.x + Math.sign(d.dx) * offset,
+              y: high - 0.028 - layer * 0.115,
+              z: cell.z + Math.sign(d.dz) * offset,
+              rot: rimRot,
+              width: 0.94 - layer * 0.035,
+              depth: 0.13 + layer * 0.018,
+              tint: levelTint,
+            });
+          }
 
           // 斷層表面隨機生成薄片狀岩角，角度、厚度和色階有細微變化，避免連續牆面像積木。
           const faceSeed = Math.abs(Math.sin(cell.x * 43.17 + cell.z * 91.73 + d.dc * 17.1 + d.dr * 31.7) * 28543.31) % 1;
@@ -1374,6 +1398,31 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         rubble.castShadow = false;
         rubble.receiveShadow = true;
         terrainRoot.add(rubble);
+      }
+
+      if (heightRims.length) {
+        const rims = new THREE.InstancedMesh(
+          new THREE.BoxGeometry(1, 1, 1),
+          shared.heightRim,
+          heightRims.length,
+        );
+        const dummy = new THREE.Object3D();
+        const tint = new THREE.Color();
+        for (let i = 0; i < heightRims.length; i++) {
+          const rim = heightRims[i];
+          dummy.position.set(rim.x, rim.y, rim.z);
+          dummy.rotation.y = rim.rot;
+          dummy.scale.set(rim.width, 0.036, rim.depth);
+          dummy.updateMatrix();
+          rims.setMatrixAt(i, dummy.matrix);
+          tint.set(rim.tint);
+          rims.setColorAt(i, tint);
+        }
+        rims.instanceMatrix.needsUpdate = true;
+        if (rims.instanceColor) rims.instanceColor.needsUpdate = true;
+        rims.castShadow = true;
+        rims.receiveShadow = true;
+        terrainRoot.add(rims);
       }
 
       if (cliffLedges.length) {
@@ -1551,6 +1600,33 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     selectedRange.visible = false;
     effectRoot.add(selectedRange);
 
+    // 放塔預覽直接貼在 3D 地面；綠色＝平地、金色＝高地、紅色＝不可放置。
+    const placementPreview = new THREE.Group();
+    const placementFillMaterial = new THREE.MeshBasicMaterial({
+      color: "#8ce3ac",
+      transparent: true,
+      opacity: 0.2,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const placementFill = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.9), placementFillMaterial);
+    placementFill.rotation.x = -Math.PI / 2;
+    placementFill.position.y = 0.004;
+    const placementOutlineMaterial = new THREE.LineBasicMaterial({
+      color: "#c1f4d0",
+      transparent: true,
+      opacity: 0.96,
+      depthWrite: false,
+    });
+    const placementOutline = new THREE.LineSegments(
+      new THREE.EdgesGeometry(new THREE.BoxGeometry(0.94, 0.045, 0.94)),
+      placementOutlineMaterial,
+    );
+    placementOutline.position.y = 0.026;
+    placementPreview.add(placementFill, placementOutline);
+    placementPreview.visible = false;
+    effectRoot.add(placementPreview);
+
     const updateEffects = (data: Terrain3DSnapshot) => {
       for (let i = 0; i < data.shots.length; i++) {
         const shot = data.shots[i];
@@ -1614,6 +1690,23 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         selectedRangeMaterial.opacity = 0.24 + Math.sin(performance.now() * 0.003) * 0.05;
       } else {
         selectedRange.visible = false;
+      }
+
+      if (data.placement) {
+        const { gx, gy, height, valid, snapped } = data.placement;
+        placementPreview.visible = true;
+        placementPreview.position.set(gx + 0.5, groundTop(height) + 0.045, gy + 0.5);
+        placementPreview.scale.setScalar(snapped ? 0.94 : 1);
+        const fillColor = !valid ? "#ff7188" : height >= 2 ? "#f1c982" : height === 1 ? "#a4d49a" : "#8ce3ac";
+        const lineColor = !valid ? "#ff9cac" : height >= 2 ? "#ffe2a5" : height === 1 ? "#c8f0a7" : "#c1f4d0";
+        placementFillMaterial.color.set(fillColor);
+        placementOutlineMaterial.color.set(lineColor);
+        placementFillMaterial.opacity = valid
+          ? (height > 0 ? 0.23 : 0.18) + Math.sin(performance.now() * 0.004) * 0.025
+          : 0.15;
+        placementOutlineMaterial.opacity = valid ? 0.96 : 0.88;
+      } else {
+        placementPreview.visible = false;
       }
     };
 
@@ -1731,6 +1824,8 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     };
     const onContextMenu = (event: Event) => event.preventDefault();
     window.addEventListener("resize", resize);
+    const resizeObserver = new ResizeObserver(resize);
+    resizeObserver.observe(host);
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
     window.addEventListener("blur", onBlur);
@@ -1835,6 +1930,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       disposed = true;
       cancelAnimationFrame(animationFrame);
       resetButton?.removeEventListener("click", reset);
+      resizeObserver.disconnect();
       window.removeEventListener("resize", resize);
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
@@ -1852,6 +1948,8 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         bar.fill.material.dispose();
       }
       selectedRangeMaterial.dispose();
+      placementFillMaterial.dispose();
+      placementOutlineMaterial.dispose();
       clearGroup(effectRoot);
       scene.remove(skyDome);
       skyGeometry.dispose();
@@ -1875,7 +1973,8 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
             Alt＋左鍵旋轉 · 右鍵平移 · 滾輪縮放
           </div>
           <div className="pointer-events-none absolute bottom-3 left-3 z-10 rounded-lg border border-[#8ec8ee33] bg-[#061525cc] px-3 py-2 text-[11px] text-[#9ec4de]">
-            海岸奇幻風格 · 角色動畫沿用現有素材
+            建塔預覽：綠＝平地 · 金＝高地 · 紅＝不可建
+            <span className="block mt-1 text-[#d8c89e]">地勢：0 平地 · 1 單層岩台 · 2 雙層岩台 · 3 三層峭台</span>
           </div>
           <button
             type="button"
