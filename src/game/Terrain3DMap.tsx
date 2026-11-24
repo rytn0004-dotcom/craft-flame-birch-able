@@ -137,6 +137,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       gold: new THREE.MeshStandardMaterial({ color: MATERIALS.gold, metalness: 0.78, roughness: 0.28 }),
       brightGold: new THREE.MeshStandardMaterial({ color: MATERIALS.brightGold, metalness: 0.7, roughness: 0.22, emissive: "#754c16", emissiveIntensity: 0.18 }),
       crystal: new THREE.MeshStandardMaterial({ color: MATERIALS.crystal, metalness: 0.25, roughness: 0.18, emissive: "#008fe8", emissiveIntensity: 1.0 }),
+      chargeCrystal: new THREE.MeshStandardMaterial({ color: "#78e6ff", metalness: 0.24, roughness: 0.16, emissive: "#00aaff", emissiveIntensity: 0.85 }),
       glass: new THREE.MeshStandardMaterial({ color: "#0b3155", roughness: 0.22, emissive: "#0876bd", emissiveIntensity: 0.5 }),
       terrain: [
         new THREE.MeshStandardMaterial({ color: MATERIALS.road, roughness: 0.95 }),
@@ -274,8 +275,12 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       spire.position.set(0, 4.12, -0.28);
       spire.castShadow = true;
       root.add(spire);
-      const heartCrystal = makeCrystal(root, 0, 4.82, -0.28, 0.53);
-      chargeCores.push({ mesh: heartCrystal, material: shared.crystal, tower });
+      const heartCrystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.53, 1), shared.chargeCrystal);
+      heartCrystal.position.set(0, 4.82, -0.28);
+      heartCrystal.castShadow = true;
+      root.add(heartCrystal);
+      gems.push(heartCrystal);
+      chargeCores.push({ mesh: heartCrystal, material: shared.chargeCrystal, tower });
 
       // 主殿四面柱與金色飛簷，強化建築層次。
       for (const side of [-1, 1]) {
