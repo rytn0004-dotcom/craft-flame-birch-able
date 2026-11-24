@@ -181,6 +181,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       shoreSand: new THREE.MeshStandardMaterial({ color: "#d9c49a", roughness: 0.94 }),
       shoreFoam: new THREE.MeshBasicMaterial({ color: "#b9e6d8", transparent: true, opacity: 0.76, depthWrite: false }),
       cliffLip: new THREE.MeshStandardMaterial({ color: "#c9b58b", roughness: 0.86 }),
+      cliffFacet: new THREE.MeshStandardMaterial({ color: "#718071", roughness: 0.96 }),
       ramp: new THREE.MeshStandardMaterial({ color: "#aeb49c", roughness: 0.9 }),
     };
 
@@ -1125,6 +1126,12 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       ];
       const cliffFaces: { x: number; y: number; z: number; sx: number; sy: number; sz: number; bandY: number; upperBandY: number }[] = [];
       const cliffLedges: { x: number; y: number; z: number; rot: number }[] = [];
+      const cliffFragments: {
+        x: number; y: number; z: number;
+        rx: number; ry: number; rz: number;
+        sx: number; sy: number; sz: number;
+        tint: string;
+      }[] = [];
       for (const cell of tileCells.values()) {
         if (cell.h <= 0) continue;
         const gx = Math.floor(cell.x), gy = Math.floor(cell.z);
@@ -1144,6 +1151,45 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
             bandY: low + (high - low) * 0.28,
             upperBandY: low + (high - low) * 0.68,
           });
+
+          // 斷層表面隨機生成薄片狀岩角，角度、厚度和色階有細微變化，避免連續牆面像積木。
+          const faceSeed = Math.abs(Math.sin(cell.x * 43.17 + cell.z * 91.73 + d.dc * 17.1 + d.dr * 31.7) * 28543.31) % 1;
+          if (cell.h >= 1 && faceSeed > 0.42) {
+            const vertical = high - low;
+            const along = (faceSeed - 0.5) * 0.48;
+            const sideDepth = 0.515;
+            const acrossX = d.dc === 0 ? along : 0;
+            const acrossZ = d.dr === 0 ? along : 0;
+            const width = 0.18 + faceSeed * 0.12;
+            const height = Math.min(vertical * 0.62, 0.16 + faceSeed * 0.17);
+            cliffFragments.push({
+              x: cell.x + d.dx * sideDepth + acrossX,
+              y: low + vertical * (0.28 + faceSeed * 0.38),
+              z: cell.z + d.dz * sideDepth + acrossZ,
+              rx: (faceSeed - 0.5) * 0.7,
+              ry: faceSeed * Math.PI * 2,
+              rz: (faceSeed - 0.5) * 0.85,
+              sx: d.dc === 0 ? width : 0.11 + faceSeed * 0.06,
+              sy: height,
+              sz: d.dr === 0 ? width : 0.11 + faceSeed * 0.06,
+              tint: faceSeed > 0.76 ? "#a49b7e" : faceSeed > 0.58 ? "#83907a" : "#536a61",
+            });
+            if (cell.h >= 2 && faceSeed > 0.86) {
+              cliffFragments.push({
+                x: cell.x + d.dx * (sideDepth + 0.01) - acrossX * 0.62,
+                y: low + vertical * (0.62 + faceSeed * 0.12),
+                z: cell.z + d.dz * (sideDepth + 0.01) - acrossZ * 0.62,
+                rx: (faceSeed - 0.5) * 0.95,
+                ry: faceSeed * Math.PI * 2 + 0.7,
+                rz: (faceSeed - 0.5) * 0.9,
+                sx: d.dc === 0 ? width * 0.72 : 0.1,
+                sy: height * 0.68,
+                sz: d.dr === 0 ? width * 0.72 : 0.1,
+                tint: "#b6aa88",
+              });
+            }
+          }
+
           if (cell.h >= 2 && neighbor) {
             cliffLedges.push({
               x: cell.x + d.dx * 0.84,
@@ -1187,6 +1233,31 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         capMesh.receiveShadow = true;
         terrainRoot.add(cliffMesh, bandMesh, upperBandMesh, capMesh);
       }
+      if (cliffFragments.length) {
+        const fragments = new THREE.InstancedMesh(
+          new THREE.DodecahedronGeometry(0.22, 0),
+          shared.cliffFacet,
+          cliffFragments.length,
+        );
+        const dummy = new THREE.Object3D();
+        const tint = new THREE.Color();
+        for (let i = 0; i < cliffFragments.length; i++) {
+          const fragment = cliffFragments[i];
+          dummy.position.set(fragment.x, fragment.y, fragment.z);
+          dummy.rotation.set(fragment.rx, fragment.ry, fragment.rz);
+          dummy.scale.set(fragment.sx / 0.22, fragment.sy / 0.22, fragment.sz / 0.22);
+          dummy.updateMatrix();
+          fragments.setMatrixAt(i, dummy.matrix);
+          tint.set(fragment.tint);
+          fragments.setColorAt(i, tint);
+        }
+        fragments.instanceMatrix.needsUpdate = true;
+        if (fragments.instanceColor) fragments.instanceColor.needsUpdate = true;
+        fragments.castShadow = true;
+        fragments.receiveShadow = true;
+        terrainRoot.add(fragments);
+      }
+
       if (cliffLedges.length) {
         const ledges = new THREE.InstancedMesh(
           new THREE.BoxGeometry(0.92, 0.026, 0.13),
