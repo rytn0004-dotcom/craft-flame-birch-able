@@ -983,7 +983,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       const mapWidth = Number.isFinite(minX) ? Math.max(1, maxX - minX) : TILE;
       const mapDepth = Number.isFinite(minZ) ? Math.max(1, maxZ - minZ) : TILE;
 
-      // 以地塊外緣、海岸距離與低頻座標場分出四種區域，整張地圖保持固定且可重現。
+      // 以地塊外緣、海岸距離與低頻座標場分出五種區域，整張地圖保持固定且可重現。
       const edgeCellKeys = new Set<string>();
       const coastBandKeys = new Set<string>();
       const biomeDirections = [[0, -1], [1, 0], [0, 1], [-1, 0]];
@@ -1003,28 +1003,39 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
           if (tileCells.has(neighborKey)) coastBandKeys.add(neighborKey);
         }
       }
+      const terrainRegionCache = new Map<string, string>();
       const terrainRegion = (cell: { x: number; z: number; h: number }) => {
         const key = Math.floor(cell.x) + "," + Math.floor(cell.z);
-        if (cell.h > 0 && coastBandKeys.has(key)) return "coast";
-        const nx = (cell.x - mapCenterX) / mapWidth;
-        const nz = (cell.z - mapCenterZ) / mapDepth;
-        const mossField =
-          Math.sin(nx * 13.1 + nz * 5.3 + 0.7) * 0.5 +
-          Math.cos(nz * 12.4 - nx * 4.8) * 0.5;
-        const ridgeField =
-          Math.sin(nx * 8.2 - nz * 12.6 + 1.2) * 0.5 +
-          Math.cos((nx + nz) * 10.5) * 0.5;
-        const relicField =
-          Math.sin(nx * 10.6 + nz * 9.4 + 2.2) * 0.5 +
-          Math.cos(nx * 7.1 - nz * 13.7) * 0.5;
-        if (cell.h >= 2 && relicField > 0.48) return "ancient";
-        if (cell.h >= 2 && ridgeField > -0.05) return "limestone";
-        if (cell.h >= 1 && mossField > -0.2) return "moss";
-        return "meadow";
+        const cached = terrainRegionCache.get(key);
+        if (cached) return cached;
+        let region = "meadow";
+        if (cell.h === 0 && data.mapMode === "expand" && !data.blocked.has(key)) {
+          region = "road";
+        } else if (cell.h > 0 && coastBandKeys.has(key)) {
+          region = "coast";
+        } else {
+          const nx = (cell.x - mapCenterX) / mapWidth;
+          const nz = (cell.z - mapCenterZ) / mapDepth;
+          const mossField =
+            Math.sin(nx * 13.1 + nz * 5.3 + 0.7) * 0.5 +
+            Math.cos(nz * 12.4 - nx * 4.8) * 0.5;
+          const ridgeField =
+            Math.sin(nx * 8.2 - nz * 12.6 + 1.2) * 0.5 +
+            Math.cos((nx + nz) * 10.5) * 0.5;
+          const relicField =
+            Math.sin(nx * 10.6 + nz * 9.4 + 2.2) * 0.5 +
+            Math.cos(nx * 7.1 - nz * 13.7) * 0.5;
+          if (cell.h >= 2 && relicField > 0.48) region = "ancient";
+          else if (cell.h >= 2 && ridgeField > -0.05) region = "limestone";
+          else if (cell.h >= 1 && mossField > -0.2) region = "moss";
+        }
+        terrainRegionCache.set(key, region);
+        return region;
       };
 
       // 每格岩面依區域加入微色偏：海岸偏沙金、苔地偏冷綠、石灰岩偏暖白、遺跡偏灰青。
       const regionTint: Record<string, [number, number, number]> = {
+        road: [1, 1, 1],
         coast: [1.055, 1.015, 0.9],
         moss: [0.9, 1.065, 0.89],
         limestone: [1.075, 1.035, 0.94],
