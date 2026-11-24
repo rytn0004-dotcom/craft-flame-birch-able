@@ -1092,6 +1092,8 @@ export function FoxTD() {
   const comboRef = useRef({ n: 0, t: 0, best: 0 });
   /** 每波首殺：觸發「首殺潮」短爆發 */
   const waveFirstKillRef = useRef(true);
+  /** 本波風格：漏敵、高地擊殺、路障相關 */
+  const waveStyleRef = useRef({ leaked: false, highlandKills: 0, stakeAssists: 0 });
   const tideRef = useRef<TideEvent | null>(null);
   const freeEscortRef = useRef(0);
   const lastStandRef = useRef(false);
@@ -1498,6 +1500,31 @@ export function FoxTD() {
             } else if (mates >= 1 && tideRef.current?.id === "cliff_song") {
               amount *= 1.08;
             }
+          }
+          // 隘口伏擊：塔旁 2 格內有路障 → 加傷，偶爾短定身
+          {
+            let stakesNear = 0;
+            for (const o of sim.current.towers) {
+              if (!o.stake) continue;
+              if (Math.max(Math.abs(o.gx - tw.gx), Math.abs(o.gy - tw.gy)) <= 2) stakesNear += 1;
+            }
+            if (stakesNear > 0) {
+              amount *= 1.1 + Math.min(0.08, stakesNear * 0.03);
+              waveStyleRef.current.stakeAssists += 1;
+              if (!e.noslow && Math.random() < 0.12 + stakesNear * 0.03) {
+                e.rootT = Math.max(e.rootT, 0.35);
+                if (Math.random() < 0.35) float(px, py - 38, "隘口", "#d2c4a8");
+              }
+            }
+          }
+          // 護衛同陣：附近有護衛 → 輕微加傷
+          {
+            let guards = 0;
+            for (const u of sim.current.escorts) {
+              if (u.hp <= 0) continue;
+              if (Math.hypot(u.x - tw.x, u.y - tw.y) < 90) guards += 1;
+            }
+            if (guards > 0) amount *= 1.06;
           }
         }
       }
@@ -2028,7 +2055,39 @@ export function FoxTD() {
         } else {
           // 清波獎勵（僅在剛清空的第一幀發，用 between==0 判斷）
           if (s.between === 0 && s.queue.length === 0) {
-            const clearBonus = 10 + s.wave * 3;
+            let clearBonus = 10 + s.wave * 3;
+            const style = waveStyleRef.current;
+            const tags: string[] = [];
+            // 完璧：本波零漏傷
+            if (!style.leaked) {
+              const perfect = 6 + Math.min(14, s.wave);
+              clearBonus += perfect;
+              tags.push(`完璧 +${perfect}`);
+              for (const tw of s.towers) {
+                if (tw.stake || tw.sanctuary) continue;
+                tw.rateMul = Math.max(tw.rateMul || 1, 1.15);
+                tw.terrorT = Math.max(tw.terrorT || 0, 2.5);
+              }
+            }
+            // 連殺殘潮
+            if (comboRef.current.best >= 8) {
+              const streak = 4 + Math.min(10, Math.floor(comboRef.current.best / 2));
+              clearBonus += streak;
+              tags.push(`連殺殘潮 +${streak}`);
+            }
+            // 高台狩獵
+            if (style.highlandKills >= 5) {
+              const hunt = 5 + Math.min(8, Math.floor(style.highlandKills / 3));
+              clearBonus += hunt;
+              tags.push(`高台狩獵 +${hunt}`);
+              hqBuffRef.current.blueprints += style.highlandKills >= 12 ? 1 : 0;
+              if (style.highlandKills >= 12) tags.push("潮紋圖紙");
+            }
+            // 隘口佈局
+            if (style.stakeAssists >= 8) {
+              clearBonus += 5;
+              tags.push("隘口有功 +5");
+            }
             goldRef.current += clearBonus;
             setGold(goldRef.current);
             // 每波微量明潮砂
@@ -2036,7 +2095,10 @@ export function FoxTD() {
               mingSandRef.current += 1;
               setMingSand(mingSandRef.current);
             }
-            setHover(`波次清除 · +${clearBonus} 金` + (s.wave % 2 === 0 ? " · 明潮砂 +1" : ""));
+            const tagStr = tags.length ? " · " + tags.join(" · ") : "";
+            setHover(`波次清除 · +${clearBonus} 金` + tagStr + (s.wave % 2 === 0 ? " · 明潮砂 +1" : ""));
+            // 重置風格計數
+            waveStyleRef.current = { leaked: false, highlandKills: 0, stakeAssists: 0 };
           }
           s.between += dt;
           const cap = wavesRef.current?.length || MAX_WAVE;
@@ -2253,6 +2315,7 @@ export function FoxTD() {
             if (leakDmg > 0) {
               hq.hp = Math.max(0, hq.hp - leakDmg);
               hq.shake = Math.max(hq.shake, 0.25);
+              waveStyleRef.current.leaked = true;
               float(pLeak.x, pLeak.y - 10, e.boss ? `Boss 破陣 −${Math.round(leakDmg)}` : `聖地 −${Math.round(leakDmg)}`, e.boss ? "#ff6a80" : "#ff8aa0");
             }
             if (e.boss) {
@@ -2272,6 +2335,7 @@ export function FoxTD() {
               setHover(`聖地告急 ${Math.round(hq.hp)}/${hq.maxHp}（本隻漏傷 ${leakDmg}）`);
             }
           } else {
+            waveStyleRef.current.leaked = true;
             livesRef.current -= 1;
             setLives(livesRef.current);
             if (livesRef.current <= 0) {
@@ -2293,6 +2357,18 @@ export function FoxTD() {
             combo.n += 1;
             if (combo.n > combo.best) combo.best = combo.n;
             if (combo.n >= 3) g += Math.max(1, Math.round(e.gold * COMBO_GOLD_PER * Math.min(combo.n, 20)));
+            // 高地擊殺統計（死在高台塔射程內）
+            {
+              for (const tw of s.towers) {
+                if (tw.stake || tw.sanctuary) continue;
+                const hh = cellHeight(s.heights, tw.gx, tw.gy);
+                if (hh < 2) continue;
+                if (Math.hypot(p.x - tw.x, p.y - tw.y) <= tw.range + 20) {
+                  waveStyleRef.current.highlandKills += 1;
+                  break;
+                }
+              }
+            }
             // 首殺潮：本波第一隻擊殺 → 短爆發 + 小額獎金
             if (waveFirstKillRef.current) {
               waveFirstKillRef.current = false;
@@ -2939,6 +3015,7 @@ export function FoxTD() {
       comboRef.current.n = 0;
       comboRef.current.t = 0;
       waveFirstKillRef.current = true;
+      waveStyleRef.current = { leaked: false, highlandKills: 0, stakeAssists: 0 };
       let msg = `第 ${s.wave} 波`;
       if (quirk) msg += ` · ${quirk.name}（${quirk.note}）`;
       if (tide) msg += ` · 潮汐「${tide.name}」：${tide.desc}`;
@@ -4163,7 +4240,16 @@ export function FoxTD() {
           terrorT: 0,
           spent: STAKE_COST,
         });
-        setHover("路障已放（可被近戰拆毀）· 妖潮改道");
+        {
+          const nearTower = s.towers.some(
+            (t) => !t.stake && !t.sanctuary && Math.max(Math.abs(t.gx - gx), Math.abs(t.gy - gy)) <= 2,
+          );
+          setHover(
+            nearTower
+              ? "路障已放 · 鄰塔啟動「隘口伏擊」（加傷／短定身）"
+              : "路障已放（可被近戰拆毀）· 妖潮改道 · 靠塔放置可觸發隘口伏擊",
+          );
+        }
         return;
       }
       // 已選塔要放置時，優先放塔，不搶選既有建築（避免點高地卻被聖地／鄰塔吃掉）
@@ -4576,6 +4662,7 @@ export function FoxTD() {
     lastStandRef.current = false;
     comboRef.current = { n: 0, t: 0, best: 0 };
     waveFirstKillRef.current = true;
+    waveStyleRef.current = { leaked: false, highlandKills: 0, stakeAssists: 0 };
     tideRef.current = null;
     freeEscortRef.current = 0;
     setPhase("play");
