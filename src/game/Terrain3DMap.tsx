@@ -3447,6 +3447,93 @@ uniform float uFoliageTime;`,
         terrainRoot.add(shrubs);
       }
 
+      // 苔地以羽狀蕨葉填補樹叢下層：單一自訂葉片幾何、多實例批次，風動沿用 GPU 材質。
+      const fernCells = Array.from(tileCells.values()).filter((cell) => {
+        if (cell.h < 1 || cell.h > 2 || terrainRegion(cell) !== "moss") return false;
+        const key = Math.floor(cell.x) + "," + Math.floor(cell.z);
+        if (coastBandKeys.has(key)) return false;
+        const seed = Math.abs(Math.sin(cell.x * 73.1 + cell.z * 41.9) * 29371.7) % 1;
+        if (seed < 0.966) return false;
+        return !protectedBuildings.some((building) =>
+          Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 0.92,
+        );
+      }).slice(0, 72);
+      if (fernCells.length) {
+        const fernPositions: number[] = [];
+        const fernIndices: number[] = [];
+        const addFernTriangle = (a: number[], b: number[], c: number[]) => {
+          const start = fernPositions.length / 3;
+          fernPositions.push(...a, ...b, ...c);
+          fernIndices.push(start, start + 1, start + 2);
+        };
+        // 中央葉脈與六對漸小羽片組成一片弧形蕨葉；雙面材質使其在斜視角仍可讀。
+        const stemRows: { y: number; z: number }[] = [];
+        for (let pair = 0; pair <= 6; pair++) {
+          const t = pair / 6;
+          stemRows.push({ y: 0.025 + t * 0.39, z: t * t * 0.13 });
+        }
+        for (let pair = 0; pair < 6; pair++) {
+          const a = stemRows[pair];
+          const b = stemRows[pair + 1];
+          const halfWidth = 0.006;
+          addFernTriangle([-halfWidth, a.y, a.z], [halfWidth, a.y, a.z], [-halfWidth, b.y, b.z]);
+          addFernTriangle([halfWidth, a.y, a.z], [halfWidth, b.y, b.z], [-halfWidth, b.y, b.z]);
+        }
+        for (let pair = 0; pair < 6; pair++) {
+          const t = (pair + 1) / 7;
+          const y = 0.045 + t * 0.34;
+          const z = t * t * 0.12;
+          const spread = 0.15 * (1.0 - t * 0.42);
+          for (const side of [-1, 1]) {
+            const base = [0, y, z];
+            const shoulder = [side * spread * 0.72, y + 0.032, z + 0.035];
+            const tip = [side * spread, y + 0.066, z + 0.092];
+            const inner = [side * spread * 0.34, y + 0.045, z + 0.074];
+            addFernTriangle(base, shoulder, inner);
+            addFernTriangle(shoulder, tip, inner);
+          }
+        }
+        const fernGeometry = new THREE.BufferGeometry();
+        fernGeometry.setAttribute("position", new THREE.Float32BufferAttribute(fernPositions, 3));
+        fernGeometry.setIndex(fernIndices);
+        fernGeometry.computeVertexNormals();
+        fernGeometry.computeBoundingSphere();
+        const fernFrondsPerCell = 5;
+        const ferns = new THREE.InstancedMesh(
+          fernGeometry,
+          shared.foliageWind,
+          fernCells.length * fernFrondsPerCell,
+        );
+        const fernDummy = new THREE.Object3D();
+        const fernTint = new THREE.Color();
+        for (let i = 0; i < fernCells.length; i++) {
+          const cell = fernCells[i];
+          const seed = Math.abs(Math.sin(cell.x * 127.1 + cell.z * 311.7) * 43758.5453) % 1;
+          for (let frond = 0; frond < fernFrondsPerCell; frond++) {
+            const index = i * fernFrondsPerCell + frond;
+            const angle = seed * Math.PI * 2 + frond * (Math.PI * 2 / fernFrondsPerCell);
+            const scale = 0.72 + seed * 0.34 + (frond % 2) * 0.08;
+            fernDummy.position.set(
+              cell.x + Math.cos(angle) * 0.055,
+              groundTop(cell.h) + 0.018,
+              cell.z + Math.sin(angle) * 0.055,
+            );
+            fernDummy.rotation.set((seed - 0.5) * 0.1, angle, (0.5 - seed) * 0.09);
+            fernDummy.scale.set(scale, scale, scale);
+            fernDummy.updateMatrix();
+            ferns.setMatrixAt(index, fernDummy.matrix);
+            fernTint.set(frond % 3 === 0 ? "#9ab878" : frond % 2 === 0 ? "#628e6b" : "#47775f");
+            ferns.setColorAt(index, fernTint);
+          }
+        }
+        ferns.instanceMatrix.needsUpdate = true;
+        if (ferns.instanceColor) ferns.instanceColor.needsUpdate = true;
+        ferns.computeBoundingSphere();
+        ferns.castShadow = false;
+        ferns.receiveShadow = false;
+        terrainRoot.add(ferns);
+      }
+
       // 苔地零星長出成簇蘑菇，提供近景尺度變化；數量固定上限，不加入逐物件動畫。
       const mushroomCells = Array.from(tileCells.values()).filter((cell) => {
         if (cell.h !== 1 || terrainRegion(cell) !== "moss") return false;
