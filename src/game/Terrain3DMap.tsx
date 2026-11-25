@@ -801,6 +801,35 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         root.add(bolt);
       }
 
+      // 每種塔在承台外緣有自己的建築模組：冰晶、焰柱、觀測翼、花瓣、根刺、護盾、導電節點等。
+      let baseModuleGeometry: THREE.BufferGeometry;
+      if (special === "slow") baseModuleGeometry = new THREE.OctahedronGeometry(0.13, 0);
+      else if (special === "burn") baseModuleGeometry = new THREE.ConeGeometry(0.105, 0.24, 5);
+      else if (special === "range") baseModuleGeometry = new THREE.BoxGeometry(0.28, 0.06, 0.12);
+      else if (special === "rapid") baseModuleGeometry = new THREE.BoxGeometry(0.23, 0.05, 0.085);
+      else if (special === "aoe") baseModuleGeometry = new THREE.DodecahedronGeometry(0.12, 0);
+      else if (special === "root") baseModuleGeometry = new THREE.ConeGeometry(0.1, 0.23, 5);
+      else if (special === "break") baseModuleGeometry = new THREE.BoxGeometry(0.18, 0.18, 0.075);
+      else if (special === "chain") baseModuleGeometry = new THREE.SphereGeometry(0.095, 8, 8);
+      else if (special === "pierce") baseModuleGeometry = new THREE.ConeGeometry(0.09, 0.28, 4);
+      else if (special === "execute") baseModuleGeometry = new THREE.BoxGeometry(0.09, 0.24, 0.085);
+      else if (special === "ultimate") baseModuleGeometry = new THREE.OctahedronGeometry(0.15, 1);
+      else baseModuleGeometry = new THREE.TorusGeometry(0.135, 0.024, 5, 24);
+      const baseModules = new THREE.InstancedMesh(baseModuleGeometry, accent, 4);
+      const baseDummy = new THREE.Object3D();
+      for (let i = 0; i < 4; i++) {
+        const angle = Math.PI / 4 + i * Math.PI / 2;
+        baseDummy.position.set(Math.cos(angle) * 0.73, 0.205, Math.sin(angle) * 0.73);
+        baseDummy.rotation.set(special === "high" ? Math.PI / 2 : 0, angle + Math.PI / 2, 0);
+        baseDummy.scale.set(1, special === "range" || special === "rapid" ? 1 : 1.12, 1);
+        baseDummy.updateMatrix();
+        baseModules.setMatrixAt(i, baseDummy.matrix);
+      }
+      baseModules.instanceMatrix.needsUpdate = true;
+      baseModules.castShadow = false;
+      baseModules.receiveShadow = true;
+      root.add(baseModules);
+
       // 分層八角底座：深藍承重層、金屬壓邊、淺石平台。
       addCylinder(root, radius, radius + 0.16, 0.2, 0, 0.1, 0, shared.blue, 12);
       addCylinder(root, radius * 0.94, radius * 0.94, 0.075, 0, 0.238, 0, shared.gold, 12);
@@ -2280,6 +2309,8 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         }
       }
 
+      const ruinWallSites: { x: number; z: number; y: number; rot: number; width: number; height: number; seed: number }[] = [];
+      const ruinOuterRingSites: { x: number; z: number; y: number; angle: number }[] = [];
       if (ruinSites.length) {
         const plinths = new THREE.InstancedMesh(
           new THREE.BoxGeometry(1.08, 0.13, 1.08),
@@ -2326,6 +2357,30 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
           shared.grass,
           ruinSites.length * 4,
         );
+        const pillarFootings = new THREE.InstancedMesh(
+          new THREE.CylinderGeometry(0.22, 0.28, 0.12, 8),
+          shared.foundationStone,
+          ruinSites.length * 2,
+        );
+        const wallSegments = new THREE.InstancedMesh(
+          new THREE.BoxGeometry(1, 1, 1),
+          shared.ruinStone,
+          ruinSites.length * 4,
+        );
+        const wallPosts = new THREE.InstancedMesh(
+          new THREE.CylinderGeometry(0.105, 0.15, 0.36, 6),
+          shared.ruinStone,
+          ruinSites.length * 8,
+        );
+        const outerRings = new THREE.InstancedMesh(
+          new THREE.TorusGeometry(0.88, 0.025, 5, 36),
+          shared.runeGlow,
+          ruinSites.length,
+        );
+        let pillarFootingCount = 0;
+        let wallCount = 0;
+        let wallPostCount = 0;
+        let outerRingCount = 0;
         let lintelCount = 0;
         let gateCount = 0;
         const dummy = new THREE.Object3D();
@@ -2378,6 +2433,55 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
             columns.setMatrixAt(index, dummy.matrix);
             tint.set(pillar.tint);
             columns.setColorAt(index, tint);
+
+            // 每根石柱都有一層外擴柱腳，避免柱身像直接插在石板上。
+            const footingX = site.x + pillar.x * Math.cos(angle) - pillar.z * Math.sin(angle);
+            const footingZ = site.z + pillar.x * Math.sin(angle) + pillar.z * Math.cos(angle);
+            dummy.position.set(footingX, top + 0.065, footingZ);
+            dummy.rotation.set(0, angle, 0);
+            dummy.scale.set(1, 1, 1);
+            dummy.updateMatrix();
+            pillarFootings.setMatrixAt(pillarFootingCount++, dummy.matrix);
+          }
+
+          // 破損圍牆只延伸到同高度的 blocked 障礙格，不會跨進可建造平台。
+          const wallDirections = [
+            { dc: 0, dr: -1, dx: 0, dz: -1, rot: 0 },
+            { dc: 1, dr: 0, dx: 1, dz: 0, rot: Math.PI / 2 },
+            { dc: 0, dr: 1, dx: 0, dz: 1, rot: 0 },
+            { dc: -1, dr: 0, dx: -1, dz: 0, rot: Math.PI / 2 },
+          ];
+          for (const direction of wallDirections) {
+            const neighborKey = (Math.floor(site.x) + direction.dc) + "," + (Math.floor(site.z) + direction.dr);
+            const neighbor = tileCells.get(neighborKey);
+            if (site.baseY === undefined && (!neighbor || !data.blocked.has(neighborKey) || neighbor.h !== site.h)) continue;
+            const wallX = site.x + direction.dx * 1.16;
+            const wallZ = site.z + direction.dz * 1.16;
+            if (protectedBuildings.some((building) => Math.hypot(wallX - building.x, wallZ - building.z) < building.radius + 0.32)) continue;
+            const wallSeed = Math.abs(Math.sin(site.x * 51.7 + site.z * 29.1 + direction.dc * 17.3 + direction.dr * 31.9) * 21481.7) % 1;
+            if (wallSeed < 0.18 || wallCount >= ruinSites.length * 4) continue;
+            const wallHeight = 0.2 + wallSeed * 0.18;
+            const wallWidth = 0.54 + wallSeed * 0.22;
+            ruinWallSites.push({
+              x: wallX,
+              z: wallZ,
+              y: top + wallHeight * 0.5,
+              rot: direction.rot,
+              width: wallWidth,
+              height: wallHeight,
+              seed: wallSeed,
+            });
+            wallCount++;
+          }
+
+          // 四面鄰格皆為同高度障礙地形時才補外圈儀式環，避免碰觸可建造格。
+          const ringNeighbors = wallDirections.map((direction) => {
+            const key = (Math.floor(site.x) + direction.dc) + "," + (Math.floor(site.z) + direction.dr);
+            const neighbor = tileCells.get(key);
+            return !!neighbor && data.blocked.has(key) && neighbor.h === site.h;
+          });
+          if (site.baseY !== undefined || ringNeighbors.every(Boolean)) {
+            ruinOuterRingSites.push({ x: site.x, z: site.z, y: top + 0.11, angle });
           }
 
           if (site.baseY === undefined && variant > 0.68) {
@@ -2461,7 +2565,40 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         }
         lintels.count = lintelCount;
         gateArches.count = gateCount;
-        for (const mesh of [plinths, columns, runeSlabs, runeLines, runeRings, rubble, lintels, gateArches, ruinMoss]) {
+        pillarFootings.count = pillarFootingCount;
+        wallSegments.count = wallCount;
+        wallPosts.count = wallCount * 2;
+        outerRings.count = ruinOuterRingSites.length;
+        const wallDummy = new THREE.Object3D();
+        for (let i = 0; i < ruinWallSites.length; i++) {
+          const wall = ruinWallSites[i];
+          wallDummy.position.set(wall.x, wall.y, wall.z);
+          wallDummy.rotation.set(0, wall.rot, 0);
+          wallDummy.scale.set(wall.width, wall.height, 0.18);
+          wallDummy.updateMatrix();
+          wallSegments.setMatrixAt(i, wallDummy.matrix);
+          for (let end = 0; end < 2; end++) {
+            const sign = end === 0 ? -1 : 1;
+            wallDummy.position.set(
+              wall.x + Math.cos(wall.rot) * sign * wall.width * 0.42,
+              wall.y + 0.045,
+              wall.z - Math.sin(wall.rot) * sign * wall.width * 0.42,
+            );
+            wallDummy.rotation.set(0, wall.rot, 0);
+            wallDummy.scale.set(1, 1, 1);
+            wallDummy.updateMatrix();
+            wallPosts.setMatrixAt(i * 2 + end, wallDummy.matrix);
+          }
+        }
+        for (let i = 0; i < ruinOuterRingSites.length; i++) {
+          const ring = ruinOuterRingSites[i];
+          wallDummy.position.set(ring.x, ring.y, ring.z);
+          wallDummy.rotation.set(Math.PI / 2, ring.angle, 0);
+          wallDummy.scale.set(1, 1, 1);
+          wallDummy.updateMatrix();
+          outerRings.setMatrixAt(i, wallDummy.matrix);
+        }
+        for (const mesh of [plinths, columns, runeSlabs, runeLines, runeRings, rubble, lintels, gateArches, ruinMoss, pillarFootings, wallSegments, wallPosts, outerRings]) {
           mesh.instanceMatrix.needsUpdate = true;
           if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
           mesh.castShadow = mesh === columns || mesh === runeSlabs || mesh === lintels;
@@ -3038,6 +3175,10 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       for (const cell of tileCells.values()) {
         if (cell.h <= 0) continue;
         const gx = Math.floor(cell.x), gy = Math.floor(cell.z);
+        const nearBuilding = protectedBuildings.some((building) =>
+          Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 0.58,
+        );
+        if (nearBuilding) continue;
         const higher = rampDirections.find((d) => {
           const neighbor = tileCells.get((gx + d.dc) + "," + (gy + d.dr));
           return !!neighbor && neighbor.h === cell.h + 1;
@@ -3056,6 +3197,51 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         ramps.instanceMatrix.needsUpdate = true;
         ramps.receiveShadow = true;
         terrainRoot.add(ramps);
+
+        // 少量坡道側邊定位柱強化落差與可走方向；最多 180 段，並且只落在避開建築的坡面。
+        const detailedRamps = rampCells.filter((ramp) => {
+          const seed = Math.abs(Math.sin(ramp.x * 47.3 + ramp.z * 83.1 + ramp.rot * 13.7) * 21731.9) % 1;
+          return seed > 0.58;
+        }).slice(0, 180);
+        if (detailedRamps.length) {
+          const rampPosts = new THREE.InstancedMesh(
+            new THREE.BoxGeometry(0.085, 0.15, 0.09),
+            shared.cliffLip,
+            detailedRamps.length * 4,
+          );
+          const rampPostCaps = new THREE.InstancedMesh(
+            new THREE.OctahedronGeometry(0.055, 0),
+            shared.foundationGold,
+            detailedRamps.length * 4,
+          );
+          const postDummy = new THREE.Object3D();
+          for (let i = 0; i < detailedRamps.length; i++) {
+            const ramp = detailedRamps[i];
+            let postIndex = 0;
+            for (const side of [-1, 1]) for (const localZ of [-0.25, 0.25]) {
+              const heightAlongRamp = HEIGHT_STEP * (0.5 - localZ / 0.92) + 0.025;
+              const worldX = ramp.x + Math.sin(ramp.rot) * localZ + Math.cos(ramp.rot) * side * 0.385;
+              const worldZ = ramp.z + Math.cos(ramp.rot) * localZ - Math.sin(ramp.rot) * side * 0.385;
+              const index = i * 4 + postIndex++;
+              postDummy.position.set(worldX, ramp.y + heightAlongRamp + 0.075, worldZ);
+              postDummy.rotation.set(0, ramp.rot, 0);
+              postDummy.scale.set(1, 1, 1);
+              postDummy.updateMatrix();
+              rampPosts.setMatrixAt(index, postDummy.matrix);
+              postDummy.position.y += 0.105;
+              postDummy.scale.set(0.82, 0.82, 0.82);
+              postDummy.updateMatrix();
+              rampPostCaps.setMatrixAt(index, postDummy.matrix);
+            }
+          }
+          rampPosts.instanceMatrix.needsUpdate = true;
+          rampPostCaps.instanceMatrix.needsUpdate = true;
+          rampPosts.castShadow = false;
+          rampPosts.receiveShadow = true;
+          rampPostCaps.castShadow = false;
+          rampPostCaps.receiveShadow = false;
+          terrainRoot.add(rampPosts, rampPostCaps);
+        }
 
         // 部分坡面疊加三段薄石階，順著原坡度排列；只增加視覺層次，不遮住通道寬度。
         const stairRamps = rampCells.filter((ramp) => {
