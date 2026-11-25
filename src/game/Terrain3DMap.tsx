@@ -679,8 +679,24 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           diffuseColor.rgb += vec3(0.035, 0.13, 0.15)
             * revealEdge * edgePulse * (0.12 + uMistPower * 0.2);`,
         );
+        shader.fragmentShader = shader.fragmentShader.replace(
+          "#include <color_fragment>",
+          `#include <color_fragment>
+          // 多尺度深淵流紋在 GPU 內緩慢翻湧，避免霧面像靜止色塊。
+          float abyssCurrentA = sin(vMistFieldUv.x * 18.0
+            + sin(vMistFieldUv.y * 11.0 - uMistTime * 0.12) * 2.6 - uMistTime * 0.08);
+          float abyssCurrentB = cos(vMistFieldUv.y * 23.0 - vMistFieldUv.x * 9.0 + uMistTime * 0.065);
+          float abyssFlow = smoothstep(0.16, 0.92, abyssCurrentA * 0.5 + 0.5)
+            * smoothstep(0.04, 0.96, abyssCurrentB * 0.5 + 0.5);
+          diffuseColor.rgb = mix(diffuseColor.rgb,
+            diffuseColor.rgb * vec3(0.76, 0.88, 1.16), abyssFlow * 0.22);
+          diffuseColor.rgb += vec3(0.012, 0.02, 0.048)
+            * abyssFlow * (0.24 + uMistPower * 0.18);
+          diffuseColor.a *= 0.94 + 0.06 * (0.5 + 0.5 * sin(
+            vMistFieldUv.x * 31.0 + vMistFieldUv.y * 19.0 - uMistTime * 0.16));`,
+        );
       };
-      material.customProgramCacheKey = () => "tide-black-mist-tile-front-v2";
+      material.customProgramCacheKey = () => "tide-black-mist-tile-front-v3";
     };
     installBlackMistFront(shared.blackMistField);
 
