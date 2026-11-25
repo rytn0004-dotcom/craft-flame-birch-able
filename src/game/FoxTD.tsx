@@ -4386,9 +4386,12 @@ export function FoxTD() {
         sim.current.pointer.inside = false;
         return;
       }
-      const world = local(ev);
+      // 滑鼠移動也直接命中實際地表格網；已升起地面回傳真正命中的 instanceId 格子，
+      // 只有黑霧／島外等沒有地表網格的區域才退回平面投影顯示不可建提示。
+      const preciseWorldHit = terrain3DApiRef.current?.screenToWorldPrecise(ev.clientX, ev.clientY) ?? null;
+      const world = preciseWorldHit ?? local(ev);
       sim.current.pointer = { ...world, down: sim.current.pointer.down, inside: true };
-      updatePlacementDebug(world, null, ev);
+      updatePlacementDebug(world, preciseWorldHit !== null, ev);
       // 擴張預覽：游標移到最新接口時提示可否放置
       if (tileOfferRef.current && pickTemplateRef.current && phaseRef.current === "play") {
         const tid = pickTemplateRef.current;
