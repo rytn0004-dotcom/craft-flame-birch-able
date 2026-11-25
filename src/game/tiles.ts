@@ -1173,7 +1173,7 @@ export function createTidalLiftTemplate(board: TileBoard): TileTemplate | null {
     TEMPLATE_BY_ID[id] = template;
     if (validPlacements(board, id).length) return template;
     if (previous) TEMPLATE_BY_ID[id] = previous;
-    else delete TEMPLATE_BY_ID[id];
+    // 若此前沒有保底模板，留下這個候選只作內部暫存；不在 OFFERABLE_IDS 中，不會自行出現在選項。
   }
   return null;
 }
