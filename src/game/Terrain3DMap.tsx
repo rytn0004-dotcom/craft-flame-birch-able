@@ -2668,7 +2668,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           groveDummy.scale.set(0.9 + seed * 0.16, 0.9 + seed * 0.18, 0.9 + seed * 0.16);
           groveDummy.updateMatrix();
           lowerCanopies.setMatrixAt(i, groveDummy.matrix);
-          groveTint.set(region === "moss" ? "#527b62" : "#5e8969");
+          groveTint.set(terrainRegion(cell) === "moss" ? "#527b62" : "#5e8969");
           lowerCanopies.setColorAt(i, groveTint);
 
           groveDummy.position.set(cell.x + Math.cos(angle) * 0.06, groundTop(cell.h) + 1.34 * scale, cell.z + Math.sin(angle) * 0.06);
