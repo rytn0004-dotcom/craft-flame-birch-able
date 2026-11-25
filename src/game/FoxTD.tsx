@@ -4382,7 +4382,7 @@ export function FoxTD() {
         `射線：${ray}`,
         `塔卡：${tower}`,
         `判定：${verdict}`,
-      ].join("\\n");
+      ].join("\n");
       const panel = placementDebugRef.current;
       if (!panel) return;
       if (debugKey === lastPlacementDebugKey && panel.textContent === debugText) return;
