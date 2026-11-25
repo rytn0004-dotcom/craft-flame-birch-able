@@ -2254,7 +2254,7 @@ uniform float uFoliageTime;`,
       shelfWater.receiveShadow = false;
       terrainRoot.add(deepWater, shelfWater);
 
-      // 黑霧底層覆蓋整張棋盤，未鋪設地塊的海域都會被深淵侵染；已開啟地塊因地表高於霧層而保持清亮。
+      // 黑霧底層覆蓋整張棋盤，只有已取得地塊的遮罩區域會退霧；其餘海域持續被深淵侵染。
       if (expandMode) {
         const blackMistField = new THREE.Mesh(
           new THREE.PlaneGeometry(blackMistFieldWidth, blackMistFieldDepth),
@@ -5265,23 +5265,52 @@ uniform float uFoliageTime;`,
       for (let i = 0; i < data.rings.length; i++) {
         const ring = data.rings[i];
         if (!ringNodes[i]) {
-          const material = new THREE.MeshBasicMaterial({ color: "#ffd27a", transparent: true, opacity: 0.88, side: THREE.DoubleSide });
-          const mesh = new THREE.Mesh(new THREE.TorusGeometry(1, 0.055, 8, 36), material);
+          const group = new THREE.Group();
+          const material = new THREE.MeshBasicMaterial({
+            color: "#ffd27a", transparent: true, opacity: 0.88,
+            side: THREE.DoubleSide, depthWrite: false, toneMapped: false,
+          });
+          const mesh = new THREE.Mesh(new THREE.TorusGeometry(1, 0.055, 8, 72), material);
           mesh.rotation.x = Math.PI / 2;
-          effectRoot.add(mesh);
-          ringNodes[i] = mesh;
+          group.add(mesh);
+          effectRoot.add(group);
+          ringNodes[i] = { group, mesh, accentOuter: null, accentInner: null, accentMaterial: null };
         }
-        const mesh = ringNodes[i];
+        const node = ringNodes[i];
+        const isTilePull = ring.color === "#72e8dc" || ring.color === "#f0d79c";
+        // 只有升陸牽引波才加上第二層潮汐線；一般戰鬥環維持原本單環，避免額外 draw calls。
+        if (isTilePull && !node.accentOuter) {
+          node.accentMaterial = new THREE.MeshBasicMaterial({
+            color: "#d8fff3", transparent: true, opacity: 0.62,
+            side: THREE.DoubleSide, depthWrite: false, toneMapped: false,
+          });
+          node.accentOuter = new THREE.Mesh(new THREE.TorusGeometry(1, 0.014, 5, 72), node.accentMaterial);
+          node.accentInner = new THREE.Mesh(new THREE.TorusGeometry(1, 0.01, 5, 72), node.accentMaterial);
+          node.accentOuter.rotation.x = Math.PI / 2;
+          node.accentInner.rotation.x = Math.PI / 2;
+          node.group.add(node.accentOuter, node.accentInner);
+        }
         const gx = Math.max(0, Math.min(COLS - 1, Math.floor(ring.x / CELL)));
         const gy = Math.max(0, Math.min(ROWS - 1, Math.floor(ring.y / CELL)));
         const h = data.heights[gy * COLS + gx] ?? 0;
-        mesh.visible = true;
-        mesh.position.set(ring.x / CELL, groundTop(h) + 0.08, ring.y / CELL);
-        mesh.scale.setScalar(Math.max(0.08, ring.r / CELL));
-        mesh.material.opacity = Math.max(0, Math.min(0.9, ring.life * 2.5));
-        mesh.material.color.set(ring.color.startsWith("#") ? ring.color : "#ffd27a");
+        const scale = Math.max(0.08, ring.r / CELL);
+        node.group.visible = true;
+        node.group.position.set(ring.x / CELL, groundTop(h) + 0.08, ring.y / CELL);
+        node.mesh.scale.setScalar(scale);
+        node.mesh.material.opacity = Math.max(0, Math.min(0.9, ring.life * 2.5));
+        node.mesh.material.color.set(ring.color.startsWith("#") ? ring.color : "#ffd27a");
+        if (node.accentOuter && node.accentInner && node.accentMaterial) {
+          node.accentOuter.visible = isTilePull;
+          node.accentInner.visible = isTilePull;
+          node.accentOuter.scale.setScalar(scale * 1.075);
+          node.accentInner.scale.setScalar(scale * 0.79);
+          node.accentOuter.rotation.z = performance.now() * 0.00016;
+          node.accentInner.rotation.z = -performance.now() * 0.00023;
+          node.accentMaterial.opacity = Math.max(0, Math.min(0.68, ring.life * 1.9));
+          node.accentMaterial.color.set(ring.color === "#f0d79c" ? "#fff0c9" : "#d8fff3");
+        }
       }
-      for (let i = data.rings.length; i < ringNodes.length; i++) ringNodes[i].visible = false;
+      for (let i = data.rings.length; i < ringNodes.length; i++) ringNodes[i].group.visible = false;
 
       const selectedTower = data.towers.find((tower) => tower.selected);
       if (selectedTower && (selectedTower.range ?? 0) > 0) {
@@ -5668,6 +5697,10 @@ uniform float uFoliageTime;`,
       blackMistFieldMaskTexture.dispose();
       placementFillMaterial.dispose();
       placementOutlineMaterial.dispose();
+      for (const ringNode of ringNodes) {
+        ringNode.mesh.material.dispose();
+        ringNode.accentMaterial?.dispose();
+      }
       clearGroup(effectRoot);
       scene.remove(skyDome);
       skyGeometry.dispose();
