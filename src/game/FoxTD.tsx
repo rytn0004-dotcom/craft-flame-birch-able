@@ -4921,6 +4921,8 @@ export function FoxTD() {
           setActiveMap(layout.name);
           // 完整關卡不啟用地塊擴張（board 標記為「已滿圖」避免誤觸發）
           boardRef.current = { placed: [], playerBlocked: new Set() };
+          // 完整關卡也必須建立可選取、可升級的遊戲聖地實體。
+          spawnSanctuaryTower();
         }
       }
     }
@@ -5400,15 +5402,48 @@ export function FoxTD() {
   function spawnSanctuaryTower() {
     const board = boardRef.current;
     const hq = board.placed.find((p) => p.templateId === "hq");
-    if (!hq) return;
     // 去掉舊聖地
     sim.current.towers = sim.current.towers.filter((t) => !t.sanctuary);
     sim.current.escorts = [];
-    const originC = hq.tc * TILE;
-    const originR = hq.tr * TILE;
-    // 建築中心約在 tile 內 9.5, 9.5 格
-    const gx = originC + 9;
-    const gy = originR + 9;
+
+    let gx: number;
+    let gy: number;
+    if (hq) {
+      const originC = hq.tc * TILE;
+      const originR = hq.tr * TILE;
+      // 擴張模式：建築中心約在 HQ 地塊內 9.5, 9.5 格
+      gx = originC + 9;
+      gy = originR + 9;
+    } else {
+      // 完整／自訂地圖沒有 HQ 地塊：將聖地放在出口群朝地圖內側約 3 格處。
+      // 位置搜尋避開障礙格與出入口，並確保 6×6 外觀留在地圖內。
+      const exits = exitsRef.current.length ? exitsRef.current : defaultExits();
+      const exitX = exits.reduce((sum, gate) => sum + gate.c + 0.5, 0) / exits.length;
+      const exitY = exits.reduce((sum, gate) => sum + gate.r + 0.5, 0) / exits.length;
+      let inwardX = COLS / 2 - exitX;
+      let inwardY = ROWS / 2 - exitY;
+      const inwardLength = Math.hypot(inwardX, inwardY) || 1;
+      inwardX /= inwardLength;
+      inwardY /= inwardLength;
+      const targetX = exitX + inwardX * 3.2;
+      const targetY = exitY + inwardY * 3.2;
+      const baseGx = Math.max(3, Math.min(COLS - 4, Math.round(targetX - 0.5)));
+      const baseGy = Math.max(3, Math.min(ROWS - 4, Math.round(targetY - 0.5)));
+      let best: { gx: number; gy: number; score: number } | null = null;
+      for (let dr = -6; dr <= 6; dr++) {
+        for (let dc = -6; dc <= 6; dc++) {
+          const c = baseGx + dc;
+          const r = baseGy + dr;
+          if (c < 3 || r < 3 || c >= COLS - 3 || r >= ROWS - 3) continue;
+          if (sim.current.blocked.has(cellKey(c, r)) || gateHere(c, r)) continue;
+          const height = cellHeight(sim.current.heights, c, r);
+          const score = Math.hypot(c + 0.5 - targetX, r + 0.5 - targetY) + height * 0.035;
+          if (!best || score < best.score) best = { gx: c, gy: r, score };
+        }
+      }
+      gx = best?.gx ?? baseGx;
+      gy = best?.gy ?? baseGy;
+    }
     const stats = sanctuaryStats({ hqCoreLv: 1 });
     sim.current.towers.push({
       def: 0,
