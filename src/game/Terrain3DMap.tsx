@@ -3376,9 +3376,15 @@ uniform float uFoliageTime;`,
           shared.grass,
           bloomCount,
         );
-        const flowerHeads = new THREE.InstancedMesh(
-          new THREE.DodecahedronGeometry(0.048, 0),
+        // 五瓣橢圓花冠＋獨立花心；每種零件各一個實例批次，不再用單顆球體代表整朵花。
+        const flowerPetals = new THREE.InstancedMesh(
+          new THREE.SphereGeometry(0.042, 7, 5),
           shared.meadowBloom,
+          bloomCount * 5,
+        );
+        const flowerCenters = new THREE.InstancedMesh(
+          new THREE.SphereGeometry(0.019, 7, 5),
+          shared.foundationGold,
           bloomCount,
         );
         const flowerDummy = new THREE.Object3D();
@@ -3400,22 +3406,49 @@ uniform float uFoliageTime;`,
             flowerDummy.updateMatrix();
             stems.setMatrixAt(index, flowerDummy.matrix);
 
-            flowerDummy.position.y = groundTop(cell.h) + (bloom === 0 ? 0.145 : 0.116 + seed * 0.018);
-            flowerDummy.scale.setScalar((0.72 + seed * 0.2) * (bloom === 0 ? 1.0 : 0.82));
+            const headY = groundTop(cell.h) + (bloom === 0 ? 0.145 : 0.116 + seed * 0.018);
+            const flowerScale = (0.72 + seed * 0.2) * (bloom === 0 ? 1.0 : 0.82);
+            const petalColor = flowerPalette[(Math.floor(seed * 17) + bloom) % flowerPalette.length];
+            flowerTint.set(petalColor);
+            for (let petal = 0; petal < 5; petal++) {
+              const petalAngle = (petal / 5) * Math.PI * 2 + seed * 0.36;
+              flowerDummy.position.set(
+                x + Math.sin(petalAngle) * 0.035 * flowerScale,
+                headY,
+                z + Math.cos(petalAngle) * 0.035 * flowerScale,
+              );
+              flowerDummy.rotation.set(
+                (seed - 0.5) * 0.16,
+                petalAngle,
+                (seed - 0.5) * 0.12,
+              );
+              flowerDummy.scale.set(
+                flowerScale * 0.82,
+                flowerScale * 0.34,
+                flowerScale * 1.34,
+              );
+              flowerDummy.updateMatrix();
+              flowerPetals.setMatrixAt(index * 5 + petal, flowerDummy.matrix);
+              flowerPetals.setColorAt(index * 5 + petal, flowerTint);
+            }
+            flowerDummy.position.set(x, headY + 0.012, z);
+            flowerDummy.rotation.set(0, seed * Math.PI * 2, 0);
+            flowerDummy.scale.setScalar(flowerScale * 0.72);
             flowerDummy.updateMatrix();
-            flowerHeads.setMatrixAt(index, flowerDummy.matrix);
-            flowerTint.set(flowerPalette[(Math.floor(seed * 17) + bloom) % flowerPalette.length]);
-            flowerHeads.setColorAt(index, flowerTint);
+            flowerCenters.setMatrixAt(index, flowerDummy.matrix);
           }
         }
         stems.instanceMatrix.needsUpdate = true;
-        flowerHeads.instanceMatrix.needsUpdate = true;
-        if (flowerHeads.instanceColor) flowerHeads.instanceColor.needsUpdate = true;
+        flowerPetals.instanceMatrix.needsUpdate = true;
+        flowerCenters.instanceMatrix.needsUpdate = true;
+        if (flowerPetals.instanceColor) flowerPetals.instanceColor.needsUpdate = true;
         stems.castShadow = false;
-        flowerHeads.castShadow = false;
+        flowerPetals.castShadow = false;
+        flowerCenters.castShadow = false;
         stems.receiveShadow = false;
-        flowerHeads.receiveShadow = false;
-        terrainRoot.add(stems, flowerHeads);
+        flowerPetals.receiveShadow = false;
+        flowerCenters.receiveShadow = false;
+        terrainRoot.add(stems, flowerPetals, flowerCenters);
       }
 
       // 高台邊緣偶爾露出低矮的海蝕礦晶，密度刻意偏低，避免水元素搶過建築主體。
