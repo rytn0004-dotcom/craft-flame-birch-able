@@ -4359,14 +4359,21 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
 
     let lastHqFireLevel: number | null = null;
     let lastFrameAt = 0;
+    let lastRafAt = 0;
+    let renderAccumulator = 0;
+    const renderInterval = 1000 / 40;
     let lastSnapshotAt = -Infinity;
     let lastAmbientUpdateAt = -Infinity;
     let cachedSnapshot: Terrain3DSnapshot | null = null;
     const render = (time: number) => {
       if (disposed) return;
       animationFrame = requestAnimationFrame(render);
-      // 渲染上限 45 FPS；遊戲快照 30 FPS，減少大量物件陣列在每個螢幕刷新週期重建。
-      if (time - lastFrameAt < 1000 / 45) return;
+      // 時間累積節流到約 40 FPS，避免在 60Hz 螢幕上使用固定門檻而意外掉成 30 FPS。
+      const rafDelta = lastRafAt ? Math.min(100, time - lastRafAt) : renderInterval;
+      lastRafAt = time;
+      renderAccumulator += rafDelta;
+      if (renderAccumulator < renderInterval) return;
+      renderAccumulator = Math.min(renderAccumulator - renderInterval, renderInterval * 0.75);
       const dt = lastFrameAt ? Math.min(0.05, (time - lastFrameAt) / 1000) : 0;
       lastFrameAt = time;
       if (!cachedSnapshot || time - lastSnapshotAt >= 1000 / 30) {
