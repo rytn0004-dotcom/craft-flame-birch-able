@@ -311,12 +311,17 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
     const gems: any[] = [];
     const waterRippleEntries: { x: number; z: number; phase: number; speed: number }[] = [];
     let waterRippleMesh: any = null;
+    const waterGlintEntries: { x: number; z: number; phase: number; rot: number; scale: number }[] = [];
+    let waterGlintMesh: any = null;
     const blackMistEntries: { x: number; z: number; y: number; phase: number; rot: number; scaleX: number; scaleZ: number; driftX: number; driftZ: number }[] = [];
     let blackMistMesh: any = null;
     const blackMistCloudEntries: { x: number; z: number; phase: number; scaleX: number; scaleZ: number; driftX: number; driftZ: number }[] = [];
     let blackMistCloudMesh: any = null;
+    const blackMistVeilEntries: { x: number; z: number; y: number; phase: number; rot: number; scaleX: number; scaleY: number; driftX: number; driftZ: number }[] = [];
+    let blackMistVeilMesh: any = null;
     const blackMistDummy = new THREE.Object3D();
     const blackMistCloudDummy = new THREE.Object3D();
+    const blackMistVeilDummy = new THREE.Object3D();
     const landmarkLights: { light: THREE.PointLight; phase: number; intensity: number }[] = [];
     const updateLandmarkLights = (time: number) => {
       for (const entry of landmarkLights) {
@@ -324,6 +329,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       }
     };
     const waterRippleDummy = new THREE.Object3D();
+    const waterGlintDummy = new THREE.Object3D();
     const turretGroups: { group: any; tower: Terrain3DTower; index: number; flash: any; baseY: number; baseZ: number }[] = [];
     const installationAnimations: { group: any; targetY: number; age: number; duration: number; fromScale: number }[] = [];
     const installationRings: { mesh: any; material: any; age: number; duration: number }[] = [];
@@ -413,6 +419,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
     blackMistFieldMaskTexture.minFilter = THREE.LinearFilter;
     blackMistFieldMaskTexture.needsUpdate = true;
 
+    const foliageWindUniform = { value: 0 };
     const shared = {
       blackMist: new THREE.MeshBasicMaterial({
         color: "#182038",
@@ -422,6 +429,16 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
         depthWrite: false,
         side: THREE.DoubleSide,
         toneMapped: false,
+      }),
+      blackMistVeil: new THREE.MeshBasicMaterial({
+        color: "#1b2944",
+        map: blackMistTexture,
+        transparent: true,
+        opacity: 0.46,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        toneMapped: false,
+        fog: false,
       }),
       blackMistField: new THREE.MeshBasicMaterial({
         color: "#10182b",
@@ -508,6 +525,8 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       bridgeStone: new THREE.MeshStandardMaterial({ color: "#c0b69b", roughness: 0.96, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.022 }),
       bridgeTrim: new THREE.MeshPhysicalMaterial({ color: "#b99560", metalness: 0.54, roughness: 0.36, roughnessMap: surfaceRoughnessMap, clearcoat: 0.48, clearcoatRoughness: 0.24, envMapIntensity: 1.02 }),
       grass: new THREE.MeshStandardMaterial({ color: "#83a878", roughness: 0.96 }),
+      treeBark: new THREE.MeshStandardMaterial({ color: "#6e5943", roughness: 0.98, bumpMap: surfaceReliefMap, bumpScale: 0.018 }),
+      foliageWind: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.94, bumpMap: surfaceReliefMap, bumpScale: 0.008 }),
       meadowBloom: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.72, emissive: "#473b20", emissiveIntensity: 0.06 }),
       roadGuide: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.78, metalness: 0.12 }),
       terrainCrystal: new THREE.MeshStandardMaterial({
@@ -522,6 +541,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       shoreSand: new THREE.MeshStandardMaterial({ color: "#d9c49a", roughness: 0.97, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.016 }),
       shoreFoam: new THREE.MeshBasicMaterial({ color: "#b9e6d8", transparent: true, opacity: 0.76, depthWrite: false }),
       waterRipple: new THREE.MeshBasicMaterial({ color: "#c7eee0", transparent: true, opacity: 0.16, depthWrite: false, side: THREE.DoubleSide }),
+      waterGlint: new THREE.MeshBasicMaterial({ color: "#d8f3e4", transparent: true, opacity: 0.2, depthWrite: false, side: THREE.DoubleSide, toneMapped: false }),
       rockCrack: new THREE.MeshStandardMaterial({ color: "#263c3b", roughness: 1, bumpMap: surfaceReliefMap, bumpScale: 0.012 }),
       rockCrackEdge: new THREE.MeshStandardMaterial({ color: "#8f9075", roughness: 0.96, bumpMap: surfaceReliefMap, bumpScale: 0.008 }),
       contactShadow: new THREE.MeshBasicMaterial({
@@ -541,6 +561,27 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       heightRim: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.93, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.02 }),
       ramp: new THREE.MeshStandardMaterial({ color: "#aeb49c", roughness: 0.95, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.02 }),
     };
+
+    // 樹冠與草叢共用一個極輕量頂點風場；只扭動頂部頂點，不逐物件跑動畫迴圈。
+    shared.foliageWind.onBeforeCompile = (shader) => {
+      shader.uniforms.uFoliageTime = foliageWindUniform;
+      shader.vertexShader = shader.vertexShader.replace(
+        "#include <common>",
+        "#include <common>\nuniform float uFoliageTime;",
+      );
+      shader.vertexShader = shader.vertexShader.replace(
+        "#include <begin_vertex>",
+        `#include <begin_vertex>
+#ifdef USE_INSTANCING
+        float foliagePhase = dot(instanceMatrix[3].xz, vec2(0.17, 0.13));
+        float foliageMask = smoothstep(-0.36, 0.42, position.y);
+        float foliageBreeze = sin(uFoliageTime + foliagePhase + position.y * 2.4);
+        transformed.x += foliageBreeze * 0.052 * foliageMask;
+        transformed.z += cos(uFoliageTime * 0.77 + foliagePhase * 1.31) * 0.032 * foliageMask;
+#endif`,
+      );
+    };
+    shared.foliageWind.customProgramCacheKey = () => "tide-foliage-wind-v1";
 
     // 所有地形區塊共用 4 種高度幾何，避免切塊後重複建立數百份相同頂點資料。
     const terrainGeometries = [0, 1, 2, 3].map(
@@ -836,6 +877,57 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
         sealGem.castShadow = false;
         root.add(sealGem);
       }
+
+      // 聖地外圈儀式庭：石環、八枚低矮晶釘與通往正門的踏石，形成建築與地景的銜接。
+      const sanctuaryOuterWalk = new THREE.Mesh(
+        new THREE.TorusGeometry(5.05, 0.035, 6, 112),
+        shared.foundationGold,
+      );
+      sanctuaryOuterWalk.rotation.x = Math.PI / 2;
+      sanctuaryOuterWalk.position.y = 0.035;
+      sanctuaryOuterWalk.castShadow = false;
+      sanctuaryOuterWalk.receiveShadow = false;
+      root.add(sanctuaryOuterWalk);
+      const sanctuaryInnerWalk = new THREE.Mesh(
+        new THREE.TorusGeometry(4.72, 0.014, 5, 112),
+        shared.runeGlow,
+      );
+      sanctuaryInnerWalk.rotation.x = Math.PI / 2;
+      sanctuaryInnerWalk.position.y = 0.038;
+      sanctuaryInnerWalk.castShadow = false;
+      root.add(sanctuaryInnerWalk);
+      for (let marker = 0; marker < 8; marker++) {
+        const angle = (marker / 8) * Math.PI * 2 + Math.PI / 8;
+        const x = Math.cos(angle) * 5.05;
+        const z = Math.sin(angle) * 5.05;
+        const plinth = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.16, 0.22, 0.13, 8),
+          shared.foundationStone,
+        );
+        plinth.position.set(x, 0.09, z);
+        plinth.castShadow = false;
+        plinth.receiveShadow = true;
+        root.add(plinth);
+        const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.105, 0), shared.chargeCrystal);
+        crystal.position.set(x, 0.26, z);
+        crystal.scale.set(0.8, 1.35, 0.8);
+        crystal.castShadow = false;
+        root.add(crystal);
+        gems.push(crystal);
+      }
+      const approachStones = new THREE.Group();
+      for (let step = 0; step < 5; step++) {
+        const stone = new THREE.Mesh(
+          new THREE.BoxGeometry(0.78, 0.055, 0.4),
+          shared.bridgeStone,
+        );
+        stone.position.set((step % 2 === 0 ? -0.035 : 0.035), 0.045, 3.22 + step * 0.49);
+        stone.rotation.y = (step % 2 === 0 ? -1 : 1) * 0.025;
+        stone.castShadow = false;
+        stone.receiveShadow = true;
+        approachStones.add(stone);
+      }
+      root.add(approachStones);
 
       // 中央聖殿、藍色穹頂和高聳水晶尖塔
       addCylinder(root, 1.03, 1.18, 1.52, 0, 1.64, -0.28, shared.ivory, 12);
@@ -1381,6 +1473,10 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       blackMistCloudMesh = null;
       waterRippleMesh = null;
       waterRippleEntries.length = 0;
+      waterGlintMesh = null;
+      waterGlintEntries.length = 0;
+      blackMistVeilMesh = null;
+      blackMistVeilEntries.length = 0;
       landmarkLights.length = 0;
       // 地形按 2×2 地塊切成可視區塊；鏡頭外的遠端地塊可整批被 frustum culling 跳過。
       const terrainChunkSize = TILE * 2;
@@ -1743,6 +1839,38 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             terrainRoot.add(guides);
           }
 
+          // 主路偶爾嵌入微型金屬路標，與路口圓章形成一致的魔導道路識別。
+          const roadWaymarkCandidates = roadCells.filter((cell) => {
+            const seed = Math.abs(Math.sin(cell.x * 67.1 + cell.z * 31.7) * 21871.3) % 1;
+            return seed > 0.965;
+          });
+          const waymarkCount = Math.min(140, roadWaymarkCandidates.length);
+          if (waymarkCount > 0) {
+            const waymarks = new THREE.InstancedMesh(
+              new THREE.OctahedronGeometry(0.034, 0),
+              shared.roadMedallion,
+              waymarkCount,
+            );
+            const waymarkDummy = new THREE.Object3D();
+            const waymarkTint = new THREE.Color();
+            for (let i = 0; i < waymarkCount; i++) {
+              const cell = roadWaymarkCandidates[Math.floor((i + 0.5) * roadWaymarkCandidates.length / waymarkCount)];
+              const seed = Math.abs(Math.sin(cell.x * 67.1 + cell.z * 31.7) * 21871.3) % 1;
+              waymarkDummy.position.set(cell.x, groundTop(0) + 0.052, cell.z);
+              waymarkDummy.rotation.set(seed * 0.2, seed * Math.PI * 2, seed * 0.16);
+              waymarkDummy.scale.set(1.0 + seed * 0.3, 0.82 + seed * 0.24, 1.0 + seed * 0.3);
+              waymarkDummy.updateMatrix();
+              waymarks.setMatrixAt(i, waymarkDummy.matrix);
+              waymarkTint.set(seed > 0.72 ? "#d8c48f" : "#8fb1a7");
+              waymarks.setColorAt(i, waymarkTint);
+            }
+            waymarks.instanceMatrix.needsUpdate = true;
+            if (waymarks.instanceColor) waymarks.instanceColor.needsUpdate = true;
+            waymarks.castShadow = false;
+            waymarks.receiveShadow = false;
+            terrainRoot.add(waymarks);
+          }
+
           if (roadEdges.length) {
             const curbs = new THREE.InstancedMesh(
               new THREE.BoxGeometry(0.9, 0.052, 0.075),
@@ -2004,6 +2132,45 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           blackMistMesh.receiveShadow = false;
           terrainRoot.add(blackMistMesh);
         }
+
+        const veilCandidates = coastEdges.filter((edge) => edge.seed > 0.24);
+        const veilCount = Math.min(72, veilCandidates.length);
+        if (veilCount > 0) {
+          blackMistVeilMesh = new THREE.InstancedMesh(
+            new THREE.PlaneGeometry(1, 1),
+            shared.blackMistVeil,
+            veilCount,
+          );
+          blackMistVeilMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+          const veilTint = new THREE.Color();
+          for (let i = 0; i < veilCount; i++) {
+            const edge = veilCandidates[Math.min(veilCandidates.length - 1, Math.floor((i + 0.5) * veilCandidates.length / veilCount))];
+            const scaleX = 2.35 + edge.seed * 2.15;
+            const scaleY = 1.15 + edge.seed * 1.3;
+            const x = edge.x + edge.dx * 0.46;
+            const z = edge.z + edge.dz * 0.46;
+            const y = 0.64 + edge.seed * 0.52;
+            const phase = edge.seed * 17.1 + i * 0.37;
+            blackMistVeilEntries.push({
+              x, z, y, phase, rot: edge.rot, scaleX, scaleY,
+              driftX: edge.dx, driftZ: edge.dz,
+            });
+            blackMistVeilDummy.position.set(x, y, z);
+            blackMistVeilDummy.rotation.set(0, edge.rot, 0);
+            blackMistVeilDummy.scale.set(scaleX, scaleY, 1);
+            blackMistVeilDummy.updateMatrix();
+            blackMistVeilMesh.setMatrixAt(i, blackMistVeilDummy.matrix);
+            veilTint.set(edge.seed > 0.72 ? "#34405b" : "#202b46");
+            blackMistVeilMesh.setColorAt(i, veilTint);
+          }
+          blackMistVeilMesh.instanceMatrix.needsUpdate = true;
+          if (blackMistVeilMesh.instanceColor) blackMistVeilMesh.instanceColor.needsUpdate = true;
+          blackMistVeilMesh.frustumCulled = false;
+          blackMistVeilMesh.renderOrder = 3;
+          blackMistVeilMesh.castShadow = false;
+          blackMistVeilMesh.receiveShadow = false;
+          terrainRoot.add(blackMistVeilMesh);
+        }
       }
 
       if (coastEdges.length) {
@@ -2228,6 +2395,38 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           terrainRoot.add(waterRippleMesh);
         }
 
+        // 淺海反光碎片隨潮汐緩慢漂移；集中在單一批次，避免逐粒子建立物件。
+        const glintCandidates = coastEdges.filter((edge) => edge.seed > 0.3);
+        const glintCount = Math.min(64, glintCandidates.length);
+        if (glintCount > 0) {
+          waterGlintMesh = new THREE.InstancedMesh(
+            new THREE.PlaneGeometry(0.42, 0.038),
+            shared.waterGlint,
+            glintCount,
+          );
+          waterGlintMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+          for (let i = 0; i < glintCount; i++) {
+            const edge = glintCandidates[Math.min(glintCandidates.length - 1, Math.floor((i + 0.5) * glintCandidates.length / glintCount))];
+            const distance = 1.85 + edge.seed * 3.25;
+            const x = edge.x + edge.dx * distance + edge.dz * (edge.seed - 0.5) * 0.9;
+            const z = edge.z + edge.dz * distance + edge.dx * (0.5 - edge.seed) * 0.9;
+            const phase = edge.seed * 19.7 + i * 0.61;
+            const rot = edge.rot + (edge.seed - 0.5) * 0.5;
+            const scale = 0.62 + edge.seed * 0.82;
+            waterGlintEntries.push({ x, z, phase, rot, scale });
+            waterGlintDummy.position.set(x, -0.246, z);
+            waterGlintDummy.rotation.set(-Math.PI / 2, rot, 0);
+            waterGlintDummy.scale.set(scale, 1, 1);
+            waterGlintDummy.updateMatrix();
+            waterGlintMesh.setMatrixAt(i, waterGlintDummy.matrix);
+          }
+          waterGlintMesh.instanceMatrix.needsUpdate = true;
+          waterGlintMesh.frustumCulled = false;
+          waterGlintMesh.castShadow = false;
+          waterGlintMesh.receiveShadow = false;
+          terrainRoot.add(waterGlintMesh);
+        }
+
         // 海岸補少量漂流木與岸邊草簇，固定上限避免沿線物件過密。
         const driftwoodEdges = coastEdges.filter((edge) => edge.seed > 0.94).slice(0, 22);
         if (driftwoodEdges.length) {
@@ -2414,6 +2613,79 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
         grass.castShadow = false;
         grass.receiveShadow = false;
         terrainRoot.add(grass);
+      }
+
+      // 草甸與苔地加入成簇的海岸林木；樹冠以頂點風場輕晃，不逐棵建立動畫。
+      const groveCandidates = Array.from(tileCells.values()).filter((cell) => {
+        if (cell.h < 1 || cell.h > 2) return false;
+        const region = terrainRegion(cell);
+        if (region !== "meadow" && region !== "moss") return false;
+        const key = Math.floor(cell.x) + "," + Math.floor(cell.z);
+        if (coastBandKeys.has(key)) return false;
+        const seed = Math.abs(Math.sin(cell.x * 37.7 + cell.z * 71.3) * 31871.9) % 1;
+        if (seed < 0.986) return false;
+        return !protectedBuildings.some((building) =>
+          Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 1.75,
+        );
+      });
+      const groveCount = Math.min(84, groveCandidates.length);
+      const groveCells = groveCount
+        ? Array.from({ length: groveCount }, (_, i) =>
+            groveCandidates[Math.min(groveCandidates.length - 1, Math.floor((i + 0.5) * groveCandidates.length / groveCount))],
+          )
+        : [];
+      if (groveCells.length) {
+        const trunks = new THREE.InstancedMesh(
+          new THREE.CylinderGeometry(0.075, 0.13, 0.88, 7),
+          shared.treeBark,
+          groveCells.length,
+        );
+        const lowerCanopies = new THREE.InstancedMesh(
+          new THREE.DodecahedronGeometry(0.55, 0),
+          shared.foliageWind,
+          groveCells.length,
+        );
+        const upperCanopies = new THREE.InstancedMesh(
+          new THREE.IcosahedronGeometry(0.39, 0),
+          shared.foliageWind,
+          groveCells.length,
+        );
+        const groveDummy = new THREE.Object3D();
+        const groveTint = new THREE.Color();
+        for (let i = 0; i < groveCells.length; i++) {
+          const cell = groveCells[i];
+          const seed = Math.abs(Math.sin(cell.x * 127.1 + cell.z * 311.7) * 43758.5453) % 1;
+          const angle = seed * Math.PI * 2;
+          const scale = 0.82 + seed * 0.34;
+          groveDummy.position.set(cell.x, groundTop(cell.h) + 0.44 * scale, cell.z);
+          groveDummy.rotation.set(0, angle, 0);
+          groveDummy.scale.set(0.86 + seed * 0.2, scale, 0.86 + seed * 0.2);
+          groveDummy.updateMatrix();
+          trunks.setMatrixAt(i, groveDummy.matrix);
+
+          groveDummy.position.set(cell.x, groundTop(cell.h) + 0.91 * scale, cell.z);
+          groveDummy.rotation.set(seed * 0.08, angle, (seed - 0.5) * 0.08);
+          groveDummy.scale.set(0.9 + seed * 0.16, 0.9 + seed * 0.18, 0.9 + seed * 0.16);
+          groveDummy.updateMatrix();
+          lowerCanopies.setMatrixAt(i, groveDummy.matrix);
+          groveTint.set(region === "moss" ? "#527b62" : "#5e8969");
+          lowerCanopies.setColorAt(i, groveTint);
+
+          groveDummy.position.set(cell.x + Math.cos(angle) * 0.06, groundTop(cell.h) + 1.34 * scale, cell.z + Math.sin(angle) * 0.06);
+          groveDummy.rotation.set(0, angle + 0.42, 0);
+          groveDummy.scale.set(0.72 + seed * 0.12, 0.72 + seed * 0.16, 0.72 + seed * 0.12);
+          groveDummy.updateMatrix();
+          upperCanopies.setMatrixAt(i, groveDummy.matrix);
+          groveTint.set(seed > 0.62 ? "#9eb879" : "#7ea873");
+          upperCanopies.setColorAt(i, groveTint);
+        }
+        for (const mesh of [trunks, lowerCanopies, upperCanopies]) {
+          mesh.instanceMatrix.needsUpdate = true;
+          if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+          mesh.castShadow = false;
+          mesh.receiveShadow = false;
+          terrainRoot.add(mesh);
+        }
       }
 
       // 草甸與苔地加入低矮野花簇，使用兩個批次實例網格，不建立逐朵動畫。
@@ -4169,6 +4441,20 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       }
       waterRippleMesh.instanceMatrix.needsUpdate = true;
       shared.waterRipple.opacity = 0.11 + (Math.sin(time * 0.0011) * 0.5 + 0.5) * 0.09;
+      if (waterGlintMesh && waterGlintEntries.length) {
+        for (let i = 0; i < waterGlintEntries.length; i++) {
+          const glint = waterGlintEntries[i];
+          const drift = Math.sin(time * 0.00042 + glint.phase);
+          const pulse = 0.58 + (Math.sin(time * 0.0016 + glint.phase) * 0.5 + 0.5) * 0.62;
+          waterGlintDummy.position.set(glint.x + drift * 0.065, -0.246, glint.z - drift * 0.045);
+          waterGlintDummy.rotation.set(-Math.PI / 2, glint.rot + drift * 0.035, 0);
+          waterGlintDummy.scale.set(glint.scale * pulse, 1, 1);
+          waterGlintDummy.updateMatrix();
+          waterGlintMesh.setMatrixAt(i, waterGlintDummy.matrix);
+        }
+        waterGlintMesh.instanceMatrix.needsUpdate = true;
+        shared.waterGlint.opacity = 0.1 + (Math.sin(time * 0.0009) * 0.5 + 0.5) * 0.12;
+      }
     };
 
     const rebuildBuildings = (data: Terrain3DSnapshot, animateTurrets: boolean, animateMainUpgrade: boolean) => {
@@ -4323,6 +4609,25 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           blackMistMesh.setMatrixAt(i, blackMistDummy.matrix);
         }
         blackMistMesh.instanceMatrix.needsUpdate = true;
+      }
+
+      if (blackMistVeilMesh && blackMistVeilEntries.length) {
+        shared.blackMistVeil.opacity = 0.48 - power * 0.2;
+        for (let i = 0; i < blackMistVeilEntries.length; i++) {
+          const veil = blackMistVeilEntries[i];
+          const drift = Math.sin(time * 0.00023 + veil.phase);
+          const pulse = 1 + Math.sin(time * 0.00041 + veil.phase) * 0.045;
+          blackMistVeilDummy.position.set(
+            veil.x + veil.driftX * drift * 0.16,
+            veil.y + Math.sin(time * 0.00031 + veil.phase) * 0.13,
+            veil.z + veil.driftZ * drift * 0.16,
+          );
+          blackMistVeilDummy.rotation.set(0, veil.rot + drift * 0.045, 0);
+          blackMistVeilDummy.scale.set(veil.scaleX * pulse, veil.scaleY * pulse, 1);
+          blackMistVeilDummy.updateMatrix();
+          blackMistVeilMesh.setMatrixAt(i, blackMistVeilDummy.matrix);
+        }
+        blackMistVeilMesh.instanceMatrix.needsUpdate = true;
       }
 
       if (blackMistCloudMesh && blackMistCloudEntries.length) {
@@ -4783,6 +5088,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
         turret.flash.scale.setScalar(0.72 + flash * 1.8);
         turret.flash.material.opacity = Math.min(1, flash * 1.25);
       }
+      foliageWindUniform.value = time * 0.00048;
       controls.update();
       renderer.render(scene, camera);
     };
@@ -4816,6 +5122,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       selectedRangeMaterial.dispose();
       purificationAuraMaterial.dispose();
       shared.blackMist.dispose();
+      shared.blackMistVeil.dispose();
       shared.blackMistField.dispose();
       shared.blackMistCloud.dispose();
       blackMistTexture.dispose();
@@ -4828,6 +5135,9 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       skyGeometry.dispose();
       skyMaterial.dispose();
       shared.waterRipple.dispose();
+      shared.waterGlint.dispose();
+      shared.treeBark.dispose();
+      shared.foliageWind.dispose();
       shared.meadowBloom.dispose();
       shared.roadGuide.dispose();
       shared.biomeSeam.dispose();
