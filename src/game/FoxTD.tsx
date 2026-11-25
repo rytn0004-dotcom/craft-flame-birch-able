@@ -1304,15 +1304,21 @@ export function FoxTD() {
   // 地塊預覽只在地圖或模板變更時重算，避免繪圖循環與滑鼠移動反覆掃描全部接口。
   const tilePlacementPreviewRef = useRef<{
     board: TileBoard;
-    templateId: string;
-    valid: ReturnType<typeof validPlacements>;
-    bySlot: Map<string, Rot[]>;
-    slotKeys: Set<string>;
-    frontierKeys: Set<string>;
+    byTemplate: Map<string, {
+      valid: ReturnType<typeof validPlacements>;
+      bySlot: Map<string, Rot[]>;
+      slotKeys: Set<string>;
+      frontierKeys: Set<string>;
+    }>;
   } | null>(null);
   const getTilePlacementPreview = (board: TileBoard, templateId: string) => {
-    const cached = tilePlacementPreviewRef.current;
-    if (cached && cached.board === board && cached.templateId === templateId) return cached;
+    let boardCache = tilePlacementPreviewRef.current;
+    if (!boardCache || boardCache.board !== board) {
+      boardCache = { board, byTemplate: new Map() };
+      tilePlacementPreviewRef.current = boardCache;
+    }
+    const cached = boardCache.byTemplate.get(templateId);
+    if (cached) return cached;
     const valid = validPlacements(board, templateId);
     const bySlot = new Map<string, Rot[]>();
     const slotKeys = new Set<string>();
@@ -1324,8 +1330,8 @@ export function FoxTD() {
       slotKeys.add(key);
     }
     const frontierKeys = new Set(frontierSlots(board).map((slot) => slot.tc + "," + slot.tr));
-    const next = { board, templateId, valid, bySlot, slotKeys, frontierKeys };
-    tilePlacementPreviewRef.current = next;
+    const next = { valid, bySlot, slotKeys, frontierKeys };
+    boardCache.byTemplate.set(templateId, next);
     return next;
   };
 
