@@ -566,6 +566,33 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       ramp: new THREE.MeshStandardMaterial({ color: "#aeb49c", roughness: 0.95, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.02 }),
     };
 
+    // 海面焦散：兩組交錯波紋在材質內運算，不建立額外粒子或平面。
+    // 透過共用 uniform 驅動深海與淺灘，讓遠景水域也有連續的潮汐流動感。
+    const oceanSurfaceUniforms = { time: { value: 0 } };
+    const installOceanSurface = (material: THREE.MeshPhysicalMaterial, cacheKey: string) => {
+      material.onBeforeCompile = (shader) => {
+        shader.uniforms.uOceanTime = oceanSurfaceUniforms.time;
+        shader.fragmentShader = shader.fragmentShader.replace(
+          "#include <common>",
+          "#include <common>\nuniform float uOceanTime;",
+        );
+        shader.fragmentShader = shader.fragmentShader.replace(
+          "#include <color_fragment>",
+          `#include <color_fragment>
+#ifdef USE_UV
+          vec2 tideUv = vUv * vec2(17.0, 13.0);
+          float tideA = abs(sin(tideUv.x + sin(tideUv.y * 0.72 - uOceanTime * 0.34) * 1.25 - uOceanTime * 0.42));
+          float tideB = abs(sin(tideUv.y * 1.18 - tideUv.x * 0.43 + cos(tideUv.x * 0.64 + uOceanTime * 0.27) * 0.9));
+          float tideCaustic = pow(1.0 - smoothstep(0.025, 0.34, tideA * tideB), 3.0);
+          diffuseColor.rgb += vec3(0.018, 0.072, 0.074) * tideCaustic;
+#endif`,
+        );
+      };
+      material.customProgramCacheKey = () => cacheKey;
+    };
+    installOceanSurface(shared.floor, "tide-ocean-floor-caustics-v1");
+    installOceanSurface(shared.seaShelf, "tide-ocean-shelf-caustics-v1");
+
     // 樹冠與草叢共用一個極輕量頂點風場；只扭動頂部頂點，不逐物件跑動畫迴圈。
     shared.foliageWind.onBeforeCompile = (shader) => {
       shader.uniforms.uFoliageTime = foliageWindUniform;
@@ -4703,6 +4730,9 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
     const updateWaterRipples = (time: number) => {
       waterBumpMap.offset.x = (time * 0.000006) % 1;
       waterBumpMap.offset.y = (time * 0.0000035) % 1;
+      oceanSurfaceUniforms.time.value = time * 0.001;
+      // 海岸泡沫只有極小幅度變化，避免像閃爍特效，保留柔和潮汐呼吸。
+      shared.shoreFoam.opacity = 0.62 + Math.sin(time * 0.00072) * 0.055;
       if (!waterRippleMesh || !waterRippleEntries.length) return;
       for (let i = 0; i < waterRippleEntries.length; i++) {
         const ripple = waterRippleEntries[i];
