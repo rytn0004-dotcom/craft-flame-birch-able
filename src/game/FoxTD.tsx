@@ -1239,6 +1239,15 @@ export function FoxTD() {
   const [pick, setPick] = useState<number | null>(null);
   const [sel, setSel] = useState<number | null>(null);
   const [hover, setHover] = useState("");
+  const [placementDebug, setPlacementDebug] = useState({
+    gx: -1,
+    gy: -1,
+    height: 0,
+    board: "等待滑鼠",
+    ray: "尚未點擊",
+    tower: "未選擇",
+    verdict: "移動滑鼠到地面查看",
+  });
   const [speed, setSpeed] = useState(1);
   const [endless, setEndless] = useState(false);
   const [autoUpgrade, setAutoUpgrade] = useState<AutoUpgradeMode>("off");
@@ -4319,6 +4328,48 @@ export function FoxTD() {
       return ev.clientX >= rect.left && ev.clientX <= rect.right && ev.clientY >= rect.top && ev.clientY <= rect.bottom;
     };
 
+    // 診斷只在格子／判定結果改變時更新 React 狀態；滑鼠每幀移動不會反覆觸發重繪。
+    let lastPlacementDebugKey = "";
+    const updatePlacementDebug = (world: { x: number; y: number }, preciseHit: boolean | null) => {
+      const gx = Math.floor(world.x / CELL);
+      const gy = Math.floor(world.y / CELL);
+      const inBounds = gx >= 0 && gy >= 0 && gx < COLS && gy < ROWS;
+      const key = inBounds ? cellKey(gx, gy) : "out";
+      const expandMode = isExpandBoard(boardRef.current);
+      const onBoard = inBounds && isCellOnBoard(boardRef.current, gx, gy);
+      const board = !inBounds
+        ? "超出世界"
+        : expandMode
+          ? (onBoard ? "地塊已升起" : "黑霧未開拓")
+          : (sim.current.blocked.has(key) ? "障礙／路障格" : "完整地圖地面");
+      const height = inBounds ? cellHeight(sim.current.heights, gx, gy) : -1;
+      const placementReason = inBounds ? canPlaceReason(gx, gy) : "超出世界範圍";
+      const selectedId = pickRef.current;
+      const selectedDef = selectedId === null
+        ? null
+        : (towerBookRef.current[selectedId] ?? TOWERS[selectedId]);
+      const tower = selectedDef?.name ?? (stakeRef.current ? "路障模式" : shrinePlaceRef.current ? "祭壇模式" : "未選擇塔卡");
+      let verdict = placementReason ?? "地形與佔用判定通過";
+      if (!placementReason && tileOfferRef.current && pickTemplateRef.current) verdict = "地塊拼接模式";
+      else if (!placementReason && stakeRef.current) verdict = "路障模式";
+      else if (!placementReason && shrinePlaceRef.current) verdict = "祭壇模式";
+      else if (!placementReason && selectedId === null) verdict = "請先選擇塔卡";
+      else if (!placementReason && selectedDef) {
+        const cost = Math.max(1, Math.round(selectedDef.cost * (difficultyRef.current.towerCostMul ?? 1)));
+        if (goldRef.current < cost) verdict = `金幣不足（需要 ${cost}）`;
+        else verdict = "可放置";
+      }
+      const ray = preciseHit === null
+        ? "平面投影預覽（尚未點擊驗證）"
+        : preciseHit
+          ? "已命中 3D 地表網格"
+          : "未命中 3D 網格，使用投影備援";
+      const debugKey = [gx, gy, height, board, ray, tower, verdict].join("|");
+      if (debugKey === lastPlacementDebugKey) return;
+      lastPlacementDebugKey = debugKey;
+      setPlacementDebug({ gx, gy, height, board, ray, tower, verdict });
+    };
+
     const onMove = (ev: PointerEvent) => {
       if (!isGameSurface(ev)) {
         sim.current.pointer.inside = false;
@@ -4326,6 +4377,7 @@ export function FoxTD() {
       }
       const world = local(ev);
       sim.current.pointer = { ...world, down: sim.current.pointer.down, inside: true };
+      updatePlacementDebug(world, null);
       // 擴張預覽：游標移到最新接口時提示可否放置
       if (tileOfferRef.current && pickTemplateRef.current && phaseRef.current === "play") {
         const tid = pickTemplateRef.current;
@@ -4358,7 +4410,9 @@ export function FoxTD() {
     };
     const onDown = (ev: PointerEvent) => {
       if (!isGameSurface(ev) || ev.button !== 0 || ev.altKey) return;
-      const p = local(ev, true);
+      const preciseWorldHit = terrain3DApiRef.current?.screenToWorldPrecise(ev.clientX, ev.clientY) ?? null;
+      const p = preciseWorldHit ?? local(ev);
+      updatePlacementDebug(p, preciseWorldHit !== null);
       sim.current.pointer = { ...p, down: true, inside: true };
       if (phaseRef.current !== "play") {
         if (!workshopRef.current) return;
@@ -4514,7 +4568,10 @@ export function FoxTD() {
       const id = pickRef.current;
       const gx = gx0;
       const gy = gy0;
-      if (id === null) return;
+      if (id === null) {
+        setHover("尚未選擇塔卡：請先選擇要建造的塔，再點擊地面");
+        return;
+      }
       const base = towerBookRef.current[id] ?? TOWERS[id];
       const diff = difficultyRef.current;
       const cost = Math.max(1, Math.round(base.cost * (diff.towerCostMul ?? 1)));
@@ -6009,6 +6066,26 @@ Alt＋左鍵環視 · 右鍵平移 · 滾輪縮放 · [H]對準聖地 · [空格
               </div>
             )}
           </div>
+          {phase === "play" && (
+            <div
+              className="pointer-events-none absolute bottom-3 right-3 z-30 max-w-[280px] rounded-lg border px-3 py-2 text-[10px] leading-5 text-[#d8e8f5] shadow-xl"
+              style={{ background: "rgba(5, 16, 28, 0.88)", borderColor: "rgba(142, 200, 238, 0.34)" }}
+              aria-live="polite"
+            >
+              <div className="mb-1 font-semibold tracking-wide text-[#f2d89b]">建塔／地塊診斷</div>
+              {placementDebug.gx >= 0 ? (
+                <>
+                  <div>格子：({placementDebug.gx}, {placementDebug.gy}) · 高度 Lv.{placementDebug.height}</div>
+                  <div>地塊：{placementDebug.board}</div>
+                  <div>射線：{placementDebug.ray}</div>
+                  <div>塔卡：{placementDebug.tower}</div>
+                  <div className="font-semibold text-[#ffe1a5]">判定：{placementDebug.verdict}</div>
+                </>
+              ) : (
+                <div className="text-[#9ec4de]">移動滑鼠到戰場地面，查看格子座標與建造判定</div>
+              )}
+            </div>
+          )}
           {phase === "play" && bossBannerUi && (
             <div
               className="overlay"
