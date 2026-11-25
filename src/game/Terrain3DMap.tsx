@@ -589,6 +589,36 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         addBox(root, 0.42, 0.07, 0.42, sx * 2.17, 0.72, sz * 2.17, shared.foundationGold);
       }
 
+
+      // 城牆外側增加八枚潮汐徽記：低矮浮雕與晶核，不改變城牆、入口或基地佔地。
+      const wallCrests = [
+        { x: -0.82, y: 1.17, z: 2.455, rot: 0, nx: 0, nz: 1 },
+        { x: 0.82, y: 1.17, z: 2.455, rot: 0, nx: 0, nz: 1 },
+        { x: -0.82, y: 1.17, z: -2.455, rot: Math.PI, nx: 0, nz: -1 },
+        { x: 0.82, y: 1.17, z: -2.455, rot: Math.PI, nx: 0, nz: -1 },
+        { x: 2.455, y: 1.17, z: -0.82, rot: Math.PI / 2, nx: 1, nz: 0 },
+        { x: 2.455, y: 1.17, z: 0.82, rot: Math.PI / 2, nx: 1, nz: 0 },
+        { x: -2.455, y: 1.17, z: -0.82, rot: -Math.PI / 2, nx: -1, nz: 0 },
+        { x: -2.455, y: 1.17, z: 0.82, rot: -Math.PI / 2, nx: -1, nz: 0 },
+      ];
+      for (const crest of wallCrests) {
+        const plate = addBox(
+          root, 0.38, 0.48, 0.055,
+          crest.x + crest.nx * 0.024, crest.y, crest.z + crest.nz * 0.024, shared.blue,
+        );
+        plate.rotation.y = crest.rot;
+        plate.castShadow = false;
+        const frame = new THREE.Mesh(new THREE.TorusGeometry(0.17, 0.018, 6, 24), shared.brightGold);
+        frame.position.set(crest.x + crest.nx * 0.065, crest.y, crest.z + crest.nz * 0.065);
+        frame.rotation.y = crest.rot;
+        root.add(frame);
+        const gem = new THREE.Mesh(new THREE.OctahedronGeometry(0.095, 0), shared.chargeCrystal);
+        gem.position.set(crest.x + crest.nx * 0.085, crest.y, crest.z + crest.nz * 0.085);
+        gem.scale.set(1, 1.16, 0.72);
+        root.add(gem);
+        gems.push(gem);
+      }
+
       // 牆面金屬收邊、窗框、立柱與石階，避免近距離環視時只看到大塊方形牆體。
       for (const sign of [-1, 1]) {
         addBox(root, 4.55, 0.055, 0.36, 0, 0.78, sign * 2.26, shared.gold);
@@ -2309,7 +2339,61 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         }
       }
 
-      const ruinWallSites: { x: number; z: number; y: number; rot: number; width: number; height: number; seed: number }[] = [];
+
+      // 同高度障礙地形上的遺跡群，以斷續石道連成小型古代聖域；沿線逐格檢查，絕不跨入可建造平台。
+      const ruinCauseways: { x: number; z: number; rot: number; length: number; y: number }[] = [];
+      if (data.mapMode === "layout" && ruinSites.length > 1) {
+        for (let i = 0; i < ruinSites.length && ruinCauseways.length < 6; i++) {
+          const a = ruinSites[i];
+          let best: { site: typeof a; distance: number } | null = null;
+          for (let j = i + 1; j < ruinSites.length; j++) {
+            const b = ruinSites[j];
+            if (a.h !== b.h) continue;
+            const dx = b.x - a.x;
+            const dz = b.z - a.z;
+            const distance = Math.hypot(dx, dz);
+            if (distance < 6.2 || distance > 10.8 || (best && distance >= best.distance)) continue;
+            let safeCorridor = true;
+            const steps = Math.ceil(distance * 2.2);
+            for (let step = 0; step <= steps; step++) {
+              const t = step / steps;
+              const x = a.x + dx * t;
+              const z = a.z + dz * t;
+              const gx = Math.floor(x);
+              const gy = Math.floor(z);
+              const key = gx + "," + gy;
+              const cell = tileCells.get(key);
+              if (!cell || !data.blocked.has(key) || cell.h !== a.h) {
+                safeCorridor = false;
+                break;
+              }
+              if (protectedBuildings.some((building) => {
+                const px = x - building.x;
+                const pz = z - building.z;
+                return Math.hypot(px, pz) < building.radius + 0.65;
+              })) {
+                safeCorridor = false;
+                break;
+              }
+            }
+            if (safeCorridor) best = { site: b, distance };
+          }
+          if (!best) continue;
+          const b = best.site;
+          const dx = b.x - a.x;
+          const dz = b.z - a.z;
+          const distance = best.distance;
+          ruinCauseways.push({
+            x: (a.x + b.x) * 0.5,
+            z: (a.z + b.z) * 0.5,
+            rot: Math.atan2(-dz, dx),
+            length: distance - 2.05,
+            y: groundTop(a.h),
+          });
+        }
+      }
+
+      const ruinWallSites: { x: number; z: number; y: number; rot: number; width: number; height: number; seed: number }[] = [];      const ruinWallSites: { x: number; z: number; y: number; rot: number; width: number; height: number; seed: number }[] = [];
       const ruinOuterRingSites: { x: number; z: number; y: number; angle: number }[] = [];
       if (ruinSites.length) {
         const plinths = new THREE.InstancedMesh(
@@ -2608,7 +2692,71 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         }
       }
 
-      // 古代石橋只生成在完整／自訂地圖的障礙地形上；道路與可建造格一律不會被覆蓋。
+
+      if (ruinCauseways.length) {
+        const causewayPieces: { x: number; z: number; rot: number; length: number; y: number }[] = [];
+        const causewayRails: { x: number; z: number; rot: number; length: number; y: number }[] = [];
+        for (const causeway of ruinCauseways) {
+          const count = Math.max(3, Math.min(8, Math.ceil(causeway.length / 1.35)));
+          const spacing = causeway.length / count;
+          const pieceLength = spacing * 0.78;
+          for (let i = 0; i < count; i++) {
+            const along = -causeway.length * 0.5 + spacing * (i + 0.5);
+            const x = causeway.x + Math.cos(causeway.rot) * along;
+            const z = causeway.z - Math.sin(causeway.rot) * along;
+            causewayPieces.push({
+              x, z, rot: causeway.rot, length: pieceLength, y: causeway.y + 0.065,
+            });
+            for (const side of [-1, 1]) {
+              causewayRails.push({
+                x: x + Math.sin(causeway.rot) * side * 0.43,
+                z: z + Math.cos(causeway.rot) * side * 0.43,
+                rot: causeway.rot,
+                length: pieceLength * 0.88,
+                y: causeway.y + 0.145,
+              });
+            }
+          }
+        }
+        const decks = new THREE.InstancedMesh(
+          new THREE.BoxGeometry(1, 1, 1), shared.bridgeStone, causewayPieces.length,
+        );
+        const inlays = new THREE.InstancedMesh(
+          new THREE.BoxGeometry(1, 1, 1), shared.foundationGold, causewayPieces.length,
+        );
+        const rails = new THREE.InstancedMesh(
+          new THREE.BoxGeometry(1, 1, 1), shared.ruinStone, causewayRails.length,
+        );
+        const dummy = new THREE.Object3D();
+        for (let i = 0; i < causewayPieces.length; i++) {
+          const piece = causewayPieces[i];
+          dummy.position.set(piece.x, piece.y, piece.z);
+          dummy.rotation.set(0, piece.rot, 0);
+          dummy.scale.set(piece.length, 0.13, 0.84);
+          dummy.updateMatrix();
+          decks.setMatrixAt(i, dummy.matrix);
+          dummy.position.y = piece.y + 0.075;
+          dummy.scale.set(piece.length * 0.62, 0.018, 0.045);
+          dummy.updateMatrix();
+          inlays.setMatrixAt(i, dummy.matrix);
+        }
+        for (let i = 0; i < causewayRails.length; i++) {
+          const rail = causewayRails[i];
+          dummy.position.set(rail.x, rail.y, rail.z);
+          dummy.rotation.set(0, rail.rot, 0);
+          dummy.scale.set(rail.length, 0.14, 0.075);
+          dummy.updateMatrix();
+          rails.setMatrixAt(i, dummy.matrix);
+        }
+        for (const mesh of [decks, inlays, rails]) {
+          mesh.instanceMatrix.needsUpdate = true;
+          mesh.castShadow = mesh === decks || mesh === rails;
+          mesh.receiveShadow = true;
+          terrainRoot.add(mesh);
+        }
+      }
+
+      // 古代石橋只生成在完整／自訂地圖的障礙地形上；道路與可建造格一律不會被覆蓋。      // 古代石橋只生成在完整／自訂地圖的障礙地形上；道路與可建造格一律不會被覆蓋。
       const bridgeSites: { x: number; z: number; rot: number; deckY: number; lowY: number }[] = [];
       if (data.mapMode === "layout") {
         const bridgeAxes = [
@@ -2760,6 +2908,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         sx: number; sy: number; sz: number;
         tint: string;
       }[] = [];
+      const ridgeSupports: { x: number; y: number; z: number; rot: number; height: number; tint: string }[] = [];
       const talusDebris: { x: number; y: number; z: number; scale: number; rot: number; tint: string }[] = [];
       for (const cell of tileCells.values()) {
         if (cell.h <= 0) continue;
@@ -2802,7 +2951,28 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
             });
           }
 
-          // 斷層表面隨機生成薄片狀岩角，角度、厚度和色階有細微變化，避免連續牆面像積木。
+
+          // 二、三級高地的裸露斷面偶爾加上石灰岩支撐脊柱；只貼在側壁，不佔平台可建造面。
+          const ridgeVertical = high - low;
+          const ridgeSeed = Math.abs(Math.sin(cell.x * 61.7 + cell.z * 37.9 + d.dc * 13.1 + d.dr * 29.3) * 24817.31) % 1;
+          const nearRidgeBuilding = protectedBuildings.some((building) =>
+            Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 1.05,
+          );
+          if (
+            cell.h >= 2 && ridgeVertical >= 0.78 && ridgeSeed > 0.905 &&
+            ridgeSupports.length < 220 && !nearRidgeBuilding
+          ) {
+            ridgeSupports.push({
+              x: cell.x + d.dx * 0.505,
+              y: low + ridgeVertical * 0.43,
+              z: cell.z + d.dz * 0.505,
+              rot: Math.atan2(d.dx, d.dz),
+              height: ridgeVertical * 0.78,
+              tint: ridgeSeed > 0.965 ? "#b9b29a" : "#78877a",
+            });
+          }
+
+          // 斷層表面隨機生成薄片狀岩角，角度、厚度和色階有細微變化，避免連續牆面像積木。          // 斷層表面隨機生成薄片狀岩角，角度、厚度和色階有細微變化，避免連續牆面像積木。
           const faceSeed = Math.abs(Math.sin(cell.x * 43.17 + cell.z * 91.73 + d.dc * 17.1 + d.dr * 31.7) * 28543.31) % 1;
           const crackSeed = Math.abs(Math.sin(cell.x * 97.3 + cell.z * 41.9 + d.dc * 23.1 + d.dr * 17.7) * 26173.91) % 1;
           if (cell.h >= 2 && crackSeed > 0.84 && rockCracks.length < 620) {
@@ -3065,7 +3235,47 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         terrainRoot.add(ribs);
       }
 
-      if (cliffFragments.length) {
+
+      if (ridgeSupports.length) {
+        const supports = new THREE.InstancedMesh(
+          new THREE.CylinderGeometry(0.12, 0.205, 1, 5),
+          shared.cliffFacet,
+          ridgeSupports.length,
+        );
+        const supportCaps = new THREE.InstancedMesh(
+          new THREE.BoxGeometry(0.27, 0.075, 0.25),
+          shared.cliffCap,
+          ridgeSupports.length,
+        );
+        const dummy = new THREE.Object3D();
+        const tint = new THREE.Color();
+        for (let i = 0; i < ridgeSupports.length; i++) {
+          const support = ridgeSupports[i];
+          dummy.position.set(support.x, support.y, support.z);
+          dummy.rotation.set(0, support.rot, 0);
+          dummy.scale.set(1, support.height, 1);
+          dummy.updateMatrix();
+          supports.setMatrixAt(i, dummy.matrix);
+          tint.set(support.tint);
+          supports.setColorAt(i, tint);
+
+          dummy.position.set(support.x, support.y + support.height * 0.48, support.z);
+          dummy.rotation.set(0, support.rot, 0);
+          dummy.scale.set(1, 1, 1);
+          dummy.updateMatrix();
+          supportCaps.setMatrixAt(i, dummy.matrix);
+        }
+        supports.instanceMatrix.needsUpdate = true;
+        supportCaps.instanceMatrix.needsUpdate = true;
+        if (supports.instanceColor) supports.instanceColor.needsUpdate = true;
+        supports.castShadow = true;
+        supports.receiveShadow = true;
+        supportCaps.castShadow = true;
+        supportCaps.receiveShadow = true;
+        terrainRoot.add(supports, supportCaps);
+      }
+
+      if (cliffFragments.length) {      if (cliffFragments.length) {
         const fragments = new THREE.InstancedMesh(
           new THREE.DodecahedronGeometry(0.22, 0),
           shared.cliffFacet,
