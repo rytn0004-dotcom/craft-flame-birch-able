@@ -55,7 +55,6 @@ import {
   seedBoard,
   setTileRngSeed,
   shouldOfferTiles,
-  suggestPlacement,
   TEMPLATE_BY_ID,
   TILE,
   TILE_COLS,
@@ -1302,6 +1301,33 @@ export function FoxTD() {
   const [pickRot, setPickRot] = useState<Rot>(0);
   const pickRotRef = useRef<Rot>(0);
   const mapModeRef = useRef<"expand" | "layout">("expand");
+  // 地塊預覽只在地圖或模板變更時重算，避免繪圖循環與滑鼠移動反覆掃描全部接口。
+  const tilePlacementPreviewRef = useRef<{
+    board: TileBoard;
+    templateId: string;
+    valid: ReturnType<typeof validPlacements>;
+    bySlot: Map<string, Rot[]>;
+    slotKeys: Set<string>;
+    frontierKeys: Set<string>;
+  } | null>(null);
+  const getTilePlacementPreview = (board: TileBoard, templateId: string) => {
+    const cached = tilePlacementPreviewRef.current;
+    if (cached && cached.board === board && cached.templateId === templateId) return cached;
+    const valid = validPlacements(board, templateId);
+    const bySlot = new Map<string, Rot[]>();
+    const slotKeys = new Set<string>();
+    for (const placement of valid) {
+      const key = placement.tc + "," + placement.tr;
+      const rotations = bySlot.get(key) ?? [];
+      rotations.push(placement.rot);
+      bySlot.set(key, rotations);
+      slotKeys.add(key);
+    }
+    const frontierKeys = new Set(frontierSlots(board).map((slot) => slot.tc + "," + slot.tr));
+    const next = { board, templateId, valid, bySlot, slotKeys, frontierKeys };
+    tilePlacementPreviewRef.current = next;
+    return next;
+  };
 
 
   useEffect(() => {
@@ -3470,13 +3496,13 @@ export function FoxTD() {
         let rot = pickRotRef.current;
         const tpl = TEMPLATE_BY_ID[tid];
         // 任一旋轉可放的槽（綠底）；避免只顯示當前旋轉導致「接口看起來不能放」
-        const validAll = validPlacements(boardRef.current, tid);
-        const slotKeys = new Set(validAll.map((v) => `${v.tc},${v.tr}`));
+        const preview = getTilePlacementPreview(boardRef.current, tid);
+        const slotKeys = preview.slotKeys;
         for (const key of slotKeys) {
           const [tc, tr] = key.split(",").map(Number);
           const ox = tc * TILE * CELL;
           const oy = tr * TILE * CELL;
-          const matchCur = validAll.some((v) => v.tc === tc && v.tr === tr && v.rot === rot);
+          const matchCur = preview.bySlot.get(key)?.includes(rot) ?? false;
           ctx.fillStyle = matchCur ? "rgba(120, 220, 180, 0.28)" : "rgba(120, 200, 255, 0.16)";
           ctx.fillRect(ox, oy, TILE * CELL, TILE * CELL);
           ctx.strokeStyle = matchCur ? "rgba(160, 255, 210, 0.95)" : "rgba(140, 210, 255, 0.75)";
@@ -3488,18 +3514,16 @@ export function FoxTD() {
         const gy = Math.floor(s.pointer.y / CELL);
         const hovTc = Math.floor(gx / TILE);
         const hovTr = Math.floor(gy / TILE);
-        const fronts = frontierSlots(boardRef.current);
-        const near = fronts.some((f) => f.tc === hovTc && f.tr === hovTr) || slotKeys.has(`${hovTc},${hovTr}`);
+        const hovKey = hovTc + "," + hovTr;
+        const near = preview.frontierKeys.has(hovKey) || slotKeys.has(hovKey);
         if (tpl && near && hovTc >= 0 && hovTr >= 0 && hovTc < TILE_COLS && hovTr < TILE_ROWS) {
           // 優先當前旋轉，否則該槽任一可放旋轉
+          const slotChoices = preview.bySlot.get(hovKey) ?? [];
           let useRot: Rot = rot;
-          let canHere = validAll.some((v) => v.tc === hovTc && v.tr === hovTr && v.rot === rot);
-          if (!canHere) {
-            const alt = validAll.find((v) => v.tc === hovTc && v.tr === hovTr);
-            if (alt) {
-              useRot = alt.rot;
-              canHere = true;
-            }
+          let canHere = slotChoices.includes(rot);
+          if (!canHere && slotChoices.length) {
+            useRot = slotChoices[0];
+            canHere = true;
           }
           const rt = rotatedTemplate(tpl, useRot);
           const ox = hovTc * TILE * CELL;
@@ -4253,7 +4277,8 @@ export function FoxTD() {
         step(h);
         left -= h;
       }
-      draw();
+      // 3D 是主畫面；WebGL 啟動後不再讓隱藏的 2D 畫布每幀完整重繪。
+      if (!terrain3DApiRef.current) draw();
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
@@ -4353,16 +4378,16 @@ export function FoxTD() {
         const gy = Math.floor(world.y / CELL);
         const tc = Math.floor(gx / TILE);
         const tr = Math.floor(gy / TILE);
-        const all = validPlacements(boardRef.current, tid);
-        const hit = all.find((v) => v.tc === tc && v.tr === tr && v.rot === pickRotRef.current)
-          || all.find((v) => v.tc === tc && v.tr === tr);
-        if (hit) {
-          if (hit.rot !== pickRotRef.current) {
-            pickRotRef.current = hit.rot;
-            setPickRot(hit.rot);
+        const preview = getTilePlacementPreview(boardRef.current, tid);
+        const slotChoices = preview.bySlot.get(tc + "," + tr) ?? [];
+        const hitRot = slotChoices.includes(pickRotRef.current) ? pickRotRef.current : slotChoices[0];
+        if (hitRot !== undefined) {
+          if (hitRot !== pickRotRef.current) {
+            pickRotRef.current = hitRot;
+            setPickRot(hitRot);
           }
-          setHover(`接口 (${tc},${tr}) 可接「${TEMPLATE_BY_ID[tid]?.name || tid}」· 點擊放置`);
-        } else if (frontierSlots(boardRef.current).some((f) => f.tc === tc && f.tr === tr)) {
+          setHover("接口 (" + tc + "," + tr + ") 可接「" + (TEMPLATE_BY_ID[tid]?.name || tid) + "」· 點擊放置");
+        } else if (preview.frontierKeys.has(tc + "," + tr)) {
           setHover(`接口 (${tc},${tr}) 與目前圖塊／旋轉無法銜接 · 按旋轉或換一塊`);
         }
       }
@@ -4679,11 +4704,12 @@ export function FoxTD() {
   function selectTileTemplate(id: string) {
     setPickTemplate(id);
     pickTemplateRef.current = id;
-    const sug = suggestPlacement(boardRef.current, id);
+    const preview = getTilePlacementPreview(boardRef.current, id);
+    const sug = preview.valid[0] ?? null;
     const rot = (sug?.rot ?? 0) as Rot;
     setPickRot(rot);
     pickRotRef.current = rot;
-    const n = validPlacements(boardRef.current, id).length;
+    const n = preview.valid.length;
     setHover(
       n
         ? `已選「${TEMPLATE_BY_ID[id]?.name || id}」· 可放 ${n} 處` +
@@ -6144,7 +6170,7 @@ Alt＋左鍵環視 · 右鍵平移 · 滾輪縮放 · [H]對準聖地 · [空格
                     </p>
                     <div className="mb-3 flex flex-wrap justify-center gap-3">
                       {tileOffer.map((id, index) => {
-                        const nPlace = validPlacements(boardRef.current, id).length;
+                        const nPlace = getTilePlacementPreview(boardRef.current, id).valid.length;
                         const tpl = TEMPLATE_BY_ID[id];
                         const rt = tpl ? rotatedTemplate(tpl, 0) : null;
                         return (
