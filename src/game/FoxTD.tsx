@@ -4337,7 +4337,6 @@ export function FoxTD() {
     const updatePlacementDebug = (
       world: { x: number; y: number },
       preciseHit: boolean | null,
-      ev: PointerEvent,
       hitCell?: { gx: number; gy: number; height: number } | null,
     ) => {
       const gx = Math.floor(world.x / CELL);
@@ -4379,15 +4378,11 @@ export function FoxTD() {
         : preciseHit
           ? "已命中 3D 地表網格"
           : "未命中 3D 網格，使用投影備援";
-      const stageRect = wrapRef.current?.getBoundingClientRect();
-      const relativeX = stageRect ? Math.round(ev.clientX - stageRect.left) : Math.round(ev.clientX);
-      const relativeY = stageRect ? Math.round(ev.clientY - stageRect.top) : Math.round(ev.clientY);
-      const pointer = stageRect
-        ? `畫面 ${Math.round(ev.clientX)},${Math.round(ev.clientY)} · 戰場 ${relativeX},${relativeY} / ${Math.round(stageRect.width)}×${Math.round(stageRect.height)}`
-        : `畫面 ${Math.round(ev.clientX)},${Math.round(ev.clientY)} · 舞台未取得`;
+      // 診斷只顯示命中方式，不追蹤像素座標；只有跨格或判定真正改變時才觸發 React 更新。
+      // 避免游標每移動 8px 就重繪整個遊戲介面，造成格子判定時畫面閃爍。
+      const pointer = preciseHit ? "3D 地表格網命中" : "平面座標備援";
       const api = apiReady ? "3D API 已連線" : "3D API 未連線";
-      // 像素座標以 8px 為單位節流；跨格時仍立即更新診斷。
-      const debugKey = [gx, gy, height, board, ray, tower, verdict, Math.floor(relativeX / 8), Math.floor(relativeY / 8), api].join("|");
+      const debugKey = [gx, gy, height, board, ray, tower, verdict, api].join("|");
       if (debugKey === lastPlacementDebugKey) return;
       lastPlacementDebugKey = debugKey;
       setPlacementDebug({ gx, gy, height, board, ray, tower, verdict, pointer, api });
@@ -4406,7 +4401,7 @@ export function FoxTD() {
         : null;
       const world = preciseWorldHit ?? local(ev);
       sim.current.pointer = { ...world, down: sim.current.pointer.down, inside: true };
-      updatePlacementDebug(world, preciseCellHit !== null, ev, preciseCellHit);
+      updatePlacementDebug(world, preciseCellHit !== null, preciseCellHit);
       // 擴張預覽：游標移到最新接口時提示可否放置
       if (tileOfferRef.current && pickTemplateRef.current && phaseRef.current === "play") {
         const tid = pickTemplateRef.current;
@@ -4444,7 +4439,7 @@ export function FoxTD() {
         ? { x: (preciseCellHit.gx + 0.5) * CELL, y: (preciseCellHit.gy + 0.5) * CELL }
         : null;
       const p = preciseWorldHit ?? local(ev);
-      updatePlacementDebug(p, preciseCellHit !== null, ev, preciseCellHit);
+      updatePlacementDebug(p, preciseCellHit !== null, preciseCellHit);
       sim.current.pointer = { ...p, down: true, inside: true };
       if (phaseRef.current !== "play") {
         if (!workshopRef.current) return;
