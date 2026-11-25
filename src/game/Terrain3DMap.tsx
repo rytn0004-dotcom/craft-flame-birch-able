@@ -94,7 +94,6 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     let lastBuildAt = 0;
     let lastTerrainKey = "";
     let lastBuildingKey = "";
-    let lastTime = 0;
 
     const scene = new THREE.Scene();
     scene.background = null;
@@ -242,7 +241,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     sun.shadow.normalBias = 0.03;
     sun.shadow.camera.near = 1;
     sun.shadow.camera.far = 230;
-    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.mapSize.set(1024, 1024);
     sun.shadow.camera.left = -112;
     sun.shadow.camera.right = 112;
     sun.shadow.camera.top = 112;
@@ -352,7 +351,10 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         + Math.cos(tau * (v * 11.1 - u * 6.2)) * 0.12;
       const fine = Math.sin(tau * (u * 23 + v * 19)) * 0.06
         + Math.cos(tau * (v * 29 - u * 17)) * 0.05;
-      const density = THREE.MathUtils.clamp(0.76 + broad * 0.16 + medium * 0.12 + fine, 0.48, 0.96);
+      const centerDistance = Math.hypot((u - 0.5) * COLS, (v - 0.5) * ROWS);
+      // 地圖正中央留出聖地淨界核心，往外才逐漸進入黑霧。
+      const coreClearance = THREE.MathUtils.smoothstep(centerDistance, 9, 17);
+      const density = THREE.MathUtils.clamp(0.76 + broad * 0.16 + medium * 0.12 + fine, 0.48, 0.96) * coreClearance;
       const index = (y * blackMistFieldSize + x) * 4;
       blackMistFieldPixels[index] = 255;
       blackMistFieldPixels[index + 1] = 255;
@@ -1750,10 +1752,9 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
           });
         }
       }
-      // 黑霧只沿擴張地圖的外露岸線生成，避開怪物道路與主要建築區；
-      // 地塊每次拼接後重新計算邊界，形成「海底升陸、外海黑霧退至新岸線」的效果。
+      // 全地圖侵染已由單一霧幕負責；岸線只保留少量局部漂霧，避免逐格建立大量動畫實例。
       if (data.mapMode === "expand" && coastEdges.length) {
-        const fogEdges = coastEdges.filter((edge) => edge.seed > 0.12).slice(0, 320);
+        const fogEdges = coastEdges.filter((edge) => edge.seed > 0.12).slice(0, 96);
         if (fogEdges.length) {
           blackMistMesh = new THREE.InstancedMesh(
             new THREE.PlaneGeometry(1, 1),
@@ -2001,7 +2002,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
 
         // 少量潮汐微光環沿岸緩慢擴散；集中在單一 InstancedMesh，不逐個建立動畫物件。        // 少量潮汐微光環沿岸緩慢擴散；集中在單一 InstancedMesh，不逐個建立動畫物件。
         const rippleCandidates = coastEdges.filter((edge) => edge.seed > 0.72);
-        const rippleCount = Math.min(18, rippleCandidates.length);
+        const rippleCount = Math.min(12, rippleCandidates.length);
         if (rippleCount > 0) {
           waterRippleMesh = new THREE.InstancedMesh(
             new THREE.TorusGeometry(0.2, 0.009, 5, 28),
@@ -3955,9 +3956,10 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     };
 
     const updateActors = (data: Terrain3DSnapshot, time: number) => {
-      const towers = data.towers.filter((tower) => !tower.sanctuary && !tower.stake);
-      for (let i = 0; i < towers.length; i++) {
-        const tower = towers[i];
+      let spriteIndex = 0;
+      for (const tower of data.towers) {
+        if (tower.sanctuary || tower.stake) continue;
+        const i = spriteIndex++;
         const sprite = ensureSprite(towerSprites, i, actorRoot);
         updateSpriteTexture(sprite, tower.image);
         const h = data.heights[tower.gy * COLS + tower.gx] ?? 0;
@@ -3965,7 +3967,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         sprite.scale.set(1.42, 1.58, 1);
         sprite.renderOrder = 4;
       }
-      for (let i = towers.length; i < towerSprites.length; i++) towerSprites[i].visible = false;
+      for (let i = spriteIndex; i < towerSprites.length; i++) towerSprites[i].visible = false;
 
       for (let i = 0; i < data.enemies.length; i++) {
         const enemy = data.enemies[i];
@@ -4258,7 +4260,8 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
 
     try {
       renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+      // 避免高 DPI 螢幕把填色像素數放大太多；仍保留清晰度。
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.35));
       renderer.setSize(Math.max(1, host.clientWidth), Math.max(1, host.clientHeight), false);
       renderer.shadowMap.enabled = true;
       renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -4334,10 +4337,22 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     renderer.domElement.addEventListener("contextmenu", onContextMenu);
 
     let lastHqFireLevel: number | null = null;
+    let lastFrameAt = 0;
+    let lastSnapshotAt = -Infinity;
+    let lastAmbientUpdateAt = -Infinity;
+    let cachedSnapshot: Terrain3DSnapshot | null = null;
     const render = (time: number) => {
       if (disposed) return;
       animationFrame = requestAnimationFrame(render);
-      const data = snapshotRef.current();
+      // 渲染上限 45 FPS；遊戲快照 30 FPS，減少大量物件陣列在每個螢幕刷新週期重建。
+      if (time - lastFrameAt < 1000 / 45) return;
+      const dt = lastFrameAt ? Math.min(0.05, (time - lastFrameAt) / 1000) : 0;
+      lastFrameAt = time;
+      if (!cachedSnapshot || time - lastSnapshotAt >= 1000 / 30) {
+        cachedSnapshot = snapshotRef.current();
+        lastSnapshotAt = time;
+      }
+      const data = cachedSnapshot;
 
       if (time - lastBuildAt > 700) {
         lastBuildAt = time;
@@ -4369,15 +4384,17 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
 
       updateActors(data, time);
       updateEffects(data);
-      updateWaterRipples(time);
-      updateLandmarkLights(time);
-      updateBlackMist(data, time);
+      // 水面、燈光與黑霧變化很慢，限制為約 12 FPS 更新；3D 畫面本身仍以 45 FPS 平順顯示。
+      if (time - lastAmbientUpdateAt >= 1000 / 12) {
+        lastAmbientUpdateAt = time;
+        updateWaterRipples(time);
+        updateLandmarkLights(time);
+        updateBlackMist(data, time);
+      }
       // 鏡頭拉遠時霧層更柔和、遠景更自然；拉近時保留地表紋理與建築邊緣。
       const viewDistance = camera.position.distanceTo(controls.target);
       atmosphericFog.near = THREE.MathUtils.clamp(viewDistance * 1.28, 58, 108);
       atmosphericFog.far = THREE.MathUtils.clamp(viewDistance * 3.45, 205, 365);
-      const dt = lastTime ? Math.min(0.05, (time - lastTime) / 1000) : 0;
-      lastTime = time;
       for (const ring of rings) ring.rotation.y += dt * 0.42;
       for (let i = installationAnimations.length - 1; i >= 0; i--) {
         const animation = installationAnimations[i];
