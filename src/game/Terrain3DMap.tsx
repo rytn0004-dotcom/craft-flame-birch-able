@@ -534,6 +534,11 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       ramp: new THREE.MeshStandardMaterial({ color: "#aeb49c", roughness: 0.95, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.02 }),
     };
 
+    // 所有地形區塊共用 4 種高度幾何，避免切塊後重複建立數百份相同頂點資料。
+    const terrainGeometries = [0, 1, 2, 3].map(
+      (height) => new THREE.BoxGeometry(0.98, groundTop(height), 0.98),
+    );
+
     // 透明命中盒只供 Raycaster 使用，完全不參與顯示與深度寫入；保證 HQ 屋頂／城牆容易選取。
     const buildingHitMaterial = new THREE.MeshBasicMaterial({
       transparent: true,
@@ -1466,10 +1471,11 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
           if (!list.length) continue;
           const top = groundTop(h);
           const mesh = new THREE.InstancedMesh(
-            new THREE.BoxGeometry(0.98, top, 0.98),
+            terrainGeometries[h],
             shared.terrain[h],
             list.length,
           );
+          mesh.userData.sharedGeometry = true;
           const matrix = new THREE.Matrix4();
           const tint = new THREE.Color();
           for (let i = 0; i < list.length; i++) {
@@ -4650,6 +4656,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       controls.dispose();
       apiRef.current = null;
       clearGroup(terrainRoot);
+      for (const geometry of terrainGeometries) geometry.dispose();
       for (const effect of installationRings) effect.material.dispose();
       for (const effect of buildFlashEffects) effect.material.dispose();
       clearGroup(buildingRoot);
