@@ -4607,7 +4607,8 @@ export function FoxTD() {
 
     const inputSurface = wrapRef.current ?? canvas;
     inputSurface.addEventListener("pointermove", onMove);
-    inputSurface.addEventListener("pointerdown", onDown);
+    // 在捕捉階段先取得點擊，避免 OrbitControls 或 3D 子元件阻止事件冒泡而讓建塔邏輯收不到。
+    inputSurface.addEventListener("pointerdown", onDown, true);
     inputSurface.addEventListener("pointerup", onUp);
     inputSurface.addEventListener("pointercancel", onUp);
     inputSurface.addEventListener("pointerleave", onLeave);
@@ -4615,7 +4616,7 @@ export function FoxTD() {
     return () => {
       cancelAnimationFrame(raf);
       inputSurface.removeEventListener("pointermove", onMove);
-      inputSurface.removeEventListener("pointerdown", onDown);
+      inputSurface.removeEventListener("pointerdown", onDown, true);
       inputSurface.removeEventListener("pointerup", onUp);
       inputSurface.removeEventListener("pointercancel", onUp);
       inputSurface.removeEventListener("pointerleave", onLeave);
