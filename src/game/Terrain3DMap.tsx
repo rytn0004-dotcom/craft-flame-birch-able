@@ -1529,32 +1529,34 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
 
         // 沙沿內側增加潮濕暗沙帶，再用小卵石將草地／岩面與海水柔和銜接。
         const wetEdges = coastEdges.filter((edge) => edge.seed > 0.16);
-        const wetBand = new THREE.InstancedMesh(
-          new THREE.BoxGeometry(0.78, 0.012, 0.075),
-          shared.tidalSand,
-          wetEdges.length,
-        );
-        const wetDummy = new THREE.Object3D();
-        const wetTint = new THREE.Color();
-        for (let i = 0; i < wetEdges.length; i++) {
-          const edge = wetEdges[i];
-          wetDummy.position.set(
-            edge.x + edge.dx * 0.255,
-            groundTop(edge.h) + 0.024,
-            edge.z + edge.dz * 0.255,
+        if (wetEdges.length) {
+          const wetBand = new THREE.InstancedMesh(
+            new THREE.BoxGeometry(0.78, 0.012, 0.075),
+            shared.tidalSand,
+            wetEdges.length,
           );
-          wetDummy.rotation.y = edge.rot;
-          wetDummy.scale.set(0.68 + edge.seed * 0.28, 1, 0.82);
-          wetDummy.updateMatrix();
-          wetBand.setMatrixAt(i, wetDummy.matrix);
-          wetTint.set(edge.seed > 0.68 ? "#a4b3a0" : "#718f89");
-          wetBand.setColorAt(i, wetTint);
+          const wetDummy = new THREE.Object3D();
+          const wetTint = new THREE.Color();
+          for (let i = 0; i < wetEdges.length; i++) {
+            const edge = wetEdges[i];
+            wetDummy.position.set(
+              edge.x + edge.dx * 0.255,
+              groundTop(edge.h) + 0.024,
+              edge.z + edge.dz * 0.255,
+            );
+            wetDummy.rotation.y = edge.rot;
+            wetDummy.scale.set(0.68 + edge.seed * 0.28, 1, 0.82);
+            wetDummy.updateMatrix();
+            wetBand.setMatrixAt(i, wetDummy.matrix);
+            wetTint.set(edge.seed > 0.68 ? "#a4b3a0" : "#718f89");
+            wetBand.setColorAt(i, wetTint);
+          }
+          wetBand.instanceMatrix.needsUpdate = true;
+          if (wetBand.instanceColor) wetBand.instanceColor.needsUpdate = true;
+          wetBand.castShadow = false;
+          wetBand.receiveShadow = false;
+          terrainRoot.add(wetBand);
         }
-        wetBand.instanceMatrix.needsUpdate = true;
-        if (wetBand.instanceColor) wetBand.instanceColor.needsUpdate = true;
-        wetBand.castShadow = false;
-        wetBand.receiveShadow = false;
-        terrainRoot.add(wetBand);
 
         const pebbleEdges = coastEdges.filter((edge) => edge.seed > 0.68).slice(0, 260);
         if (pebbleEdges.length) {
