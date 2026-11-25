@@ -4429,6 +4429,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
           <div className="pointer-events-none absolute bottom-3 left-3 z-10 rounded-lg border border-[#8ec8ee33] bg-[#061525cc] px-3 py-2 text-[11px] text-[#9ec4de]">
             建塔預覽：綠＝平地可建 · 金＝高地可建 · 紅＝不可建
             <span className="block mt-1 text-[#d8c89e]">0～3 級皆可建塔｜1／2／3 級分別有單／雙／三層岩沿</span>
+            <span className="block mt-1 text-[#83d9d5]">擴張時黑霧侵蝕外緣岸線 · 聖地充能可增強淨界、削弱深淵迷霧</span>
           </div>
           <button
             type="button"
