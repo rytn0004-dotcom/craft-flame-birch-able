@@ -331,6 +331,10 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       terrainMoss: new THREE.MeshStandardMaterial({ color: "#66856a", roughness: 0.99, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.01 }),
       terrainStrata: new THREE.MeshStandardMaterial({ color: "#c0b99d", roughness: 0.96, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.018 }),
       terrainInlay: new THREE.MeshStandardMaterial({ color: "#e1d0a6", roughness: 0.82, metalness: 0.08 }),
+      biomeSeam: new THREE.MeshStandardMaterial({ color: "#c7b99a", roughness: 0.96, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.012 }),
+      roadMedallion: new THREE.MeshPhysicalMaterial({ color: "#b99a68", metalness: 0.58, roughness: 0.3, clearcoat: 0.48, clearcoatRoughness: 0.2, envMapIntensity: 1.05 }),
+      tidalSand: new THREE.MeshPhysicalMaterial({ color: "#819d94", metalness: 0.06, roughness: 0.42, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.009, clearcoat: 0.34, clearcoatRoughness: 0.3 }),
+      beachPebble: new THREE.MeshStandardMaterial({ color: "#a9a58e", roughness: 0.94, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.018 }),
       roadPaver: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.97, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.016 }),
       roadEdge: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.95, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.021 }),
       foundationStone: new THREE.MeshStandardMaterial({ color: "#b5b29f", roughness: 0.96, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.021 }),
@@ -550,6 +554,40 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       addBox(root, 0.78, 0.68, 0.08, 0, 0.98, 2.49, shared.blue);
       addBox(root, 0.52, 0.47, 0.035, 0, 0.98, 2.55, shared.gold);
       addBox(root, 0.33, 0.37, 0.035, 0, 0.98, 2.58, shared.glass);
+
+      // 本陣入口增加半圓石拱、內側金屬收邊與中央徽記，入口仍保持原有開口寬度。
+      const entryArch = new THREE.Mesh(
+        new THREE.TorusGeometry(0.58, 0.075, 8, 32, Math.PI),
+        shared.ruinStone,
+      );
+      entryArch.position.set(0, 1.31, 2.64);
+      entryArch.castShadow = true;
+      entryArch.receiveShadow = true;
+      root.add(entryArch);
+      const entryArchTrim = new THREE.Mesh(
+        new THREE.TorusGeometry(0.49, 0.024, 6, 32, Math.PI),
+        shared.brightGold,
+      );
+      entryArchTrim.position.set(0, 1.31, 2.705);
+      root.add(entryArchTrim);
+      for (const side of [-1, 1]) {
+        addBox(root, 0.16, 0.78, 0.18, side * 0.56, 1.12, 2.62, shared.ivory);
+        addBox(root, 0.25, 0.09, 0.22, side * 0.56, 1.54, 2.62, shared.bridgeTrim);
+        addBox(root, 0.21, 0.07, 0.21, side * 0.56, 0.69, 2.62, shared.foundationGold);
+      }
+      const entryEmblem = new THREE.Mesh(new THREE.OctahedronGeometry(0.13, 0), shared.chargeCrystal);
+      entryEmblem.position.set(0, 1.91, 2.66);
+      entryEmblem.scale.set(1, 1.18, 0.48);
+      entryEmblem.castShadow = false;
+      root.add(entryEmblem);
+      gems.push(entryEmblem);
+
+      // 牆面轉角增加同材質石造扶壁，讓本陣從斜角觀看更有厚重支撐感。
+      for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+        addBox(root, 0.38, 0.74, 0.38, sx * 2.17, 1.12, sz * 2.17, shared.ivory);
+        addBox(root, 0.45, 0.085, 0.45, sx * 2.17, 1.52, sz * 2.17, shared.brightGold);
+        addBox(root, 0.42, 0.07, 0.42, sx * 2.17, 0.72, sz * 2.17, shared.foundationGold);
+      }
 
       // 牆面金屬收邊、窗框、立柱與石階，避免近距離環視時只看到大塊方形牆體。
       for (const sign of [-1, 1]) {
@@ -1192,6 +1230,11 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         terrainRegionCache.set(key, region);
         return region;
       };
+      const protectedBuildings = data.towers.map((tower) => ({
+        x: tower.x / CELL,
+        z: tower.y / CELL,
+        radius: tower.sanctuary ? 4.4 : 1.18,
+      }));
 
       // 每格岩面依區域加入微色偏：海岸偏沙金、苔地偏冷綠、石灰岩偏暖白、遺跡偏灰青。
       const regionTint: Record<string, [number, number, number]> = {
@@ -1231,6 +1274,72 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         mesh.receiveShadow = true;
         mesh.frustumCulled = false;
         terrainRoot.add(mesh);
+      }
+
+      // 生態區交界以少量貼地石縫與植被色階銜接，避免地貌像硬切換色塊。
+      const biomeSeamCells: { x: number; z: number; y: number; rot: number; tint: string; scale: number }[] = [];
+      const seamDirections = [
+        { dc: 1, dr: 0, rot: Math.PI / 2 },
+        { dc: 0, dr: 1, rot: 0 },
+      ];
+      const seamTint = (a: string, b: string) => {
+        const regions = a + "|" + b;
+        if (regions.includes("coast")) return "#cdbb93";
+        if (regions.includes("moss")) return "#8ba17c";
+        if (regions.includes("limestone")) return "#c8c1a8";
+        if (regions.includes("ancient")) return "#9da99b";
+        return "#9aab9b";
+      };
+      for (const cell of tileCells.values()) {
+        if (biomeSeamCells.length >= 520) break;
+        const gx = Math.floor(cell.x);
+        const gy = Math.floor(cell.z);
+        const region = terrainRegion(cell);
+        if (region === "road") continue;
+        for (const direction of seamDirections) {
+          const neighbor = tileCells.get((gx + direction.dc) + "," + (gy + direction.dr));
+          if (!neighbor || neighbor.h !== cell.h) continue;
+          const nextRegion = terrainRegion(neighbor);
+          if (nextRegion === region || nextRegion === "road") continue;
+          const x = cell.x + direction.dc * 0.5;
+          const z = cell.z + direction.dr * 0.5;
+          if (protectedBuildings.some((building) => Math.hypot(x - building.x, z - building.z) < building.radius + 0.38)) continue;
+          const seed = Math.abs(Math.sin(cell.x * 81.7 + cell.z * 47.3 + direction.dc * 19.1) * 29171.7) % 1;
+          if (seed < 0.52) continue;
+          biomeSeamCells.push({
+            x: x + (seed - 0.5) * 0.08,
+            z: z + (0.5 - seed) * 0.08,
+            y: groundTop(cell.h) + 0.012,
+            rot: direction.rot,
+            tint: seamTint(region, nextRegion),
+            scale: 0.52 + seed * 0.43,
+          });
+          if (biomeSeamCells.length >= 520) break;
+        }
+      }
+      if (biomeSeamCells.length) {
+        const seams = new THREE.InstancedMesh(
+          new THREE.BoxGeometry(0.72, 0.012, 0.034),
+          shared.biomeSeam,
+          biomeSeamCells.length,
+        );
+        const dummy = new THREE.Object3D();
+        const tint = new THREE.Color();
+        for (let i = 0; i < biomeSeamCells.length; i++) {
+          const seam = biomeSeamCells[i];
+          dummy.position.set(seam.x, seam.y, seam.z);
+          dummy.rotation.set(0, seam.rot, 0);
+          dummy.scale.set(seam.scale, 1, 0.78 + seam.scale * 0.18);
+          dummy.updateMatrix();
+          seams.setMatrixAt(i, dummy.matrix);
+          tint.set(seam.tint);
+          seams.setColorAt(i, tint);
+        }
+        seams.instanceMatrix.needsUpdate = true;
+        if (seams.instanceColor) seams.instanceColor.needsUpdate = true;
+        seams.castShadow = false;
+        seams.receiveShadow = false;
+        terrainRoot.add(seams);
       }
 
       // 擴張地圖的道路格保持原有高度與碰撞資料，只在表面加石板鋪面。
@@ -1287,6 +1396,47 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
               });
             }
           }
+          const roadJunctions = roadCells.filter((cell) => {
+            const gx = Math.floor(cell.x);
+            const gy = Math.floor(cell.z);
+            const connected = [
+              tileCells.has(gx + "," + (gy - 1)) && !data.blocked.has(gx + "," + (gy - 1)),
+              tileCells.has((gx + 1) + "," + gy) && !data.blocked.has((gx + 1) + "," + gy),
+              tileCells.has(gx + "," + (gy + 1)) && !data.blocked.has(gx + "," + (gy + 1)),
+              tileCells.has((gx - 1) + "," + gy) && !data.blocked.has((gx - 1) + "," + gy),
+            ].filter(Boolean).length;
+            return connected >= 3;
+          }).slice(0, 120);
+          if (roadJunctions.length) {
+            const medallionRings = new THREE.InstancedMesh(
+              new THREE.TorusGeometry(0.18, 0.016, 5, 24),
+              shared.roadMedallion,
+              roadJunctions.length,
+            );
+            const medallionCenters = new THREE.InstancedMesh(
+              new THREE.CircleGeometry(0.12, 16),
+              shared.terrainInlay,
+              roadJunctions.length,
+            );
+            const marker = new THREE.Object3D();
+            for (let i = 0; i < roadJunctions.length; i++) {
+              const cell = roadJunctions[i];
+              marker.position.set(cell.x, groundTop(0) + 0.036, cell.z);
+              marker.rotation.set(Math.PI / 2, 0, 0);
+              marker.updateMatrix();
+              medallionRings.setMatrixAt(i, marker.matrix);
+              marker.position.y = groundTop(0) + 0.029;
+              marker.scale.setScalar(0.78);
+              marker.updateMatrix();
+              medallionCenters.setMatrixAt(i, marker.matrix);
+            }
+            medallionRings.instanceMatrix.needsUpdate = true;
+            medallionCenters.instanceMatrix.needsUpdate = true;
+            medallionRings.castShadow = false;
+            medallionCenters.castShadow = false;
+            terrainRoot.add(medallionRings, medallionCenters);
+          }
+
           if (roadEdges.length) {
             const curbs = new THREE.InstancedMesh(
               new THREE.BoxGeometry(0.9, 0.052, 0.075),
@@ -1337,11 +1487,6 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         { dc: 0, dr: 1, dx: 0, dz: 1, rot: 0 },
         { dc: -1, dr: 0, dx: -1, dz: 0, rot: Math.PI / 2 },
       ];
-      const protectedBuildings = data.towers.map((tower) => ({
-        x: tower.x / CELL,
-        z: tower.y / CELL,
-        radius: tower.sanctuary ? 4.4 : 1.18,
-      }));
       const coastEdges: { x: number; z: number; h: number; dx: number; dz: number; rot: number; seed: number }[] = [];
       for (const cell of tileCells.values()) {
         const gx = Math.floor(cell.x);
@@ -1381,6 +1526,66 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         sand.instanceMatrix.needsUpdate = true;
         sand.receiveShadow = true;
         terrainRoot.add(sand);
+
+        // 沙沿內側增加潮濕暗沙帶，再用小卵石將草地／岩面與海水柔和銜接。
+        const wetEdges = coastEdges.filter((edge) => edge.seed > 0.16);
+        const wetBand = new THREE.InstancedMesh(
+          new THREE.BoxGeometry(0.78, 0.012, 0.075),
+          shared.tidalSand,
+          wetEdges.length,
+        );
+        const wetDummy = new THREE.Object3D();
+        const wetTint = new THREE.Color();
+        for (let i = 0; i < wetEdges.length; i++) {
+          const edge = wetEdges[i];
+          wetDummy.position.set(
+            edge.x + edge.dx * 0.255,
+            groundTop(edge.h) + 0.024,
+            edge.z + edge.dz * 0.255,
+          );
+          wetDummy.rotation.y = edge.rot;
+          wetDummy.scale.set(0.68 + edge.seed * 0.28, 1, 0.82);
+          wetDummy.updateMatrix();
+          wetBand.setMatrixAt(i, wetDummy.matrix);
+          wetTint.set(edge.seed > 0.68 ? "#a4b3a0" : "#718f89");
+          wetBand.setColorAt(i, wetTint);
+        }
+        wetBand.instanceMatrix.needsUpdate = true;
+        if (wetBand.instanceColor) wetBand.instanceColor.needsUpdate = true;
+        wetBand.castShadow = false;
+        wetBand.receiveShadow = false;
+        terrainRoot.add(wetBand);
+
+        const pebbleEdges = coastEdges.filter((edge) => edge.seed > 0.68).slice(0, 260);
+        if (pebbleEdges.length) {
+          const pebbles = new THREE.InstancedMesh(
+            new THREE.DodecahedronGeometry(0.052, 0),
+            shared.beachPebble,
+            pebbleEdges.length,
+          );
+          const pebbleDummy = new THREE.Object3D();
+          const pebbleTint = new THREE.Color();
+          for (let i = 0; i < pebbleEdges.length; i++) {
+            const edge = pebbleEdges[i];
+            const along = (edge.seed - 0.5) * 0.5;
+            pebbleDummy.position.set(
+              edge.x + edge.dx * (0.64 + edge.seed * 0.06) + (edge.dz !== 0 ? along : 0),
+              -0.19,
+              edge.z + edge.dz * (0.64 + edge.seed * 0.06) + (edge.dx !== 0 ? along : 0),
+            );
+            pebbleDummy.rotation.set(edge.seed * 0.4, edge.seed * Math.PI * 2, edge.seed * 0.3);
+            pebbleDummy.scale.set(0.8 + edge.seed * 0.6, 0.62 + edge.seed * 0.45, 0.75 + edge.seed * 0.55);
+            pebbleDummy.updateMatrix();
+            pebbles.setMatrixAt(i, pebbleDummy.matrix);
+            pebbleTint.set(edge.seed > 0.85 ? "#c5b89d" : "#738b83");
+            pebbles.setColorAt(i, pebbleTint);
+          }
+          pebbles.instanceMatrix.needsUpdate = true;
+          if (pebbles.instanceColor) pebbles.instanceColor.needsUpdate = true;
+          pebbles.castShadow = false;
+          pebbles.receiveShadow = false;
+          terrainRoot.add(pebbles);
+        }
 
         // 礁岩與淺海珊瑚沿岸稀疏分布，只是遠景環境物件，不加入建造格或路徑資料。
         const reefEdges = coastEdges.filter((edge) => edge.seed > 0.54);
@@ -3366,6 +3571,10 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       skyGeometry.dispose();
       skyMaterial.dispose();
       shared.waterRipple.dispose();
+      shared.biomeSeam.dispose();
+      shared.roadMedallion.dispose();
+      shared.tidalSand.dispose();
+      shared.beachPebble.dispose();
       shared.contactShadow.dispose();
       surfaceReliefMap.dispose();
       surfaceRoughnessMap.dispose();
