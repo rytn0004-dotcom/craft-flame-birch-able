@@ -760,9 +760,23 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
     const installOceanSurface = (material: THREE.MeshPhysicalMaterial, cacheKey: string) => {
       material.onBeforeCompile = (shader) => {
         shader.uniforms.uOceanTime = oceanSurfaceUniforms.time;
+        // 細分海面頂點沿法線做低幅度長波形變，真正改變剪影而非只改變貼圖顏色。
+        shader.vertexShader = shader.vertexShader.replace(
+          "#include <common>",
+          "#include <common>\nuniform float uOceanTime;\nvarying vec2 vOceanLocal;",
+        );
+        shader.vertexShader = shader.vertexShader.replace(
+          "#include <begin_vertex>",
+          `#include <begin_vertex>
+          vOceanLocal = position.xy;
+          float swellA = sin(position.x * 0.055 + position.y * 0.039 + uOceanTime * 0.34);
+          float swellB = sin(position.y * 0.083 - position.x * 0.026 - uOceanTime * 0.23);
+          float capillary = sin((position.x + position.y) * 0.12 + uOceanTime * 0.52);
+          transformed.z += swellA * 0.024 + swellB * 0.012 + capillary * 0.003;`,
+        );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <common>",
-          "#include <common>\nuniform float uOceanTime;",
+          "#include <common>\nuniform float uOceanTime;\nvarying vec2 vOceanLocal;",
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <color_fragment>",
@@ -2348,15 +2362,19 @@ uniform float uFoliageTime;`,
       const deepSeaDepth = expandMode ? ROWS + 240 : mapDepth + 72;
       const shelfSeaWidth = expandMode ? COLS + 104 : mapWidth + 28;
       const shelfSeaDepth = expandMode ? ROWS + 104 : mapDepth + 28;
+      const deepWaterSegmentsX = Math.min(160, Math.max(24, Math.ceil(deepSeaWidth / 4)));
+      const deepWaterSegmentsY = Math.min(160, Math.max(24, Math.ceil(deepSeaDepth / 4)));
+      const shelfWaterSegmentsX = Math.min(128, Math.max(24, Math.ceil(shelfSeaWidth / 4)));
+      const shelfWaterSegmentsY = Math.min(128, Math.max(24, Math.ceil(shelfSeaDepth / 4)));
       const deepWater = new THREE.Mesh(
-        new THREE.PlaneGeometry(deepSeaWidth, deepSeaDepth),
+        new THREE.PlaneGeometry(deepSeaWidth, deepSeaDepth, deepWaterSegmentsX, deepWaterSegmentsY),
         shared.floor,
       );
       deepWater.rotation.x = -Math.PI / 2;
       deepWater.position.set(seaCenterX, -0.34, seaCenterZ);
       deepWater.receiveShadow = false;
       const shelfWater = new THREE.Mesh(
-        new THREE.PlaneGeometry(shelfSeaWidth, shelfSeaDepth),
+        new THREE.PlaneGeometry(shelfSeaWidth, shelfSeaDepth, shelfWaterSegmentsX, shelfWaterSegmentsY),
         shared.seaShelf,
       );
       shelfWater.rotation.x = -Math.PI / 2;
