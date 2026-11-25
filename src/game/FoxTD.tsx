@@ -4307,8 +4307,15 @@ export function FoxTD() {
       const zoom = cam.zoom || 1;
       return { x: cam.x + screen.x / zoom, y: cam.y + screen.y / zoom };
     };
-    const isGameSurface = (ev: PointerEvent) =>
-      (ev.target as HTMLElement | null)?.closest?.("canvas[data-game3d='true']") != null;
+    const isGameSurface = (ev: PointerEvent) => {
+      const stage = wrapRef.current;
+      if (!stage) return false;
+      const target = ev.target as Element | null;
+      // 不把 HUD 按鈕／面板操作當成地面點擊；舞台內其他覆蓋層仍可安全回傳地面座標。
+      if (target?.closest?.("button, input, select, textarea, a, [role='button']")) return false;
+      const rect = stage.getBoundingClientRect();
+      return ev.clientX >= rect.left && ev.clientX <= rect.right && ev.clientY >= rect.top && ev.clientY <= rect.bottom;
+    };
 
     const onMove = (ev: PointerEvent) => {
       if (!isGameSurface(ev)) {
@@ -4478,7 +4485,7 @@ export function FoxTD() {
       // 沒有放置工具時，先以 3D 建築實際網格命中選取，再用地面距離作備援。
       // 這可避免點聖地屋頂／城牆時，因高度投影誤差而選不到本陣。
       if (!stakeRef.current && !shrinePlaceRef.current) {
-        // 即使仍選著塔卡，也優先命中既有建築；避免放置模式鎖住聖地選取。
+        // 真正點中 3D 建築碰撞盒時，無論是否選著塔卡都可選取建築。
         const pickedTower = terrain3DApiRef.current?.pickTower(ev.clientX, ev.clientY);
         if (pickedTower != null && s.towers[pickedTower]) {
           selRef.current = pickedTower;
@@ -4487,15 +4494,19 @@ export function FoxTD() {
           setPick(null);
           return;
         }
-        for (let i = 0; i < s.towers.length; i++) {
-          const tw = s.towers[i];
-          const hitR = tw.sanctuary ? 176 : 56;
-          if (Math.hypot(tw.x - p.x, tw.y - p.y) < hitR) {
-            selRef.current = i;
-            setSel(i);
-            pickRef.current = null;
-            setPick(null);
-            return;
+        // 2D 像素距離是舊版 Canvas 的備援；3D 透視下不可在放置模式使用，否則會吞掉地面建塔點擊。
+        // 只有未選取塔卡時才啟用近距離選取備援，並縮小 HQ 判定半徑。
+        if (pickRef.current === null) {
+          for (let i = 0; i < s.towers.length; i++) {
+            const tw = s.towers[i];
+            const hitR = tw.sanctuary ? 96 : 44;
+            if (Math.hypot(tw.x - p.x, tw.y - p.y) < hitR) {
+              selRef.current = i;
+              setSel(i);
+              pickRef.current = null;
+              setPick(null);
+              return;
+            }
           }
         }
       }
