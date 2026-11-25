@@ -1331,6 +1331,49 @@ uniform float uFoliageTime;`,
       sanctuaryOuterWalk.castShadow = false;
       sanctuaryOuterWalk.receiveShadow = false;
       root.add(sanctuaryOuterWalk);
+
+      // 外環改成可辨識的儀式石徑：32 塊放射狀踏石搭配細金屬嵌條，讓聖地與周圍草地有完整的建築邊界。
+      const plazaPaverCount = 32;
+      const plazaPavers = new THREE.InstancedMesh(
+        new THREE.BoxGeometry(0.82, 0.055, 0.62),
+        shared.foundationStone,
+        plazaPaverCount,
+      );
+      const plazaInlays = new THREE.InstancedMesh(
+        new THREE.BoxGeometry(0.34, 0.012, 0.052),
+        shared.foundationGold,
+        plazaPaverCount,
+      );
+      const plazaDummy = new THREE.Object3D();
+      const plazaTint = new THREE.Color();
+      for (let i = 0; i < plazaPaverCount; i++) {
+        const angle = (i / plazaPaverCount) * Math.PI * 2;
+        const radius = 4.16 + Math.sin(i * 2.31) * 0.035;
+        const x = Math.cos(angle) * radius;
+        const z = Math.sin(angle) * radius;
+        plazaDummy.position.set(x, 0.052, z);
+        plazaDummy.rotation.set(0, -angle, 0);
+        plazaDummy.scale.set(0.94 + (i % 3) * 0.035, 1, 0.92 + (i % 4) * 0.035);
+        plazaDummy.updateMatrix();
+        plazaPavers.setMatrixAt(i, plazaDummy.matrix);
+        plazaTint.set(i % 4 === 0 ? "#c7b999" : i % 3 === 0 ? "#aeb5a2" : "#9eaa9e");
+        plazaPavers.setColorAt(i, plazaTint);
+
+        plazaDummy.position.set(x, 0.086, z);
+        plazaDummy.rotation.set(0, -angle, 0);
+        plazaDummy.scale.set(0.9, 1, 1);
+        plazaDummy.updateMatrix();
+        plazaInlays.setMatrixAt(i, plazaDummy.matrix);
+      }
+      plazaPavers.instanceMatrix.needsUpdate = true;
+      plazaInlays.instanceMatrix.needsUpdate = true;
+      if (plazaPavers.instanceColor) plazaPavers.instanceColor.needsUpdate = true;
+      plazaPavers.castShadow = false;
+      plazaPavers.receiveShadow = true;
+      plazaInlays.castShadow = false;
+      plazaInlays.receiveShadow = false;
+      root.add(plazaPavers, plazaInlays);
+
       const sanctuaryInnerWalk = new THREE.Mesh(
         new THREE.TorusGeometry(4.72, 0.014, 5, 112),
         shared.runeGlow,
