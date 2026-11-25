@@ -485,10 +485,15 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
 
     const foliageWindUniform = { value: 0 };
     const sanctuarySigilUniforms = { time: { value: 0 }, power: { value: 0.18 } };
-    const roadGuideUniforms = { time: { value: 0 } };
+    const roadGuideUniforms = {
+      time: { value: 0 },
+      origin: { value: new THREE.Vector2(COLS / 2, ROWS / 2) },
+      power: { value: 0.18 },
+    };
     const shoreFoamUniforms = { time: { value: 0 } };
     const cliffStrataUniforms = { time: { value: 0 } };
     const blackMistFrontUniforms = { time: { value: 0 }, power: { value: 0.12 } };
+    const blackMistVeilUniforms = { time: { value: 0 } };
     const shared = {
       blackMist: new THREE.MeshBasicMaterial({
         color: "#182038",
@@ -729,30 +734,119 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
     const installRoadFlow = (material: THREE.MeshStandardMaterial) => {
       material.onBeforeCompile = (shader) => {
         shader.uniforms.uRoadFlowTime = roadGuideUniforms.time;
+        shader.uniforms.uRoadFlowOrigin = roadGuideUniforms.origin;
+        shader.uniforms.uRoadFlowPower = roadGuideUniforms.power;
         shader.vertexShader = shader.vertexShader.replace(
           "#include <common>",
-          "#include <common>\nvarying vec2 vRoadFlowUv;",
+          "#include <common>\nvarying vec2 vRoadFlowUv;\nvarying vec3 vRoadFlowWorldPosition;",
         );
         shader.vertexShader = shader.vertexShader.replace(
           "#include <begin_vertex>",
           "#include <begin_vertex>\nvRoadFlowUv = vec2(position.x / 0.34 + 0.5, position.z / 0.038 + 0.5);",
         );
+        shader.vertexShader = shader.vertexShader.replace(
+          "#include <worldpos_vertex>",
+          "#include <worldpos_vertex>\nvRoadFlowWorldPosition = worldPosition.xyz;",
+        );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <common>",
-          "#include <common>\nvarying vec2 vRoadFlowUv;\nuniform float uRoadFlowTime;",
+          "#include <common>\nvarying vec2 vRoadFlowUv;\nvarying vec3 vRoadFlowWorldPosition;\nuniform float uRoadFlowTime;\nuniform vec2 uRoadFlowOrigin;\nuniform float uRoadFlowPower;",
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <color_fragment>",
           `#include <color_fragment>
+          float roadDistanceFromSanctuary = length(vRoadFlowWorldPosition.xz - uRoadFlowOrigin);
+          float roadWave = cos(roadDistanceFromSanctuary * 0.55 - uRoadFlowTime * 1.1);
+          float roadPulse = pow(max(0.0, roadWave), 18.0);
           float roadFlowPhase = fract(vRoadFlowUv.x - uRoadFlowTime * 0.18);
-          float roadFlow = pow(max(0.0, 1.0 - abs(roadFlowPhase - 0.5) * 2.0), 12.0);
-          diffuseColor.rgb += vec3(0.025, 0.105, 0.095) * roadFlow;`,
+          float localFlow = pow(max(0.0, 1.0 - abs(roadFlowPhase - 0.5) * 2.0), 12.0);
+          diffuseColor.rgb += vec3(0.028, 0.12, 0.105)
+            * (roadPulse * (0.65 + uRoadFlowPower * 0.55) + localFlow * 0.16);`,
         );
       };
-      material.customProgramCacheKey = () => "tide-road-flow-v1";
+      material.customProgramCacheKey = () => "tide-road-flow-sanctuary-pulse-v2";
+    };
+    const installTerrainSurface = (material: THREE.MeshStandardMaterial, height: number) => {
+      material.onBeforeCompile = (shader) => {
+        shader.vertexShader = shader.vertexShader.replace(
+          "#include <common>",
+          "#include <common>\nvarying vec3 vTerrainWorldPosition;",
+        );
+        shader.vertexShader = shader.vertexShader.replace(
+          "#include <worldpos_vertex>",
+          "#include <worldpos_vertex>\nvTerrainWorldPosition = worldPosition.xyz;",
+        );
+        shader.fragmentShader = shader.fragmentShader.replace(
+          "#include <common>",
+          "#include <common>\nvarying vec3 vTerrainWorldPosition;",
+        );
+        shader.fragmentShader = shader.fragmentShader.replace(
+          "#include <color_fragment>",
+          `#include <color_fragment>
+          // 世界座標噪聲跨越地塊連續取樣，讓草土、岩層與微型礦斑不再沿方格邊界切斷。
+          vec2 terrainWorld = vTerrainWorldPosition.xz;
+          float broadMottle = sin(terrainWorld.x * 0.17 + sin(terrainWorld.y * 0.11 + ${height.toFixed(1)} * 0.3) * 2.0)
+            * cos(terrainWorld.y * 0.21 - terrainWorld.x * 0.07);
+          float middleGrain = sin(terrainWorld.x * 1.31 + cos(terrainWorld.y * 1.07) * 1.4 + ${height.toFixed(1)})
+            * cos(terrainWorld.y * 1.57 - terrainWorld.x * 0.63);
+          float fineGrain = sin(terrainWorld.x * 7.3 + terrainWorld.y * 5.9)
+            * cos(terrainWorld.y * 8.1 - terrainWorld.x * 3.7);
+          float lichenField = smoothstep(0.12, 0.78, broadMottle * 0.5 + 0.5 + middleGrain * 0.045);
+          float mineralSpeck = pow(max(0.0, sin(terrainWorld.x * 0.73 + terrainWorld.y * 0.51 + ${height.toFixed(1)})
+            * cos(terrainWorld.y * 0.67 - terrainWorld.x * 0.39)), 10.0);
+          diffuseColor.rgb *= 0.978 + broadMottle * 0.017 + middleGrain * 0.011 + fineGrain * 0.004;
+          diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.91, 1.025, 0.91),
+            lichenField * ${height >= 1 ? "0.052" : "0.018"});
+          diffuseColor.rgb += vec3(0.022, 0.026, 0.02) * mineralSpeck * ${height >= 2 ? "0.22" : "0.1"};`,
+        );
+        shader.fragmentShader = shader.fragmentShader.replace(
+          "#include <roughnessmap_fragment>",
+          `#include <roughnessmap_fragment>
+          float terrainRoughnessGrain = sin(vTerrainWorldPosition.x * 5.4 + vTerrainWorldPosition.z * 4.7)
+            * cos(vTerrainWorldPosition.z * 6.2 - vTerrainWorldPosition.x * 2.9);
+          roughnessFactor = clamp(roughnessFactor + terrainRoughnessGrain * 0.018, 0.0, 1.0);`,
+        );
+      };
+      material.customProgramCacheKey = () => "tide-terrain-world-mottle-v1-" + height;
+    };
+    const installBlackMistVeil = (material: THREE.MeshBasicMaterial) => {
+      material.onBeforeCompile = (shader) => {
+        shader.uniforms.uMistVeilTime = blackMistVeilUniforms.time;
+        shader.vertexShader = shader.vertexShader.replace(
+          "#include <common>",
+          "#include <common>\nuniform float uMistVeilTime;\nvarying vec2 vMistVeilUv;",
+        );
+        shader.vertexShader = shader.vertexShader.replace(
+          "#include <begin_vertex>",
+          `#include <begin_vertex>
+          vMistVeilUv = uv;
+          // 霧幕本身有輕微起伏，避免像直立貼片；形變留在 GPU，不增加 CPU 逐片更新。
+          transformed.x += sin(position.y * 4.2 + position.x * 2.1 + uMistVeilTime * 0.22) * 0.014;
+          transformed.y += sin(position.x * 5.8 - uMistVeilTime * 0.17 + position.y * 1.6) * 0.018;`,
+        );
+        shader.fragmentShader = shader.fragmentShader.replace(
+          "#include <common>",
+          "#include <common>\nuniform float uMistVeilTime;\nvarying vec2 vMistVeilUv;",
+        );
+        shader.fragmentShader = shader.fragmentShader.replace(
+          "#include <color_fragment>",
+          `#include <color_fragment>
+          float veilBaseFade = smoothstep(0.015, 0.2, vMistVeilUv.y);
+          float veilTopFade = 1.0 - smoothstep(0.7, 1.0, vMistVeilUv.y);
+          float veilStrand = 0.91 + 0.09 * sin(vMistVeilUv.x * 18.0 - uMistVeilTime * 0.24
+            + sin(vMistVeilUv.y * 8.0) * 1.7);
+          diffuseColor.a *= veilBaseFade * veilTopFade * veilStrand;
+          diffuseColor.rgb *= mix(vec3(0.72, 0.82, 1.02), vec3(0.92, 0.98, 1.12), vMistVeilUv.y);`,
+        );
+      };
+      material.customProgramCacheKey = () => "tide-black-mist-3d-veil-v1";
     };
     installSanctuarySigil(shared.sanctuarySigil);
     installRoadFlow(shared.roadGuide);
+    for (let height = 0; height < shared.terrain.length; height++) {
+      installTerrainSurface(shared.terrain[height], height);
+    }
+    installBlackMistVeil(shared.blackMistVeil);
 
     // 海面焦散：兩組交錯波紋在材質內運算，不建立額外粒子或平面。
     // 透過共用 uniform 驅動深海與淺灘，讓遠景水域也有連續的潮汐流動感。
@@ -5358,7 +5452,14 @@ uniform float uFoliageTime;`,
 
     const updateBlackMist = (data: Terrain3DSnapshot, time: number) => {
       const power = THREE.MathUtils.clamp(data.sanctuaryPower ?? 0.12, 0, 1);
+      const hq = data.towers.find((tower) => tower.sanctuary);
+      roadGuideUniforms.origin.value.set(
+        hq ? hq.x / CELL : COLS / 2,
+        hq ? hq.y / CELL : ROWS / 2,
+      );
+      roadGuideUniforms.power.value = power;
       if (data.mapMode === "expand") {
+        blackMistVeilUniforms.time.value = time * 0.001;
         // 黑霧覆蓋強度固定；真正的退霧只能由已取得地塊遮罩觸發。
         shared.blackMistField.opacity = 0.86;
         blackMistFrontUniforms.time.value = time * 0.001;
@@ -5423,7 +5524,6 @@ uniform float uFoliageTime;`,
         blackMistCloudMesh.instanceMatrix.needsUpdate = true;
       }
 
-      const hq = data.towers.find((tower) => tower.sanctuary);
       if (!hq || data.mapMode !== "expand") {
         purificationAura.visible = false;
         return;
