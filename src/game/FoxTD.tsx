@@ -1414,6 +1414,12 @@ export function FoxTD() {
   terrain3DSnapshotRef.current = () => {
     const current = sim.current;
     const now = performance.now() / 1000;
+    const sanctuary = current.towers.find((tower) => tower.sanctuary);
+    const coreProgress = Math.max(0, Math.min(1, ((sanctuary?.hqCoreLv ?? 1) - 1) / 10));
+    const buffProgress = Math.max(0, Math.min(1, hqBuffRef.current.tier / 3));
+    const shrineProgress = Math.max(0, Math.min(1, hqBuffRef.current.shrineCount / 4));
+    // 只作黑霧濃度與聖地結界的視覺進度，不修改任何戰鬥數值。
+    const sanctuaryPower = Math.max(0.12, Math.min(1, 0.12 + coreProgress * 0.58 + buffProgress * 0.22 + shrineProgress * 0.08));
     const placementActive =
       current.pointer.inside &&
       phaseRef.current === "play" &&
@@ -1440,6 +1446,7 @@ export function FoxTD() {
       heights: current.heights,
       blocked: current.blocked,
       placement,
+      sanctuaryPower,
       mapMode: mapModeRef.current,
       towers: current.towers.map((tower, index) => {
         const idle = current.towerFrames[tower.def] || [];
@@ -4713,8 +4720,15 @@ export function FoxTD() {
     }
     mingSandRef.current += 1;
     setMingSand(mingSandRef.current);
+    // 海底升陸與淨化波：兩道潮汐光環由新地塊中心向外擴散。
+    const tileCenterX = (tc * TILE + TILE / 2) * CELL;
+    const tileCenterY = (tr * TILE + TILE / 2) * CELL;
+    sim.current.rings.push(
+      { x: tileCenterX, y: tileCenterY, r: 12, max: TILE * CELL * 0.78, color: "#72e8dc", life: 1.35 },
+      { x: tileCenterX, y: tileCenterY, r: 8, max: TILE * CELL * 0.48, color: "#f0d79c", life: 1.05 },
+    );
     endTileExpand(
-      `已拼接「${TEMPLATE_BY_ID[id]?.name || id}」· 戰線 ${entrancesRef.current.length} · 明潮砂 +1（${mingSandRef.current}）· 準備下一波`,
+      `仙力牽引「${TEMPLATE_BY_ID[id]?.name || id}」自海底升起 · 道路已接通 · 黑霧退至外海 · 明潮砂 +1（${mingSandRef.current}）`,
     );
   }
 
@@ -4746,7 +4760,7 @@ export function FoxTD() {
     setHover(`第 ${index + 1} 格重骰為「${TEMPLATE_BY_ID[nextId]?.name || nextId}」· 明潮砂 −${MING_SAND_REROLL_COST}`);
   }
 
-  /** 結束本波擴張（放完或略過都走這裡，避免再彈選單卡住） */
+  /** 只有成功放置地塊才能結束本輪淨界；每三波的選地塊流程不可略過。 */
   function endTileExpand(msg?: string) {
     lastExpandWaveRef.current = Math.max(lastExpandWaveRef.current, sim.current.wave);
     tileOfferRef.current = null;
@@ -4758,10 +4772,6 @@ export function FoxTD() {
     // 立刻進入波間倒數，不會再 shouldOffer
     if (sim.current.between <= 0) sim.current.between = 0.05;
     if (msg) setHover(msg);
-  }
-
-  function skipTileOffer() {
-    endTileExpand("已略過拼接，下一波即將開始");
   }
 
   function clearTilePick() {
@@ -5954,6 +5964,14 @@ export function FoxTD() {
 
   const selected = sel !== null ? sim.current.towers[sel] : null;
   const selectedDef: TowerDef | null = selected ? TOWERS[selected.def] : null;
+  const sanctuaryForHud = sim.current.towers.find((tower) => tower.sanctuary);
+  const sanctuaryCoreProgress = Math.max(0, Math.min(1, ((sanctuaryForHud?.hqCoreLv ?? 1) - 1) / 10));
+  const sanctuaryBuffProgress = Math.max(0, Math.min(1, hqBuffRef.current.tier / 3));
+  const sanctuaryShrineProgress = Math.max(0, Math.min(1, hqBuffRef.current.shrineCount / 4));
+  const sanctuaryPowerForHud = Math.max(
+    0.12,
+    Math.min(1, 0.12 + sanctuaryCoreProgress * 0.58 + sanctuaryBuffProgress * 0.22 + sanctuaryShrineProgress * 0.08),
+  );
 
   return (
     <div className="td-shell">
@@ -5981,6 +5999,11 @@ Alt＋左鍵環視 · 右鍵平移 · 滾輪縮放 · [H]對準聖地 · [空格
               })()}
             </div>
             <div className="chip">金幣 {gold}</div>
+            {phase === "play" && isExpandBoard(boardRef.current) && (
+              <div className="chip" title="聖地升級與潮紋祭壇加持會增強淨界，削弱外緣黑霧">
+                聖地淨界 {Math.round(sanctuaryPowerForHud * 100)}%
+              </div>
+            )}
             {phase === "play" && (
               <div className="chip" title="可連通聖地的進怪入口">
                 戰線 {Math.max(1, entrancesRef.current.length || 1)}
@@ -6100,9 +6123,12 @@ Alt＋左鍵環視 · 右鍵平移 · 滾輪縮放 · [H]對準聖地 · [空格
                       boxShadow: "0 12px 40px rgba(0,0,0,0.5)",
                     }}
                   >
-                    <h2 style={{ marginTop: 0 }}>疆域擴張 · 選一塊地塊</h2>
+                    <h2 style={{ marginTop: 0 }}>聖地淨界 · 選擇升起的地塊</h2>
                     <p className="mb-2 text-sm text-[#c5dff2]">
-                      第 {wave} 波結束。選完後遮罩會收起，即可看清地圖並放到綠格。
+                      第 {wave} 波結束。每三波必須選擇並放置一塊新地，戰線才會延伸；完成前戰鬥保持暫停。
+                    </p>
+                    <p className="mb-2 text-xs leading-5 text-[#9ad7ff]">
+                      聖地以仙力牽引海底地脈，使新地塊升出海面；外緣黑霧持續侵蝕未淨化之地，升級聖地與建造潮紋祭壇可增強淨界。
                     </p>
                     <p className="mb-2 text-xs text-[#9ad7ff]">
                       明潮砂 <b className="text-[#ffe08a]">{mingSand}</b>
@@ -6164,9 +6190,6 @@ Alt＋左鍵環視 · 右鍵平移 · 滾輪縮放 · [H]對準聖地 · [空格
                         );
                       })}
                     </div>
-                    <button className="btn ghost" onClick={skipTileOffer}>
-                      略過，繼續戰鬥
-                    </button>
                   </div>
                 </div>
               )}
@@ -6202,11 +6225,8 @@ Alt＋左鍵環視 · 右鍵平移 · 滾輪縮放 · [H]對準聖地 · [空格
                   <button className="btn ghost" style={{ padding: "6px 10px", fontSize: 12 }} onClick={clearTilePick}>
                     返回選塊
                   </button>
-                  <button className="btn ghost" style={{ padding: "6px 10px", fontSize: 12 }} onClick={skipTileOffer}>
-                    略過
-                  </button>
                   <span className="text-[11px] text-[#9ad7ff]">
-                    綠格可放 · 點地圖確認
+                    綠格可放 · 點地圖升起新地 · 放置前無法繼續波次
                   </span>
                 </div>
               )}
