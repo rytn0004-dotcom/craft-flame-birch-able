@@ -1,5 +1,10 @@
-import { useEffect, useRef, useState } from "react";
-import { Terrain3DMap, type Terrain3DApi, type Terrain3DSnapshot } from "./Terrain3DMap";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import type { Terrain3DApi, Terrain3DSnapshot } from "./Terrain3DMap";
+
+// Three.js 與完整 3D 場景改由獨立 chunk 載入，避免和塔防邏輯綁成單一大型 route chunk。
+const Terrain3DMap = lazy(() =>
+  import("./Terrain3DMap").then((module) => ({ default: module.Terrain3DMap })),
+);
 import { CELL, COLS, cellHeight, cellKey, defaultEntrances, defaultExits, emptyHeights, pathsForGates, pointsOf, presetMaps, rangeBonus, ROWS, sameCell, VIEW_H, VIEW_W, WORLD_H, WORLD_W, type Cell, type MapLayout } from "./grid";
 import { tickBrain, type Blackboard } from "./ai";
 import {
@@ -5934,7 +5939,18 @@ Alt＋左鍵環視 · 右鍵平移 · 滾輪縮放 · [H]對準聖地 · [空格
       </header>
       <div className="td-layout">
         <div className="stage" ref={wrapRef}>
-          <Terrain3DMap snapshotRef={terrain3DSnapshotRef} apiRef={terrain3DApiRef} />
+          <Suspense
+            fallback={
+              <div
+                role="status"
+                style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", color: "#c7d8d1", background: "#111a2b" }}
+              >
+                正在載入 3D 地圖…
+              </div>
+            }
+          >
+            <Terrain3DMap snapshotRef={terrain3DSnapshotRef} apiRef={terrain3DApiRef} />
+          </Suspense>
           <canvas ref={canvasRef} width={VIEWW} height={VIEWH} style={{ display: "none" }} />
           <div className="hud-float">
             <div className="chip" title="聖地建築耐久（漏怪依怪物剩餘生命扣血）">
