@@ -340,12 +340,52 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     blackMistTexture.colorSpace = THREE.SRGBColorSpace;
     blackMistTexture.needsUpdate = true;
 
+    // 全地圖深淵霧幕：覆蓋 200×200 可探索範圍；地塊地表位於霧幕上方，因此已開啟區域自然保持明亮。
+    const blackMistFieldSize = 256;
+    const blackMistFieldPixels = new Uint8Array(blackMistFieldSize * blackMistFieldSize * 4);
+    for (let y = 0; y < blackMistFieldSize; y++) for (let x = 0; x < blackMistFieldSize; x++) {
+      const u = x / blackMistFieldSize;
+      const v = y / blackMistFieldSize;
+      const broad = Math.sin(tau * (u * 3.1 + Math.sin(v * tau * 1.7) * 0.22)) * 0.42
+        + Math.cos(tau * (v * 2.7 - u * 1.9)) * 0.34;
+      const medium = Math.sin(tau * (u * 8.3 + v * 5.7)) * 0.16
+        + Math.cos(tau * (v * 11.1 - u * 6.2)) * 0.12;
+      const fine = Math.sin(tau * (u * 23 + v * 19)) * 0.06
+        + Math.cos(tau * (v * 29 - u * 17)) * 0.05;
+      const density = THREE.MathUtils.clamp(0.76 + broad * 0.16 + medium * 0.12 + fine, 0.48, 0.96);
+      const index = (y * blackMistFieldSize + x) * 4;
+      blackMistFieldPixels[index] = 255;
+      blackMistFieldPixels[index + 1] = 255;
+      blackMistFieldPixels[index + 2] = 255;
+      blackMistFieldPixels[index + 3] = Math.round(density * 255);
+    }
+    const blackMistFieldTexture = new THREE.DataTexture(
+      blackMistFieldPixels, blackMistFieldSize, blackMistFieldSize, THREE.RGBAFormat,
+    );
+    blackMistFieldTexture.colorSpace = THREE.SRGBColorSpace;
+    blackMistFieldTexture.wrapS = THREE.RepeatWrapping;
+    blackMistFieldTexture.wrapT = THREE.RepeatWrapping;
+    blackMistFieldTexture.magFilter = THREE.LinearFilter;
+    blackMistFieldTexture.minFilter = THREE.LinearMipmapLinearFilter;
+    blackMistFieldTexture.generateMipmaps = true;
+    blackMistFieldTexture.repeat.set(4.2, 4.2);
+    blackMistFieldTexture.needsUpdate = true;
+
     const shared = {
       blackMist: new THREE.MeshBasicMaterial({
         color: "#182038",
         map: blackMistTexture,
         transparent: true,
         opacity: 0.72,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        toneMapped: false,
+      }),
+      blackMistField: new THREE.MeshBasicMaterial({
+        color: "#10182b",
+        map: blackMistFieldTexture,
+        transparent: true,
+        opacity: 0.84,
         depthWrite: false,
         side: THREE.DoubleSide,
         toneMapped: false,
@@ -1568,21 +1608,43 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       }
 
       // 雙層海面：近岸較淺、外海較深；全部位於地塊底面以下，不介入地形碰撞或道路判定。
+      const expandMode = data.mapMode === "expand";
+      const seaCenterX = expandMode ? COLS / 2 : mapCenterX;
+      const seaCenterZ = expandMode ? ROWS / 2 : mapCenterZ;
+      const deepSeaWidth = expandMode ? COLS + 36 : mapWidth + 36;
+      const deepSeaDepth = expandMode ? ROWS + 36 : mapDepth + 36;
+      const shelfSeaWidth = expandMode ? COLS + 12 : mapWidth + 12;
+      const shelfSeaDepth = expandMode ? ROWS + 12 : mapDepth + 12;
       const deepWater = new THREE.Mesh(
-        new THREE.PlaneGeometry(mapWidth + 36, mapDepth + 36),
+        new THREE.PlaneGeometry(deepSeaWidth, deepSeaDepth),
         shared.floor,
       );
       deepWater.rotation.x = -Math.PI / 2;
-      deepWater.position.set(mapCenterX, -0.34, mapCenterZ);
+      deepWater.position.set(seaCenterX, -0.34, seaCenterZ);
       deepWater.receiveShadow = false;
       const shelfWater = new THREE.Mesh(
-        new THREE.PlaneGeometry(mapWidth + 12, mapDepth + 12),
+        new THREE.PlaneGeometry(shelfSeaWidth, shelfSeaDepth),
         shared.seaShelf,
       );
       shelfWater.rotation.x = -Math.PI / 2;
-      shelfWater.position.set(mapCenterX, -0.285, mapCenterZ);
+      shelfWater.position.set(seaCenterX, -0.285, seaCenterZ);
       shelfWater.receiveShadow = false;
       terrainRoot.add(deepWater, shelfWater);
+
+      // 黑霧底層覆蓋整張棋盤，未鋪設地塊的海域都會被深淵侵染；已開啟地塊因地表高於霧層而保持清亮。
+      if (expandMode) {
+        const blackMistField = new THREE.Mesh(
+          new THREE.PlaneGeometry(COLS, ROWS),
+          shared.blackMistField,
+        );
+        blackMistField.rotation.x = -Math.PI / 2;
+        blackMistField.position.set(COLS / 2, -0.235, ROWS / 2);
+        blackMistField.renderOrder = 1;
+        blackMistField.frustumCulled = false;
+        blackMistField.castShadow = false;
+        blackMistField.receiveShadow = false;
+        terrainRoot.add(blackMistField);
+      }
 
 
       // 海平線外的低矮島礁剪影：固定在地塊包圍盒之外，提供遠景尺度而不佔用地圖格。
@@ -3966,8 +4028,13 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
 
     const updateBlackMist = (data: Terrain3DSnapshot, time: number) => {
       const power = THREE.MathUtils.clamp(data.sanctuaryPower ?? 0.12, 0, 1);
+      if (data.mapMode === "expand") {
+        // 淨化力量只能削弱黑霧濃度，不會讓尚未開拓的海域整片恢復安全。
+        shared.blackMistField.opacity = 0.84 - power * 0.22;
+        blackMistFieldTexture.offset.set((time * 0.000006) % 1, (time * 0.000004) % 1);
+      }
       if (blackMistMesh && blackMistEntries.length) {
-        // 聖地升級／祭壇加持越高，黑霧越稀薄，但深淵邊界仍持續存在。
+        // 聖地升級／祭壇加持越高，岸線漂浮黑霧越稀薄，但深淵邊界仍持續存在。
         shared.blackMist.opacity = 0.72 - power * 0.43;
         for (let i = 0; i < blackMistEntries.length; i++) {
           const entry = blackMistEntries[i];
@@ -4391,7 +4458,9 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       selectedRangeMaterial.dispose();
       purificationAuraMaterial.dispose();
       shared.blackMist.dispose();
+      shared.blackMistField.dispose();
       blackMistTexture.dispose();
+      blackMistFieldTexture.dispose();
       placementFillMaterial.dispose();
       placementOutlineMaterial.dispose();
       clearGroup(effectRoot);
