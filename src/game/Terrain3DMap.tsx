@@ -423,6 +423,8 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
     blackMistFieldMaskTexture.needsUpdate = true;
 
     const foliageWindUniform = { value: 0 };
+    const sanctuarySigilUniforms = { time: { value: 0 }, power: { value: 0.18 } };
+    const roadGuideUniforms = { time: { value: 0 } };
     const shared = {
       blackMist: new THREE.MeshBasicMaterial({
         color: "#182038",
@@ -531,7 +533,19 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       treeBark: new THREE.MeshStandardMaterial({ color: "#6e5943", roughness: 0.98, bumpMap: surfaceReliefMap, bumpScale: 0.018 }),
       foliageWind: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.94, bumpMap: surfaceReliefMap, bumpScale: 0.008, side: THREE.DoubleSide }),
       meadowBloom: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.72, emissive: "#473b20", emissiveIntensity: 0.06 }),
-      roadGuide: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.78, metalness: 0.12 }),
+      roadGuide: new THREE.MeshStandardMaterial({
+        color: "#ffffff", roughness: 0.78, metalness: 0.12,
+        emissive: "#1c6e70", emissiveIntensity: 0.12,
+      }),
+      sanctuarySigil: new THREE.MeshBasicMaterial({
+        color: "#76f5d6",
+        transparent: true,
+        opacity: 0.76,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+        toneMapped: false,
+      }),
       terrainCrystal: new THREE.MeshStandardMaterial({
         color: "#55a6a2",
         metalness: 0.22,
@@ -565,6 +579,75 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       heightRim: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.93, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.02 }),
       ramp: new THREE.MeshStandardMaterial({ color: "#aeb49c", roughness: 0.95, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.02 }),
     };
+
+    // 聖地地面符印與道路導光使用材質內動畫；不額外建立逐顆動畫物件。
+    const installSanctuarySigil = (material: THREE.MeshBasicMaterial) => {
+      material.onBeforeCompile = (shader) => {
+        shader.uniforms.uSigilTime = sanctuarySigilUniforms.time;
+        shader.uniforms.uSigilPower = sanctuarySigilUniforms.power;
+        shader.vertexShader = shader.vertexShader.replace(
+          "#include <common>",
+          "#include <common>\\nvarying vec2 vSanctuaryUv;",
+        );
+        shader.vertexShader = shader.vertexShader.replace(
+          "#include <begin_vertex>",
+          "#include <begin_vertex>\\nvSanctuaryUv = uv;",
+        );
+        shader.fragmentShader = shader.fragmentShader.replace(
+          "#include <common>",
+          "#include <common>\\nvarying vec2 vSanctuaryUv;\\nuniform float uSigilTime;\\nuniform float uSigilPower;",
+        );
+        shader.fragmentShader = shader.fragmentShader.replace(
+          "#include <color_fragment>",
+          `#include <color_fragment>
+          vec2 sigilPoint = (vSanctuaryUv - 0.5) * 2.0;
+          float sigilRadius = length(sigilPoint);
+          float sigilAngle = atan(sigilPoint.y, sigilPoint.x) + uSigilTime * 0.12;
+          float outerRing = 1.0 - smoothstep(0.012, 0.035, abs(sigilRadius - 0.91));
+          float middleRing = 1.0 - smoothstep(0.01, 0.026, abs(sigilRadius - 0.72));
+          float innerRing = 1.0 - smoothstep(0.008, 0.024, abs(sigilRadius - 0.42));
+          float tickMask = smoothstep(0.47, 0.54, sigilRadius) * (1.0 - smoothstep(0.68, 0.76, sigilRadius));
+          float runeTicks = 1.0 - smoothstep(0.045, 0.13, abs(sin(sigilAngle * 4.0)));
+          float travelingRune = 1.0 - smoothstep(0.015, 0.11, abs(sin(sigilAngle * 0.5)));
+          float corePulse = exp(-sigilRadius * sigilRadius * 18.0) * (0.6 + 0.4 * sin(uSigilTime * 1.4));
+          float edgeFade = 1.0 - smoothstep(0.94, 1.0, sigilRadius);
+          float sigilPattern = outerRing * 0.38 + middleRing * 0.2 + innerRing * 0.12
+            + runeTicks * tickMask * 0.22 + travelingRune * outerRing * 0.26 + corePulse * 0.08;
+          float sigilBreath = 0.82 + 0.18 * sin(uSigilTime * 0.9 + sigilRadius * 5.0);
+          diffuseColor.a *= clamp(sigilPattern, 0.0, 1.0) * edgeFade
+            * sigilBreath * (0.38 + uSigilPower * 0.62);
+          diffuseColor.rgb *= 0.82 + uSigilPower * 0.3;`,
+        );
+      };
+      material.customProgramCacheKey = () => "tide-sanctuary-sigil-v1";
+    };
+    const installRoadFlow = (material: THREE.MeshStandardMaterial) => {
+      material.onBeforeCompile = (shader) => {
+        shader.uniforms.uRoadFlowTime = roadGuideUniforms.time;
+        shader.vertexShader = shader.vertexShader.replace(
+          "#include <common>",
+          "#include <common>\\nvarying vec2 vRoadFlowUv;",
+        );
+        shader.vertexShader = shader.vertexShader.replace(
+          "#include <begin_vertex>",
+          "#include <begin_vertex>\\nvRoadFlowUv = uv;",
+        );
+        shader.fragmentShader = shader.fragmentShader.replace(
+          "#include <common>",
+          "#include <common>\\nvarying vec2 vRoadFlowUv;\\nuniform float uRoadFlowTime;",
+        );
+        shader.fragmentShader = shader.fragmentShader.replace(
+          "#include <color_fragment>",
+          `#include <color_fragment>
+          float roadFlowPhase = fract(vRoadFlowUv.x - uRoadFlowTime * 0.18);
+          float roadFlow = pow(max(0.0, 1.0 - abs(roadFlowPhase - 0.5) * 2.0), 12.0);
+          diffuseColor.rgb += vec3(0.025, 0.105, 0.095) * roadFlow;`,
+        );
+      };
+      material.customProgramCacheKey = () => "tide-road-flow-v1";
+    };
+    installSanctuarySigil(shared.sanctuarySigil);
+    installRoadFlow(shared.roadGuide);
 
     // 海面焦散：兩組交錯波紋在材質內運算，不建立額外粒子或平面。
     // 透過共用 uniform 驅動深海與淺灘，讓遠景水域也有連續的潮汐流動感。
@@ -745,6 +828,17 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       const root = new THREE.Group();
       root.position.set(tower.x / CELL, groundTop(heights[tower.gy * COLS + tower.gx] ?? 0), tower.y / CELL);
       addContactShadow(root, 3.34);
+      // 儀式廣場的流動符印：刻紋由 Shader 驅動，貼著地面展開、不遮擋本陣模型。
+      const sanctuarySigil = new THREE.Mesh(
+        new THREE.PlaneGeometry(10.8, 10.8),
+        shared.sanctuarySigil,
+      );
+      sanctuarySigil.rotation.x = -Math.PI / 2;
+      sanctuarySigil.position.y = 0.046;
+      sanctuarySigil.renderOrder = 1;
+      sanctuarySigil.castShadow = false;
+      sanctuarySigil.receiveShadow = false;
+      root.add(sanctuarySigil);
       // 六乘六格石造基座，金邊和階層清楚標示建築佔地
       addBox(root, 6.05, 0.24, 6.05, 0, 0.12, 0, shared.blue);
       addBox(root, 5.8, 0.16, 5.8, 0, 0.31, 0, shared.gold);
@@ -978,6 +1072,25 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       root.add(heartCrystal);
       gems.push(heartCrystal);
       chargeCores.push({ mesh: heartCrystal, material: shared.chargeCrystal, tower });
+      // 水晶核心外側懸浮兩道不同傾角的能量軌道，與地面符印形成上下呼應。
+      const heartOrbitInner = new THREE.Mesh(
+        new THREE.TorusGeometry(0.72, 0.018, 6, 64),
+        shared.runeGlow,
+      );
+      heartOrbitInner.position.set(0, 4.82, -0.28);
+      heartOrbitInner.rotation.set(Math.PI / 2 - 0.34, 0.22, 0.18);
+      heartOrbitInner.castShadow = false;
+      root.add(heartOrbitInner);
+      rings.push(heartOrbitInner);
+      const heartOrbitOuter = new THREE.Mesh(
+        new THREE.TorusGeometry(0.98, 0.014, 5, 72),
+        shared.brightGold,
+      );
+      heartOrbitOuter.position.set(0, 4.82, -0.28);
+      heartOrbitOuter.rotation.set(Math.PI / 2 + 0.48, -0.38, -0.22);
+      heartOrbitOuter.castShadow = false;
+      root.add(heartOrbitOuter);
+      rings.push(heartOrbitOuter);
 
       // 主殿四面柱與金色飛簷，強化建築層次。
       for (const side of [-1, 1]) {
@@ -5394,6 +5507,9 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
         turret.flash.scale.setScalar(0.72 + flash * 1.8);
         turret.flash.material.opacity = Math.min(1, flash * 1.25);
       }
+      sanctuarySigilUniforms.time.value = time * 0.001;
+      sanctuarySigilUniforms.power.value = THREE.MathUtils.clamp(data.sanctuaryPower ?? 0.18, 0, 1);
+      roadGuideUniforms.time.value = time * 0.001;
       foliageWindUniform.value = time * 0.00048;
       controls.update();
       renderer.render(scene, camera);
@@ -5447,6 +5563,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       shared.foliageWind.dispose();
       shared.meadowBloom.dispose();
       shared.roadGuide.dispose();
+      shared.sanctuarySigil.dispose();
       shared.biomeSeam.dispose();
       shared.roadMedallion.dispose();
       shared.tidalSand.dispose();
