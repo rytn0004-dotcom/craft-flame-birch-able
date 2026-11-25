@@ -1069,11 +1069,8 @@ export function rerollOfferSlot(
   let pool = placeableTemplateIds(board, [offers[index], ...others]);
   if (!pool.length) pool = placeableTemplateIds(board, [offers[index]]);
   if (!pool.length) pool = placeableTemplateIds(board);
-  if (!pool.length) {
-    const any = OFFERABLE_IDS.filter((id) => id !== offers[index]);
-    if (!any.length) return null;
-    return weightedPick(any, weights);
-  }
+  // 不以不可放置的地塊充數；必選擴張時，保留可行的淨界浮島保底。
+  if (!pool.length) return null;
   return weightedPick(pool, weights);
 }
 
@@ -1111,6 +1108,74 @@ export function validPlacements(board: TileBoard, templateId: string): { tc: num
   }
   out.sort((a, b) => b.score - a.score);
   return out;
+}
+
+/**
+ * 極端接口排列的保底地塊：依鄰格道路端口動態雕出「淨界浮島」。
+ * 每個已佔用鄰邊都精確匹配道路／非道路狀態與端口索引，避免選地塊流程無牌可選。
+ */
+export function createTidalLiftTemplate(board: TileBoard): TileTemplate | null {
+  const id = "tide_lift";
+  const center = Math.floor(TILE / 2);
+  const slots = frontierSlots(board);
+  for (const slot of slots) {
+    const blocked = emptyBlocked(true);
+    const ports: Port[] = [];
+    let adjacent = false;
+    const portSeen = new Set<string>();
+
+    for (const edge of CARDINAL) {
+      const nb = neighborSlot(slot.tc, slot.tr, edge);
+      if (!nb || !slotOccupied(board, nb.tc, nb.tr)) continue;
+      adjacent = true;
+      const neighbor = board.placed.find((placed) => placed.tc === nb.tc && placed.tr === nb.tr);
+      if (!neighbor) continue;
+      const neighborTemplate = TEMPLATE_BY_ID[neighbor.templateId];
+      if (!neighborTemplate) continue;
+      const neighborPorts = rotatedTemplate(neighborTemplate, neighbor.rot).ports;
+      const touching = opposite(edge);
+      const indexes = [...new Set(neighborPorts.filter((p) => p.edge === touching).map((p) => p.i))];
+
+      for (const index of indexes) {
+        const portKey = edge + ":" + index;
+        if (portSeen.has(portKey)) continue;
+        portSeen.add(portKey);
+        ports.push(port(edge, index));
+
+        let c = edge === "W" ? 0 : edge === "E" ? TILE - 1 : index;
+        let r = edge === "N" ? 0 : edge === "S" ? TILE - 1 : index;
+        blocked[r][c] = false;
+        while (c !== center) {
+          c += c < center ? 1 : -1;
+          blocked[r][c] = false;
+        }
+        while (r !== center) {
+          r += r < center ? 1 : -1;
+          blocked[r][c] = false;
+        }
+      }
+    }
+
+    if (!adjacent) continue;
+    const template: TileTemplate = {
+      id,
+      name: "淨界浮島",
+      blocked,
+      ports,
+      heights: [
+        { c: 6, r: 6, h: 2 },
+        { c: 13, r: 6, h: 1 },
+        { c: 6, r: 13, h: 1 },
+        { c: 13, r: 13, h: 2 },
+      ],
+    };
+    const previous = TEMPLATE_BY_ID[id];
+    TEMPLATE_BY_ID[id] = template;
+    if (validPlacements(board, id).length) return template;
+    if (previous) TEMPLATE_BY_ID[id] = previous;
+    else delete TEMPLATE_BY_ID[id];
+  }
+  return null;
 }
 
 export function isCellOnBoard(board: TileBoard, c: number, r: number): boolean {
