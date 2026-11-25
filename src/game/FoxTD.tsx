@@ -7103,7 +7103,7 @@ Alt＋左鍵環視 · 右鍵平移 · 滾輪縮放 · [H]對準聖地 · [空格
                   setSel(null);
                   selRef.current = null;
                   setHover(
-                    `${t.name}：${t.trait} · 傷 ${Math.round(t.damage * (getDifficulty(difficultyId).towerCostMul ?? 1))} · 一般塔模式 · [${hotkey}]`,
+                    `${t.name}：${t.trait} · 傷 ${Math.round(t.damage * (getDifficulty(difficultyId).towerDmgMul ?? 1))} · 一般塔模式 · [${hotkey}]`,
                   );
                 }}
               >
