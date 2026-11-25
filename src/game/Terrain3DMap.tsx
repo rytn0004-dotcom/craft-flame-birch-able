@@ -2341,6 +2341,48 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
 
 
       // 同高度障礙地形上的遺跡群，以斷續石道連成小型古代聖域；沿線逐格檢查，絕不跨入可建造平台。
+
+      // 區域遠景地標：完整地圖使用高地燈塔，擴張地圖則將燈塔放在島外淺海。
+      // 陸上燈塔周圍八格必須全為同高度 blocked 障礙面，確保基座不侵入可建造平台。
+      const beaconSites: { x: number; z: number; y: number; seed: number; offshore: boolean }[] = [];
+      if (data.mapMode === "layout") {
+        for (const cell of tileCells.values()) {
+          if (cell.h < 2 || beaconSites.length >= 3) continue;
+          const gx = Math.floor(cell.x);
+          const gy = Math.floor(cell.z);
+          const key = gx + "," + gy;
+          if (!data.blocked.has(key)) continue;
+          if (terrainRegion(cell) !== "limestone" && terrainRegion(cell) !== "ancient") continue;
+          const neighbors = ruinNeighborOffsets.map(([dc, dr]) => {
+            const neighborKey = (gx + dc) + "," + (gy + dr);
+            const neighbor = tileCells.get(neighborKey);
+            return !!neighbor && data.blocked.has(neighborKey) && neighbor.h === cell.h;
+          });
+          if (!neighbors.every(Boolean)) continue;
+          const seed = Math.abs(Math.sin(cell.x * 43.7 + cell.z * 91.3) * 28931.17) % 1;
+          if (seed < 0.982) continue;
+          if (protectedBuildings.some((building) =>
+            Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 6.2,
+          )) continue;
+          if (ruinSites.some((site) => Math.hypot(cell.x - site.x, cell.z - site.z) < 7.5)) continue;
+          if (beaconSites.some((site) => Math.hypot(cell.x - site.x, cell.z - site.z) < 15)) continue;
+          beaconSites.push({ x: cell.x, z: cell.z, y: groundTop(cell.h), seed, offshore: false });
+        }
+      } else {
+        const offshoreBeaconEdges = coastEdges.filter((edge) => edge.seed > 0.88);
+        for (const edge of offshoreBeaconEdges) {
+          if (beaconSites.length >= 3) break;
+          const x = edge.x + edge.dx * (2.75 + edge.seed * 0.3);
+          const z = edge.z + edge.dz * (2.75 + edge.seed * 0.3);
+          if (protectedBuildings.some((building) =>
+            Math.hypot(x - building.x, z - building.z) < building.radius + 4.5,
+          )) continue;
+          if (ruinSites.some((site) => Math.hypot(x - site.x, z - site.z) < 6.8)) continue;
+          if (beaconSites.some((site) => Math.hypot(x - site.x, z - site.z) < 13)) continue;
+          beaconSites.push({ x, z, y: -0.34, seed: edge.seed, offshore: true });
+        }
+      }
+
       const ruinCauseways: { x: number; z: number; rot: number; length: number; y: number }[] = [];
       if (data.mapMode === "layout" && ruinSites.length > 1) {
         for (let i = 0; i < ruinSites.length && ruinCauseways.length < 6; i++) {
@@ -2756,7 +2798,101 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         }
       }
 
-      // 古代石橋只生成在完整／自訂地圖的障礙地形上；道路與可建造格一律不會被覆蓋。      // 古代石橋只生成在完整／自訂地圖的障礙地形上；道路與可建造格一律不會被覆蓋。
+
+      if (beaconSites.length) {
+        const beaconBases = new THREE.InstancedMesh(
+          new THREE.CylinderGeometry(0.36, 0.48, 0.22, 8),
+          shared.foundationStone,
+          beaconSites.length,
+        );
+        const beaconShafts = new THREE.InstancedMesh(
+          new THREE.CylinderGeometry(0.16, 0.22, 1.28, 8),
+          shared.blue,
+          beaconSites.length,
+        );
+        const beaconCollars = new THREE.InstancedMesh(
+          new THREE.TorusGeometry(0.27, 0.038, 6, 24),
+          shared.brightGold,
+          beaconSites.length,
+        );
+        const beaconCrowns = new THREE.InstancedMesh(
+          new THREE.ConeGeometry(0.34, 0.44, 6),
+          shared.gold,
+          beaconSites.length,
+        );
+        const beaconCrystals = new THREE.InstancedMesh(
+          new THREE.OctahedronGeometry(0.245, 1),
+          shared.chargeCrystal,
+          beaconSites.length,
+        );
+        const beaconFins = new THREE.InstancedMesh(
+          new THREE.ConeGeometry(0.052, 0.42, 4),
+          shared.foundationGold,
+          beaconSites.length * 4,
+        );
+        const dummy = new THREE.Object3D();
+        for (let i = 0; i < beaconSites.length; i++) {
+          const site = beaconSites[i];
+          const baseY = site.y;
+          dummy.position.set(site.x, baseY + 0.11, site.z);
+          dummy.rotation.set(0, site.seed * Math.PI * 2, 0);
+          dummy.scale.set(1, 1, 1);
+          dummy.updateMatrix();
+          beaconBases.setMatrixAt(i, dummy.matrix);
+
+          dummy.position.set(site.x, baseY + 0.82, site.z);
+          dummy.rotation.set(0, site.seed * Math.PI * 2, 0);
+          dummy.scale.set(1, 1, 1);
+          dummy.updateMatrix();
+          beaconShafts.setMatrixAt(i, dummy.matrix);
+
+          dummy.position.set(site.x, baseY + 1.42, site.z);
+          dummy.rotation.set(Math.PI / 2, site.seed * Math.PI * 2, 0);
+          dummy.scale.set(1, 1, 1);
+          dummy.updateMatrix();
+          beaconCollars.setMatrixAt(i, dummy.matrix);
+
+          dummy.position.set(site.x, baseY + 1.72, site.z);
+          dummy.rotation.set(0, site.seed * Math.PI * 2, 0);
+          dummy.scale.set(1, 1, 1);
+          dummy.updateMatrix();
+          beaconCrowns.setMatrixAt(i, dummy.matrix);
+
+          dummy.position.set(site.x, baseY + 2.08, site.z);
+          dummy.rotation.set(0, site.seed * Math.PI * 2, 0);
+          dummy.scale.set(1, 1.16, 0.86);
+          dummy.updateMatrix();
+          beaconCrystals.setMatrixAt(i, dummy.matrix);
+
+          for (let fin = 0; fin < 4; fin++) {
+            const angle = site.seed * Math.PI * 2 + fin * Math.PI / 2;
+            dummy.position.set(
+              site.x + Math.cos(angle) * 0.29,
+              baseY + 1.86,
+              site.z + Math.sin(angle) * 0.29,
+            );
+            dummy.rotation.set(0.12 * Math.cos(angle), angle, 0.12 * Math.sin(angle));
+            dummy.scale.set(1, 1, 1);
+            dummy.updateMatrix();
+            beaconFins.setMatrixAt(i * 4 + fin, dummy.matrix);
+          }
+          if (i < 3) {
+            const glow = new THREE.PointLight(site.offshore ? "#8bdde0" : "#8de8ce", site.offshore ? 0.48 : 0.56, 8.5, 2);
+            glow.position.set(site.x, baseY + 2.32, site.z);
+            glow.castShadow = false;
+            terrainRoot.add(glow);
+            landmarkLights.push({ light: glow, phase: 30 + i * 1.7, intensity: site.offshore ? 0.48 : 0.56 });
+          }
+        }
+        for (const mesh of [beaconBases, beaconShafts, beaconCollars, beaconCrowns, beaconCrystals, beaconFins]) {
+          mesh.instanceMatrix.needsUpdate = true;
+          mesh.castShadow = mesh === beaconShafts || mesh === beaconCrowns || mesh === beaconFins;
+          mesh.receiveShadow = true;
+          terrainRoot.add(mesh);
+        }
+      }
+
+      // 古代石橋只生成在完整／自訂地圖的障礙地形上；道路與可建造格一律不會被覆蓋。
       const bridgeSites: { x: number; z: number; rot: number; deckY: number; lowY: number }[] = [];
       if (data.mapMode === "layout") {
         const bridgeAxes = [
