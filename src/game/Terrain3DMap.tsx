@@ -596,15 +596,15 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
         shader.uniforms.uMistWorldSize = blackMistFrontUniforms.worldSize;
         shader.vertexShader = shader.vertexShader.replace(
           "#include <common>",
-          "#include <common>\\nvarying vec2 vMistFieldUv;",
+          "#include <common>\nvarying vec2 vMistFieldUv;",
         );
         shader.vertexShader = shader.vertexShader.replace(
           "#include <begin_vertex>",
-          "#include <begin_vertex>\\nvMistFieldUv = uv;",
+          "#include <begin_vertex>\nvMistFieldUv = uv;",
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <common>",
-          "#include <common>\\nvarying vec2 vMistFieldUv;\\nuniform float uMistTime;\\nuniform float uMistPower;\\nuniform vec2 uMistCenter;\\nuniform vec2 uMistWorldSize;",
+          "#include <common>\nvarying vec2 vMistFieldUv;\nuniform float uMistTime;\nuniform float uMistPower;\nuniform vec2 uMistCenter;\nuniform vec2 uMistWorldSize;",
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <alphamap_fragment>",
