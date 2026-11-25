@@ -2387,7 +2387,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
             x: (a.x + b.x) * 0.5,
             z: (a.z + b.z) * 0.5,
             rot: Math.atan2(-dz, dx),
-            length: distance - 2.05,
+            length: distance - 1.45,
             y: groundTop(a.h),
           });
         }
