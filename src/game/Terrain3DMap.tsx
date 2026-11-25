@@ -742,11 +742,8 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
         );
         shader.vertexShader = shader.vertexShader.replace(
           "#include <begin_vertex>",
-          "#include <begin_vertex>\nvRoadFlowUv = vec2(position.x / 0.34 + 0.5, position.z / 0.038 + 0.5);",
-        );
-        shader.vertexShader = shader.vertexShader.replace(
-          "#include <begin_vertex>",
           `#include <begin_vertex>
+          vRoadFlowUv = vec2(position.x / 0.34 + 0.5, position.z / 0.038 + 0.5);
           vec4 roadWorldPosition = vec4(transformed, 1.0);
           #ifdef USE_INSTANCING
             roadWorldPosition = instanceMatrix * roadWorldPosition;
@@ -863,7 +860,13 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
     // 海面焦散：兩組交錯波紋在材質內運算，不建立額外粒子或平面。
     // 透過共用 uniform 驅動深海與淺灘，讓遠景水域也有連續的潮汐流動感。
     const oceanSurfaceUniforms = { time: { value: 0 } };
-    const installOceanSurface = (material: THREE.MeshPhysicalMaterial, cacheKey: string) => {
+    const installOceanSurface = (material: THREE.MeshPhysicalMaterial, cacheKey: string, isShelf = false) => {
+      const shelfGradient = isShelf
+        ? "float shelfEdgeDistance = min(min(vUv.x, 1.0 - vUv.x), min(vUv.y, 1.0 - vUv.y));\n"
+          + "float shelfWaterBlend = smoothstep(0.008, 0.2, shelfEdgeDistance);\n"
+          + "diffuseColor.rgb = mix(vec3(0.025, 0.075, 0.098), diffuseColor.rgb, shelfWaterBlend);\n"
+          + "diffuseColor.rgb += vec3(0.006, 0.024, 0.03) * (1.0 - shelfWaterBlend) * 0.35;"
+        : "";
       material.onBeforeCompile = (shader) => {
         shader.uniforms.uOceanTime = oceanSurfaceUniforms.time;
         // 細分海面頂點沿法線做低幅度長波形變，真正改變剪影而非只改變貼圖顏色。
@@ -901,6 +904,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <color_fragment>",
           `#include <color_fragment>
+          ${shelfGradient}
 #ifdef USE_UV
           vec2 tideUv = vUv * vec2(17.0, 13.0);
           float tideA = abs(sin(tideUv.x + sin(tideUv.y * 0.72 - uOceanTime * 0.34) * 1.25 - uOceanTime * 0.42));
@@ -915,7 +919,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       material.customProgramCacheKey = () => cacheKey;
     };
     installOceanSurface(shared.floor, "tide-ocean-floor-caustics-v1");
-    installOceanSurface(shared.seaShelf, "tide-ocean-shelf-caustics-v1");
+    installOceanSurface(shared.seaShelf, "tide-ocean-shelf-caustics-v2", true);
 
     // 海岸浪沫：沿實例世界座標產生不同相位，讓浪花沿岸流動，而非整條海岸同步閃爍。
     const installShoreFoamFlow = (material: THREE.MeshBasicMaterial) => {
