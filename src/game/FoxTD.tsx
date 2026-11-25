@@ -4324,7 +4324,8 @@ export function FoxTD() {
     const updatePlacementDebug = (
       world: { x: number; y: number },
       preciseHit: boolean | null,
-      hitCell?: { gx: number; gy: number; height: number } | null,
+      hitCell: { gx: number; gy: number; height: number } | null,
+      placementReason: string | null,
     ) => {
       const gx = Math.floor(world.x / CELL);
       const gy = Math.floor(world.y / CELL);
@@ -4338,7 +4339,7 @@ export function FoxTD() {
           ? (onBoard ? "地塊已升起" : "黑霧未開拓")
           : (sim.current.blocked.has(key) ? "障礙／路障格" : "完整地圖地面");
       const height = inBounds ? (hitCell?.gx === gx && hitCell?.gy === gy ? hitCell.height : cellHeight(sim.current.heights, gx, gy)) : -1;
-      const placementReason = inBounds ? canPlaceReason(gx, gy) : "超出世界範圍";
+      const clickReason = inBounds ? placementReason : "超出世界範圍";
       const selectedId = pickRef.current;
       const selectedDef = selectedId === null
         ? null
@@ -4349,12 +4350,12 @@ export function FoxTD() {
         : shrinePlaceRef.current
           ? "祭壇模式"
           : selectedDef?.name ?? "未選擇塔卡";
-      let verdict = placementReason ?? "地形與佔用判定通過";
-      if (!placementReason && tileOfferRef.current && pickTemplateRef.current) verdict = "地塊拼接模式";
-      else if (!placementReason && stakeRef.current) verdict = "路障模式仍在接管點擊，請先關閉路障";
-      else if (!placementReason && shrinePlaceRef.current) verdict = "祭壇模式";
-      else if (!placementReason && selectedId === null) verdict = "請先選擇塔卡";
-      else if (!placementReason && selectedDef) {
+      let verdict = clickReason ?? "地形與佔用判定通過";
+      if (!clickReason && tileOfferRef.current && pickTemplateRef.current) verdict = "地塊拼接模式";
+      else if (!clickReason && stakeRef.current) verdict = "路障模式仍在接管點擊，請先關閉路障";
+      else if (!clickReason && shrinePlaceRef.current) verdict = "祭壇模式";
+      else if (!clickReason && selectedId === null) verdict = "請先選擇塔卡";
+      else if (!clickReason && selectedDef) {
         const cost = Math.max(1, Math.round(selectedDef.cost * (difficultyRef.current.towerCostMul ?? 1)));
         if (goldRef.current < cost) verdict = `金幣不足（需要 ${cost}）`;
         else verdict = "可放置";
@@ -4408,7 +4409,17 @@ export function FoxTD() {
         ? { x: (preciseCellHit.gx + 0.5) * CELL, y: (preciseCellHit.gy + 0.5) * CELL }
         : null;
       const p = preciseWorldHit ?? local(ev);
-      updatePlacementDebug(p, preciseCellHit !== null, preciseCellHit);
+      const clickGx = preciseCellHit?.gx ?? Math.floor(p.x / GRID);
+      const clickGy = preciseCellHit?.gy ?? Math.floor(p.y / GRID);
+      const isTowerPlacementClick =
+        phaseRef.current === "play" &&
+        !tileOfferRef.current?.length &&
+        !stakeRef.current &&
+        !shrinePlaceRef.current &&
+        pickRef.current !== null;
+      // 一般塔的合法性在這裡只算一次；診斷與後續放置共用同一結果。
+      const clickPlacementReason = isTowerPlacementClick ? canPlaceReason(clickGx, clickGy) : null;
+      updatePlacementDebug(p, preciseCellHit !== null, preciseCellHit, clickPlacementReason);
       sim.current.pointer = { ...p, down: true, inside: true };
       if (phaseRef.current !== "play") {
         if (!workshopRef.current) return;
@@ -4478,8 +4489,8 @@ export function FoxTD() {
       }
       // 所有放置模式共用這次 3D 地表命中結果；若射線未命中，才退回同一份 2D 座標備援。
       // 一般塔只改用 canPlaceReason 與塔資料寫入，不另做一套地面偵測。
-      const gx0 = preciseCellHit?.gx ?? Math.floor(p.x / GRID);
-      const gy0 = preciseCellHit?.gy ?? Math.floor(p.y / GRID);
+      const gx0 = clickGx;
+      const gy0 = clickGy;
       // 路障模式優先：點地圖即放，不先選中塔
       if (stakeRef.current && phaseRef.current === "play") {
         const gx = gx0;
@@ -4586,7 +4597,7 @@ export function FoxTD() {
       const diff = difficultyRef.current;
       const cost = Math.max(1, Math.round(base.cost * (diff.towerCostMul ?? 1)));
       const dmg = base.damage * (diff.towerDmgMul ?? 1);
-      const placementReason = canPlaceReason(gx, gy);
+      const placementReason = clickPlacementReason;
       if (placementReason) {
         setHover(`無法放置：${placementReason}`);
         return;
