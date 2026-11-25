@@ -6261,7 +6261,7 @@ Alt＋左鍵環視 · 右鍵平移 · 滾輪縮放 · [H]對準聖地 · [空格
                 <h2 className="menu-title">{phase === "win" ? "潮退，聖地仍在" : phase === "lose" ? "結界破碎" : "狐仙結界"}</h2>
                 <p className="menu-lead">
                   {phase === "ready"
-                    ? "選擇開局與難度，守護潮中聖地。自訂內容可刪除並自動儲存。"
+                    ? "深淵黑霧吞噬海上的殘土。聖地以仙力淨化海域、牽引海底地脈升起新土；唯有持續充能，才能為狐仙重建安居之所。"
                     : phase === "win"
                       ? "十二波妖潮已被擋下，結界依然完整。"
                       : "生命歸零。重整佈署，再試一次。"}
@@ -6271,12 +6271,12 @@ Alt＋左鍵環視 · 右鍵平移 · 滾輪縮放 · [H]對準聖地 · [空格
                 <div className="menu-grid">
                 <section className="menu-card">
                   <h3 className="menu-card-title">選擇開局</h3>
-                  <p className="menu-card-hint">從小地圖擴張，或挑戰完整關卡</p>
+                  <p className="menu-card-hint">擴張模式每三波必須升起一塊新地，讓戰線延伸並把黑霧推回深海</p>
                   <div className="menu-btn-row">
                     <button
                       className={"btn menu-pill" + (selectedLevelId === "mode-expand" ? " on" : " ghost")}
                       onClick={() => selectLevel("mode-expand", "expand")}
-                      title="從小地圖開始，每 3 波拼接新地塊"
+                      title="從小地圖開始；每 3 波必須選擇並放置新地塊，不可略過"
                     >
                       潮汐擴張 <span className="menu-pill-tag">推薦</span>
                     </button>
