@@ -772,7 +772,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           float swellA = sin(position.x * 0.055 + position.y * 0.039 + uOceanTime * 0.34);
           float swellB = sin(position.y * 0.083 - position.x * 0.026 - uOceanTime * 0.23);
           float capillary = sin((position.x + position.y) * 0.12 + uOceanTime * 0.52);
-          transformed.z += swellA * 0.024 + swellB * 0.012 + capillary * 0.003;`,
+          transformed.z += swellA * 0.082 + swellB * 0.036 + capillary * 0.009;`,
         );
         shader.vertexShader = shader.vertexShader.replace(
           "#include <beginnormal_vertex>",
@@ -780,12 +780,12 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           float normalPhaseA = position.x * 0.055 + position.y * 0.039 + uOceanTime * 0.34;
           float normalPhaseB = position.y * 0.083 - position.x * 0.026 - uOceanTime * 0.23;
           float normalPhaseC = (position.x + position.y) * 0.12 + uOceanTime * 0.52;
-          float swellDx = 0.024 * 0.055 * cos(normalPhaseA)
-            - 0.012 * 0.026 * cos(normalPhaseB)
-            + 0.003 * 0.12 * cos(normalPhaseC);
-          float swellDy = 0.024 * 0.039 * cos(normalPhaseA)
-            + 0.012 * 0.083 * cos(normalPhaseB)
-            + 0.003 * 0.12 * cos(normalPhaseC);
+          float swellDx = 0.082 * 0.055 * cos(normalPhaseA)
+            - 0.036 * 0.026 * cos(normalPhaseB)
+            + 0.009 * 0.12 * cos(normalPhaseC);
+          float swellDy = 0.082 * 0.039 * cos(normalPhaseA)
+            + 0.036 * 0.083 * cos(normalPhaseB)
+            + 0.009 * 0.12 * cos(normalPhaseC);
           objectNormal.xy += vec2(-swellDx, -swellDy);`,
         );
         shader.fragmentShader = shader.fragmentShader.replace(
@@ -801,7 +801,9 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           float tideB = abs(sin(tideUv.y * 1.18 - tideUv.x * 0.43 + cos(tideUv.x * 0.64 + uOceanTime * 0.27) * 0.9));
           float tideCaustic = pow(1.0 - smoothstep(0.025, 0.34, tideA * tideB), 3.0);
           diffuseColor.rgb += vec3(0.018, 0.072, 0.074) * tideCaustic;
-#endif`,
+#endif
+          float swellSheen = pow(max(0.0, 0.5 + 0.5 * sin(vOceanLocal.x * 0.055 + vOceanLocal.y * 0.039 + uOceanTime * 0.34)), 7.0);
+          diffuseColor.rgb += vec3(0.012, 0.038, 0.04) * swellSheen;
         );
       };
       material.customProgramCacheKey = () => cacheKey;
