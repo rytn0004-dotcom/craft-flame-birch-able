@@ -2839,7 +2839,10 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
 
       // 苔地零星長出成簇蘑菇，提供近景尺度變化；數量固定上限，不加入逐物件動畫。
       const mushroomCells = Array.from(tileCells.values()).filter((cell) => {
-        if (cell.h !== 1 || terrainRegion(cell) !== "moss" || !detailIsClear(cell, 0.9)) return false;
+        if (cell.h !== 1 || terrainRegion(cell) !== "moss") return false;
+        if (protectedBuildings.some((building) =>
+          Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 0.9,
+        )) return false;
         const seed = Math.abs(Math.sin(cell.x * 37.1 + cell.z * 91.7) * 21873.5) % 1;
         return seed > 0.982;
       }).slice(0, 64);
