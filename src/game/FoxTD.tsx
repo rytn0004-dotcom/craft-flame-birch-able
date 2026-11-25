@@ -1276,6 +1276,8 @@ export function FoxTD() {
   const speedRef = useRef(1);
   const endlessRef = useRef(false);
   const stakeRef = useRef(false);
+  // 潮紋祭壇與路障／一般塔共用同一個點擊流程；必須有穩定 ref，供事件回呼讀取模式。
+  const shrinePlaceRef = useRef(false);
   const workshopRef = useRef(false);
   const pausedRef = useRef(false);
   const wavesRef = useRef<WaveDef[] | null>(null);
@@ -4498,6 +4500,8 @@ export function FoxTD() {
         confirmPlaceTile(Math.floor(gx / TILE), Math.floor(gy / TILE));
         return;
       }
+      // 所有放置模式共用這次 3D 地表命中結果；若射線未命中，才退回同一份 2D 座標備援。
+      // 一般塔只改用 canPlaceReason 與塔資料寫入，不另做一套地面偵測。
       const gx0 = preciseCellHit?.gx ?? Math.floor(p.x / GRID);
       const gy0 = preciseCellHit?.gy ?? Math.floor(p.y / GRID);
       // 路障模式優先：點地圖即放，不先選中塔
@@ -4908,6 +4912,12 @@ export function FoxTD() {
   }
 
   function start() {
+    // 新局一律清除舊放置模式，避免上一局的路障／祭壇狀態接管新局點擊。
+    stakeRef.current = false;
+    setStaking(false);
+    shrinePlaceRef.current = false;
+    pickRef.current = null;
+    setPick(null);
     // 每局新種子：可重現可改成固定數字；此處用時間混合難度字串
     {
       const base = Date.now() ^ (difficultyId || "").split("").reduce((a, c) => a + c.charCodeAt(0) * 17, 0);
