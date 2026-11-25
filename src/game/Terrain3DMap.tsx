@@ -350,13 +350,13 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     blackMistTexture.colorSpace = THREE.SRGBColorSpace;
     blackMistTexture.needsUpdate = true;
 
-    // 全地圖深淵霧幕：覆蓋 200×200 可探索範圍；地塊地表位於霧幕上方，因此已開啟區域自然保持明亮。
+    // 全世界深淵霧幕：覆蓋 400×400 可探索範圍並向外延伸 90 格；已升起地表在霧幕上方保持明亮。
     const blackMistFieldSize = 256;
     const blackMistFieldWidth = COLS + 180;
     const blackMistFieldDepth = ROWS + 180;
     const blackMistFieldPixels = new Uint8Array(blackMistFieldSize * blackMistFieldSize * 4);
     const blackMistFieldMaskPixels = new Uint8Array(blackMistFieldSize * blackMistFieldSize * 4);
-    // 初始 HQ 地塊固定在地圖中央槽位；淨界核心對齊該地塊中心（110, 110）。
+    // 初始 HQ 地塊固定在 20×20 棋盤中央槽位；淨界核心對齊該地塊中心（210, 210）。
     const sanctuaryCenterX = COLS / 2 + TILE / 2;
     const sanctuaryCenterZ = ROWS / 2 + TILE / 2;
     for (let y = 0; y < blackMistFieldSize; y++) for (let x = 0; x < blackMistFieldSize; x++) {
@@ -4343,8 +4343,8 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     const reset = () => {
       const snapshot = snapshotRef.current();
       const hq = snapshot.towers.find((tower) => tower.sanctuary);
-      const centerX = hq ? hq.x / CELL : 10;
-      const centerZ = hq ? hq.y / CELL : 10;
+      const centerX = hq ? hq.x / CELL : COLS / 2;
+      const centerZ = hq ? hq.y / CELL : ROWS / 2;
       const gx = Math.max(0, Math.min(COLS - 1, Math.floor(centerX)));
       const gy = Math.max(0, Math.min(ROWS - 1, Math.floor(centerZ)));
       const terrainHeight = snapshot.heights[gy * COLS + gx] ?? 0;
@@ -4450,8 +4450,8 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
 
       const snapshot = snapshotRef.current();
       const hq = snapshot.towers.find((tower) => tower.sanctuary);
-      const centerX = hq ? hq.x / CELL : 10;
-      const centerZ = hq ? hq.y / CELL : 10;
+      const centerX = hq ? hq.x / CELL : COLS / 2;
+      const centerZ = hq ? hq.y / CELL : ROWS / 2;
       const h = hq ? snapshot.heights[hq.gy * COLS + hq.gx] ?? 0 : 0;
       controls.target.set(centerX, groundTop(h), centerZ);
       camera.position.set(centerX + 5, groundTop(h) + 27, centerZ + 5);
