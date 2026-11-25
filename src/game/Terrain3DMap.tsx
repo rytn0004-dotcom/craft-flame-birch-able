@@ -486,6 +486,8 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
     const foliageWindUniform = { value: 0 };
     const sanctuarySigilUniforms = { time: { value: 0 }, power: { value: 0.18 } };
     const roadGuideUniforms = { time: { value: 0 } };
+    const shoreFoamUniforms = { time: { value: 0 } };
+    const cliffStrataUniforms = { time: { value: 0 } };
     const blackMistFrontUniforms = { time: { value: 0 }, power: { value: 0.12 } };
     const shared = {
       blackMist: new THREE.MeshBasicMaterial({
@@ -642,8 +644,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       ramp: new THREE.MeshStandardMaterial({ color: "#aeb49c", roughness: 0.95, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.02 }),
     };
 
-    // 黑霧淨界前緣：以世界座標在 GPU 推進安全半徑，邊界帶有緩慢潮汐起伏。
-    // 保留原本中央固定遮罩作為保底；動態擴張只改材質透明度，不重建地形或霧粒子。
+    // 黑霧淨界前緣：已開拓遮罩決定退霧範圍，GPU 只在地塊外緣疊加潮汐光澤。
     const installBlackMistFront = (material: THREE.MeshBasicMaterial) => {
       material.onBeforeCompile = (shader) => {
         shader.uniforms.uMistTime = blackMistFrontUniforms.time;
@@ -773,7 +774,72 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
     installOceanSurface(shared.floor, "tide-ocean-floor-caustics-v1");
     installOceanSurface(shared.seaShelf, "tide-ocean-shelf-caustics-v1");
 
-    // 草、花、樹冠與蘑菇共用頂點風場；每個實例只在 GPU 彎曲頂端，不逐物件跑動畫。
+    // 海岸浪沫：沿實例世界座標產生不同相位，讓浪花沿岸流動，而非整條海岸同步閃爍。
+    const installShoreFoamFlow = (material: THREE.MeshBasicMaterial) => {
+      material.onBeforeCompile = (shader) => {
+        shader.uniforms.uShoreFoamTime = shoreFoamUniforms.time;
+        shader.vertexShader = shader.vertexShader.replace(
+          "#include <common>",
+          "#include <common>\\nvarying vec2 vShoreFoamUv;\\nvarying float vShoreFoamPhase;",
+        );
+        shader.vertexShader = shader.vertexShader.replace(
+          "#include <begin_vertex>",
+          "#include <begin_vertex>\\nvShoreFoamUv = uv;\\n#ifdef USE_INSTANCING\\nvShoreFoamPhase = dot(instanceMatrix[3].xz, vec2(0.19, 0.13));\\n#else\\nvShoreFoamPhase = dot(position.xz, vec2(0.19, 0.13));\\n#endif",
+        );
+        shader.fragmentShader = shader.fragmentShader.replace(
+          "#include <common>",
+          "#include <common>\\nvarying vec2 vShoreFoamUv;\\nvarying float vShoreFoamPhase;\\nuniform float uShoreFoamTime;",
+        );
+        shader.fragmentShader = shader.fragmentShader.replace(
+          "#include <color_fragment>",
+          [
+            "#include <color_fragment>",
+            "float shoreFlowA = 0.5 + 0.5 * sin(vShoreFoamUv.x * 18.0 - uShoreFoamTime * 1.25 + vShoreFoamPhase);",
+            "float shoreFlowB = 0.5 + 0.5 * sin(vShoreFoamUv.x * 31.0 + vShoreFoamUv.y * 8.0 - uShoreFoamTime * 0.72 + vShoreFoamPhase * 1.7);",
+            "float foamCrest = smoothstep(0.72, 0.98, shoreFlowA * (0.72 + shoreFlowB * 0.28));",
+            "diffuseColor.rgb += vec3(0.075, 0.16, 0.135) * foamCrest;",
+            "diffuseColor.a *= 0.88 + foamCrest * 0.12;",
+          ].join("\\n"),
+        );
+      };
+      material.customProgramCacheKey = () => "tide-shore-foam-flow-v1";
+    };
+    installShoreFoamFlow(shared.shoreFoam);
+
+    // 崖壁使用材質內的細層理與緩慢礦脈光，不添加額外幾何，也不影響地形碰撞。
+    const installCliffStrata = (material: THREE.MeshStandardMaterial) => {
+      material.onBeforeCompile = (shader) => {
+        shader.uniforms.uCliffStrataTime = cliffStrataUniforms.time;
+        shader.vertexShader = shader.vertexShader.replace(
+          "#include <common>",
+          "#include <common>\\nvarying vec2 vCliffStrataUv;",
+        );
+        shader.vertexShader = shader.vertexShader.replace(
+          "#include <begin_vertex>",
+          "#include <begin_vertex>\\nvCliffStrataUv = uv;",
+        );
+        shader.fragmentShader = shader.fragmentShader.replace(
+          "#include <common>",
+          "#include <common>\\nvarying vec2 vCliffStrataUv;\\nuniform float uCliffStrataTime;",
+        );
+        shader.fragmentShader = shader.fragmentShader.replace(
+          "#include <color_fragment>",
+          [
+            "#include <color_fragment>",
+            "float strataWarp = sin(vCliffStrataUv.x * 13.0 + sin(vCliffStrataUv.y * 8.0) * 1.4);",
+            "float strataLine = 1.0 - smoothstep(0.018, 0.075, abs(fract(vCliffStrataUv.y * 9.0 + strataWarp * 0.018) - 0.5));",
+            "float strataBreak = smoothstep(0.18, 0.82, sin(vCliffStrataUv.x * 21.0 + sin(vCliffStrataUv.y * 17.0) * 2.1) * 0.5 + 0.5);",
+            "float mineralVein = pow(max(0.0, sin(vCliffStrataUv.x * 26.0 - uCliffStrataTime * 0.22 + vCliffStrataUv.y * 5.0)), 18.0);",
+            "diffuseColor.rgb *= 0.94 + strataLine * strataBreak * 0.09;",
+            "diffuseColor.rgb += vec3(0.018, 0.065, 0.052) * mineralVein * strataBreak * 0.55;",
+          ].join("\\n"),
+        );
+      };
+      material.customProgramCacheKey = () => "tide-cliff-strata-mineral-v1";
+    };
+    installCliffStrata(shared.cliff);
+
+    // 草、花、樹冠與蘑菇共用頂點風場；每個實例只在 GPU 彎曲頂端，不逐物件跑動畫.
     const installFoliageWind = (material: THREE.MeshStandardMaterial, cacheKey: string) => {
       material.onBeforeCompile = (shader) => {
         shader.uniforms.uFoliageTime = foliageWindUniform;
@@ -4957,7 +5023,9 @@ uniform float uFoliageTime;`,
       waterBumpMap.offset.x = (time * 0.000006) % 1;
       waterBumpMap.offset.y = (time * 0.0000035) % 1;
       oceanSurfaceUniforms.time.value = time * 0.001;
-      // 海岸泡沫只有極小幅度變化，避免像閃爍特效，保留柔和潮汐呼吸。
+      shoreFoamUniforms.time.value = time * 0.001;
+      cliffStrataUniforms.time.value = time * 0.001;
+      // 海岸泡沫除了整體呼吸，還有依岸線位置錯相的流動脈衝。
       shared.shoreFoam.opacity = 0.62 + Math.sin(time * 0.00072) * 0.055;
       if (!waterRippleMesh || !waterRippleEntries.length) return;
       for (let i = 0; i < waterRippleEntries.length; i++) {
