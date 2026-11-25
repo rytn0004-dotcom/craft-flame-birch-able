@@ -4498,13 +4498,21 @@ export function FoxTD() {
         }
         return;
       }
-      // 已選塔要放置時，優先放塔，不搶選既有建築（避免點高地卻被聖地／鄰塔吃掉）
+      // 沒有放置工具時，先以 3D 建築實際網格命中選取，再用地面距離作備援。
+      // 這可避免點聖地屋頂／城牆時，因高度投影誤差而選不到本陣。
       if (pickRef.current === null && !stakeRef.current && !shrinePlaceRef.current) {
+        const pickedTower = terrain3DApiRef.current?.pickTower(ev.clientX, ev.clientY);
+        if (pickedTower != null && s.towers[pickedTower]) {
+          selRef.current = pickedTower;
+          setSel(pickedTower);
+          pickRef.current = null;
+          setPick(null);
+          return;
+        }
         for (let i = 0; i < s.towers.length; i++) {
           const tw = s.towers[i];
-          const py = tw.y;
           const hitR = tw.sanctuary ? 112 : 42;
-          if (Math.hypot(tw.x - p.x, py - p.y) < hitR) {
+          if (Math.hypot(tw.x - p.x, tw.y - p.y) < hitR) {
             selRef.current = i;
             setSel(i);
             pickRef.current = null;
