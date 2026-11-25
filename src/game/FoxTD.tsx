@@ -4298,9 +4298,10 @@ export function FoxTD() {
     };
     const local = (ev: PointerEvent, precise = false) => {
       const api = terrain3DApiRef.current;
-      const world = precise
-        ? (api?.screenToWorldPrecise(ev.clientX, ev.clientY) ?? api?.screenToWorld(ev.clientX, ev.clientY))
-        : api?.screenToWorld(ev.clientX, ev.clientY);
+      // 預覽與點擊統一先用相同的高度平面投影，避免分塊 InstancedMesh 射線命中與游標格子不一致。
+      const projected = api?.screenToWorld(ev.clientX, ev.clientY);
+      const preciseHit = precise ? api?.screenToWorldPrecise(ev.clientX, ev.clientY) : null;
+      const world = projected ?? preciseHit;
       if (world) return world;
       const screen = screenOf(ev);
       const cam = sim.current.cam;
