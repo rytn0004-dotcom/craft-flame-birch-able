@@ -514,6 +514,15 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       ramp: new THREE.MeshStandardMaterial({ color: "#aeb49c", roughness: 0.95, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.02 }),
     };
 
+    // 透明命中盒只供 Raycaster 使用，完全不參與顯示與深度寫入；保證 HQ 屋頂／城牆容易選取。
+    const buildingHitMaterial = new THREE.MeshBasicMaterial({
+      transparent: true,
+      opacity: 0,
+      colorWrite: false,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+
     const getTexture = (image: HTMLImageElement) => {
       let texture = textureCache.get(image);
       if (!texture) {
@@ -3963,7 +3972,18 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         else createTowerBase(tower, data.heights);
         // 讓 3D 點擊能直接對應遊戲塔陣列索引，不再只靠地面距離猜測。
         const hitRoot = buildingRoot.children[childIndex];
-        if (hitRoot) hitRoot.userData.gameTowerIndex = i;
+        if (hitRoot) {
+          const isSanctuary = !!tower.sanctuary;
+          const hitWidth = isSanctuary ? 6.6 : 2.05;
+          const hitHeight = isSanctuary ? 5.8 : 3.8;
+          const hitBox = new THREE.Mesh(
+            new THREE.BoxGeometry(hitWidth, hitHeight, hitWidth),
+            buildingHitMaterial,
+          );
+          hitBox.position.y = hitHeight * 0.5;
+          hitRoot.add(hitBox);
+          hitRoot.userData.gameTowerIndex = i;
+        }
       }
     };
 
@@ -4555,6 +4575,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       contactShadowGeometry.dispose();
       for (const texture of textureCache.values()) texture.dispose();
       for (const material of towerAccentMaterials.values()) material.dispose();
+      buildingHitMaterial.dispose();
       renderer.dispose();
       renderer.domElement.remove();
     };
