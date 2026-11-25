@@ -5575,6 +5575,7 @@ uniform float uFoliageTime;`,
       shared.waterGlint.dispose();
       shared.firefly.dispose();
       shared.treeBark.dispose();
+      shared.grass.dispose();
       shared.foliageWind.dispose();
       shared.meadowBloom.dispose();
       shared.roadGuide.dispose();
