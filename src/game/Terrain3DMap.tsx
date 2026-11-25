@@ -774,6 +774,20 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           float capillary = sin((position.x + position.y) * 0.12 + uOceanTime * 0.52);
           transformed.z += swellA * 0.024 + swellB * 0.012 + capillary * 0.003;`,
         );
+        shader.vertexShader = shader.vertexShader.replace(
+          "#include <beginnormal_vertex>",
+          `#include <beginnormal_vertex>
+          float normalPhaseA = position.x * 0.055 + position.y * 0.039 + uOceanTime * 0.34;
+          float normalPhaseB = position.y * 0.083 - position.x * 0.026 - uOceanTime * 0.23;
+          float normalPhaseC = (position.x + position.y) * 0.12 + uOceanTime * 0.52;
+          float swellDx = 0.024 * 0.055 * cos(normalPhaseA)
+            - 0.012 * 0.026 * cos(normalPhaseB)
+            + 0.003 * 0.12 * cos(normalPhaseC);
+          float swellDy = 0.024 * 0.039 * cos(normalPhaseA)
+            + 0.012 * 0.083 * cos(normalPhaseB)
+            + 0.003 * 0.12 * cos(normalPhaseC);
+          objectNormal.xy += vec2(-swellDx, -swellDy);`,
+        );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <common>",
           "#include <common>\nuniform float uOceanTime;\nvarying vec2 vOceanLocal;",
