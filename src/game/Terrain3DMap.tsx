@@ -587,15 +587,15 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
         shader.uniforms.uSigilPower = sanctuarySigilUniforms.power;
         shader.vertexShader = shader.vertexShader.replace(
           "#include <common>",
-          "#include <common>\\nvarying vec2 vSanctuaryUv;",
+          "#include <common>\nvarying vec2 vSanctuaryUv;",
         );
         shader.vertexShader = shader.vertexShader.replace(
           "#include <begin_vertex>",
-          "#include <begin_vertex>\\nvSanctuaryUv = uv;",
+          "#include <begin_vertex>\nvSanctuaryUv = uv;",
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <common>",
-          "#include <common>\\nvarying vec2 vSanctuaryUv;\\nuniform float uSigilTime;\\nuniform float uSigilPower;",
+          "#include <common>\nvarying vec2 vSanctuaryUv;\nuniform float uSigilTime;\nuniform float uSigilPower;",
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <color_fragment>",
@@ -626,15 +626,15 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
         shader.uniforms.uRoadFlowTime = roadGuideUniforms.time;
         shader.vertexShader = shader.vertexShader.replace(
           "#include <common>",
-          "#include <common>\\nvarying vec2 vRoadFlowUv;",
+          "#include <common>\nvarying vec2 vRoadFlowUv;",
         );
         shader.vertexShader = shader.vertexShader.replace(
           "#include <begin_vertex>",
-          "#include <begin_vertex>\\nvRoadFlowUv = uv;",
+          "#include <begin_vertex>\nvRoadFlowUv = uv;",
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <common>",
-          "#include <common>\\nvarying vec2 vRoadFlowUv;\\nuniform float uRoadFlowTime;",
+          "#include <common>\nvarying vec2 vRoadFlowUv;\nuniform float uRoadFlowTime;",
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <color_fragment>",
