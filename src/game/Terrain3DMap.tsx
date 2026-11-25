@@ -95,6 +95,10 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     let altDown = false;
     let lastBuildAt = 0;
     let lastTerrainKey = "";
+    let lastTerrainHeightsRef: number[] | null = null;
+    let lastTerrainBlockedRef: Set<string> | null = null;
+    let lastTerrainPlacedRef: PlacedTile[] | null = null;
+    let lastTerrainMapMode: "expand" | "layout" | null = null;
     let lastBuildingKey = "";
 
     const scene = new THREE.Scene();
@@ -4513,17 +4517,29 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
 
       if (time - lastBuildAt > 700) {
         lastBuildAt = time;
-        let heightHash = 2166136261;
-        for (let i = 0; i < data.heights.length; i++) heightHash = Math.imul(heightHash ^ (data.heights[i] ?? 0), 16777619);
-        let blockedHash = 2166136261;
-        for (const key of data.blocked) {
-          for (let i = 0; i < key.length; i++) blockedHash = Math.imul(blockedHash ^ key.charCodeAt(i), 16777619);
-        }
-        const placedKey = data.placed.map((tile) => [tile.tc, tile.tr, tile.templateId, tile.rot].join(",")).join("|");
-        const terrainKey = data.mapMode + "|" + placedKey + "|" + heightHash + "|" + blockedHash;
-        if (terrainKey !== lastTerrainKey) {
-          rebuildTerrain(data);
-          lastTerrainKey = terrainKey;
+        // 地形資料以不可變引用更新；未變更時不再每 700ms 重掃 400×400 高度陣列與碰撞集合。
+        const terrainInputsChanged =
+          data.heights !== lastTerrainHeightsRef ||
+          data.blocked !== lastTerrainBlockedRef ||
+          data.placed !== lastTerrainPlacedRef ||
+          data.mapMode !== lastTerrainMapMode;
+        if (terrainInputsChanged) {
+          let heightHash = 2166136261;
+          for (let i = 0; i < data.heights.length; i++) heightHash = Math.imul(heightHash ^ (data.heights[i] ?? 0), 16777619);
+          let blockedHash = 2166136261;
+          for (const key of data.blocked) {
+            for (let i = 0; i < key.length; i++) blockedHash = Math.imul(blockedHash ^ key.charCodeAt(i), 16777619);
+          }
+          const placedKey = data.placed.map((tile) => [tile.tc, tile.tr, tile.templateId, tile.rot].join(",")).join("|");
+          const terrainKey = data.mapMode + "|" + placedKey + "|" + heightHash + "|" + blockedHash;
+          if (terrainKey !== lastTerrainKey) {
+            rebuildTerrain(data);
+            lastTerrainKey = terrainKey;
+          }
+          lastTerrainHeightsRef = data.heights;
+          lastTerrainBlockedRef = data.blocked;
+          lastTerrainPlacedRef = data.placed;
+          lastTerrainMapMode = data.mapMode;
         }
         const buildingKey = data.towers.map((tower) =>
           [tower.sanctuary ? "hq" : tower.stake ? "stake" : "tower", tower.gx, tower.gy, tower.def, tower.level, tower.hqFireLv ?? 0, tower.hqFortifyLv ?? 0].join(","),
@@ -4674,9 +4690,9 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
             Alt＋左鍵旋轉 · 右鍵平移 · 滾輪縮放
           </div>
           <div className="pointer-events-none absolute bottom-3 left-3 z-10 rounded-lg border border-[#8ec8ee33] bg-[#061525cc] px-3 py-2 text-[11px] text-[#9ec4de]">
-            建塔預覽：綠＝平地可建 · 金＝高地可建 · 紅＝不可建
-            <span className="block mt-1 text-[#d8c89e]">0～3 級皆可建塔｜1／2／3 級分別有單／雙／三層岩沿</span>
-            <span className="block mt-1 text-[#83d9d5]">擴張時黑霧侵蝕外緣岸線 · 聖地充能可增強淨界、削弱深淵迷霧</span>
+            道路與高地皆可建造 · 僅未升起區域及已佔用格不可建
+            <span className="block mt-1 text-[#d8c89e]">高地 0～3 級保留不同高度外觀與射程加成</span>
+            <span className="block mt-1 text-[#83d9d5]">深淵霧覆蓋未開拓世界 · 聖地充能可削弱霧勢</span>
           </div>
           <button
             type="button"
