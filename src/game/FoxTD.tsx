@@ -1247,6 +1247,8 @@ export function FoxTD() {
     ray: "尚未點擊",
     tower: "未選擇",
     verdict: "移動滑鼠到地面查看",
+    pointer: "尚未收到滑鼠事件",
+    api: "等待 3D 場景",
   });
   const [speed, setSpeed] = useState(1);
   const [endless, setEndless] = useState(false);
@@ -4330,7 +4332,7 @@ export function FoxTD() {
 
     // 診斷只在格子／判定結果改變時更新 React 狀態；滑鼠每幀移動不會反覆觸發重繪。
     let lastPlacementDebugKey = "";
-    const updatePlacementDebug = (world: { x: number; y: number }, preciseHit: boolean | null) => {
+    const updatePlacementDebug = (world: { x: number; y: number }, preciseHit: boolean | null, ev: PointerEvent) => {
       const gx = Math.floor(world.x / CELL);
       const gy = Math.floor(world.y / CELL);
       const inBounds = gx >= 0 && gy >= 0 && gx < COLS && gy < ROWS;
@@ -4359,15 +4361,24 @@ export function FoxTD() {
         if (goldRef.current < cost) verdict = `金幣不足（需要 ${cost}）`;
         else verdict = "可放置";
       }
+      const apiReady = terrain3DApiRef.current !== null;
       const ray = preciseHit === null
-        ? "平面投影預覽（尚未點擊驗證）"
+        ? (apiReady ? "3D 平面射線預覽（點擊時驗證地表網格）" : "3D API 未就緒，使用 2D 備援")
         : preciseHit
           ? "已命中 3D 地表網格"
           : "未命中 3D 網格，使用投影備援";
-      const debugKey = [gx, gy, height, board, ray, tower, verdict].join("|");
+      const stageRect = wrapRef.current?.getBoundingClientRect();
+      const relativeX = stageRect ? Math.round(ev.clientX - stageRect.left) : Math.round(ev.clientX);
+      const relativeY = stageRect ? Math.round(ev.clientY - stageRect.top) : Math.round(ev.clientY);
+      const pointer = stageRect
+        ? `畫面 ${Math.round(ev.clientX)},${Math.round(ev.clientY)} · 戰場 ${relativeX},${relativeY} / ${Math.round(stageRect.width)}×${Math.round(stageRect.height)}`
+        : `畫面 ${Math.round(ev.clientX)},${Math.round(ev.clientY)} · 舞台未取得`;
+      const api = apiReady ? "3D API 已連線" : "3D API 未連線";
+      // 像素座標以 8px 為單位節流；跨格時仍立即更新診斷。
+      const debugKey = [gx, gy, height, board, ray, tower, verdict, Math.floor(relativeX / 8), Math.floor(relativeY / 8), api].join("|");
       if (debugKey === lastPlacementDebugKey) return;
       lastPlacementDebugKey = debugKey;
-      setPlacementDebug({ gx, gy, height, board, ray, tower, verdict });
+      setPlacementDebug({ gx, gy, height, board, ray, tower, verdict, pointer, api });
     };
 
     const onMove = (ev: PointerEvent) => {
@@ -4377,7 +4388,7 @@ export function FoxTD() {
       }
       const world = local(ev);
       sim.current.pointer = { ...world, down: sim.current.pointer.down, inside: true };
-      updatePlacementDebug(world, null);
+      updatePlacementDebug(world, null, ev);
       // 擴張預覽：游標移到最新接口時提示可否放置
       if (tileOfferRef.current && pickTemplateRef.current && phaseRef.current === "play") {
         const tid = pickTemplateRef.current;
@@ -4412,7 +4423,7 @@ export function FoxTD() {
       if (!isGameSurface(ev) || ev.button !== 0 || ev.altKey) return;
       const preciseWorldHit = terrain3DApiRef.current?.screenToWorldPrecise(ev.clientX, ev.clientY) ?? null;
       const p = preciseWorldHit ?? local(ev);
-      updatePlacementDebug(p, preciseWorldHit !== null);
+      updatePlacementDebug(p, preciseWorldHit !== null, ev);
       sim.current.pointer = { ...p, down: true, inside: true };
       if (phaseRef.current !== "play") {
         if (!workshopRef.current) return;
@@ -4660,7 +4671,8 @@ export function FoxTD() {
     const onContext = (ev: Event) => ev.preventDefault();
 
     const inputSurface = wrapRef.current ?? canvas;
-    inputSurface.addEventListener("pointermove", onMove);
+    // 和 pointerdown 一樣使用捕捉階段，避免 3D 控制器或其他子元件攔截滑鼠移動。
+    inputSurface.addEventListener("pointermove", onMove, true);
     // 在捕捉階段先取得點擊，避免 OrbitControls 或 3D 子元件阻止事件冒泡而讓建塔邏輯收不到。
     inputSurface.addEventListener("pointerdown", onDown, true);
     inputSurface.addEventListener("pointerup", onUp);
@@ -4669,7 +4681,7 @@ export function FoxTD() {
     inputSurface.addEventListener("contextmenu", onContext);
     return () => {
       cancelAnimationFrame(raf);
-      inputSurface.removeEventListener("pointermove", onMove);
+      inputSurface.removeEventListener("pointermove", onMove, true);
       inputSurface.removeEventListener("pointerdown", onDown, true);
       inputSurface.removeEventListener("pointerup", onUp);
       inputSurface.removeEventListener("pointercancel", onUp);
@@ -6075,6 +6087,8 @@ Alt＋左鍵環視 · 右鍵平移 · 滾輪縮放 · [H]對準聖地 · [空格
               <div className="mb-1 font-semibold tracking-wide text-[#f2d89b]">建塔／地塊診斷</div>
               {placementDebug.gx >= 0 ? (
                 <>
+                  <div>滑鼠：{placementDebug.pointer}</div>
+                  <div>座標來源：{placementDebug.api}</div>
                   <div>格子：({placementDebug.gx}, {placementDebug.gy}) · 高度 Lv.{placementDebug.height}</div>
                   <div>地塊：{placementDebug.board}</div>
                   <div>射線：{placementDebug.ray}</div>
