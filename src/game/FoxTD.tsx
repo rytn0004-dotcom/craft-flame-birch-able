@@ -1239,17 +1239,8 @@ export function FoxTD() {
   const [pick, setPick] = useState<number | null>(null);
   const [sel, setSel] = useState<number | null>(null);
   const [hover, setHover] = useState("");
-  const [placementDebug, setPlacementDebug] = useState({
-    gx: -1,
-    gy: -1,
-    height: 0,
-    board: "等待滑鼠",
-    ray: "尚未點擊",
-    tower: "未選擇",
-    verdict: "移動滑鼠到地面查看",
-    pointer: "尚未收到滑鼠事件",
-    api: "等待 3D 場景",
-  });
+  // 診斷面板使用 DOM ref 直接更新，避免每次跨格都觸發 FoxTD 整體 React 重繪。
+  const placementDebugRef = useRef<HTMLDivElement | null>(null);
   const [speed, setSpeed] = useState(1);
   const [endless, setEndless] = useState(false);
   const [autoUpgrade, setAutoUpgrade] = useState<AutoUpgradeMode>("off");
@@ -4378,14 +4369,25 @@ export function FoxTD() {
         : preciseHit
           ? "已命中 3D 地表網格"
           : "未命中 3D 網格，使用投影備援";
-      // 診斷只顯示命中方式，不追蹤像素座標；只有跨格或判定真正改變時才觸發 React 更新。
-      // 避免游標每移動 8px 就重繪整個遊戲介面，造成格子判定時畫面閃爍。
+      // 只在格子／判定變更時更新診斷面板，直接寫入獨立 DOM 節點，
+      // 不觸發 React 狀態更新，避免整個遊戲樹重繪造成頻閃。
       const pointer = preciseHit ? "3D 地表格網命中" : "平面座標備援";
       const api = apiReady ? "3D API 已連線" : "3D API 未連線";
       const debugKey = [gx, gy, height, board, ray, tower, verdict, api].join("|");
-      if (debugKey === lastPlacementDebugKey) return;
+      const debugText = [
+        `滑鼠：${pointer}`,
+        `座標來源：${api}`,
+        `格子：(${gx}, ${gy}) · 高度 Lv.${height}`,
+        `地塊：${board}`,
+        `射線：${ray}`,
+        `塔卡：${tower}`,
+        `判定：${verdict}`,
+      ].join("\\n");
+      const panel = placementDebugRef.current;
+      if (!panel) return;
+      if (debugKey === lastPlacementDebugKey && panel.textContent === debugText) return;
       lastPlacementDebugKey = debugKey;
-      setPlacementDebug({ gx, gy, height, board, ray, tower, verdict, pointer, api });
+      panel.textContent = debugText;
     };
 
     const onMove = (ev: PointerEvent) => {
@@ -4894,14 +4896,16 @@ export function FoxTD() {
 
   function canPlaceReason(gx: number, gy: number): string | null {
     if (gx < 0 || gy < 0 || gx >= COLS || gy >= ROWS) return "超出世界範圍";
+    // 聖地本體、HQ 核心與周圍保留格都視為占用，不允許一般塔覆蓋。
+    if (isSanctuaryFootprint(gx, gy)) return "聖地占用範圍不可建塔";
     if (isExpandBoard(boardRef.current)) {
-      // 地塊擴張：只要地塊已升起，道路與 0～3 級高地一律可建。
+      // 擴張地圖：黑霧未開拓不可建；道路固定 Lv0，只有 Lv1～3 高地可放一般塔。
       if (!isCellOnBoard(boardRef.current, gx, gy)) return "黑霧尚未散去，這塊地還沒升起";
+      if (cellHeight(sim.current.heights, gx, gy) <= 0) return "道路（Lv.0）不可放置塔";
     } else if (sim.current.blocked.has(cellKey(gx, gy))) {
       // 完整關卡：仍保留原有牆體、障礙及路障保護。
       return "障礙／路障不可建";
     }
-    // 只保留同格不能重疊；不再限制擴張地塊上的道路、入口或高低差。
     if (sim.current.towers.some((t) => t.gx === gx && t.gy === gy)) return "此格已有建築";
     return null;
   }
@@ -6124,19 +6128,9 @@ Alt＋左鍵環視 · 右鍵平移 · 滾輪縮放 · [H]對準聖地 · [空格
               aria-live="polite"
             >
               <div className="mb-1 font-semibold tracking-wide text-[#f2d89b]">建塔／地塊診斷</div>
-              {placementDebug.gx >= 0 ? (
-                <>
-                  <div>滑鼠：{placementDebug.pointer}</div>
-                  <div>座標來源：{placementDebug.api}</div>
-                  <div>格子：({placementDebug.gx}, {placementDebug.gy}) · 高度 Lv.{placementDebug.height}</div>
-                  <div>地塊：{placementDebug.board}</div>
-                  <div>射線：{placementDebug.ray}</div>
-                  <div>塔卡：{placementDebug.tower}</div>
-                  <div className="font-semibold text-[#ffe1a5]">判定：{placementDebug.verdict}</div>
-                </>
-              ) : (
-                <div className="text-[#9ec4de]">移動滑鼠到戰場地面，查看格子座標與建造判定</div>
-              )}
+              <div ref={placementDebugRef} className="whitespace-pre-line text-[#d8e8f5]">
+                移動滑鼠到戰場地面，查看格子座標與建造判定
+              </div>
             </div>
           )}
           {phase === "play" && bossBannerUi && (
