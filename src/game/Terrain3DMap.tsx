@@ -745,8 +745,14 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           "#include <begin_vertex>\nvRoadFlowUv = vec2(position.x / 0.34 + 0.5, position.z / 0.038 + 0.5);",
         );
         shader.vertexShader = shader.vertexShader.replace(
-          "#include <worldpos_vertex>",
-          "#include <worldpos_vertex>\nvRoadFlowWorldPosition = worldPosition.xyz;",
+          "#include <begin_vertex>",
+          `#include <begin_vertex>
+          vec4 roadWorldPosition = vec4(transformed, 1.0);
+          #ifdef USE_INSTANCING
+            roadWorldPosition = instanceMatrix * roadWorldPosition;
+          #endif
+          roadWorldPosition = modelMatrix * roadWorldPosition;
+          vRoadFlowWorldPosition = roadWorldPosition.xyz;`,
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <common>",
@@ -773,8 +779,14 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           "#include <common>\nvarying vec3 vTerrainWorldPosition;",
         );
         shader.vertexShader = shader.vertexShader.replace(
-          "#include <worldpos_vertex>",
-          "#include <worldpos_vertex>\nvTerrainWorldPosition = worldPosition.xyz;",
+          "#include <begin_vertex>",
+          `#include <begin_vertex>
+          vec4 terrainWorldPosition = vec4(transformed, 1.0);
+          #ifdef USE_INSTANCING
+            terrainWorldPosition = instanceMatrix * terrainWorldPosition;
+          #endif
+          terrainWorldPosition = modelMatrix * terrainWorldPosition;
+          vTerrainWorldPosition = terrainWorldPosition.xyz;`,
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <common>",
