@@ -1343,7 +1343,9 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       waterRippleMesh = null;
       waterRippleEntries.length = 0;
       landmarkLights.length = 0;
-      const byHeight: { x: number; z: number; h: number }[][] = [[], [], [], []];
+      // 地形按 2×2 地塊切成可視區塊；鏡頭外的遠端地塊可整批被 frustum culling 跳過。
+      const terrainChunkSize = TILE * 2;
+      const terrainChunks = new Map<string, { byHeight: { x: number; z: number; h: number }[][] }>();
       const tileCells = new Map<string, { x: number; z: number; h: number }>();
 
       const addCell = (gx: number, gy: number) => {
@@ -1358,7 +1360,15 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         const cell = { x: gx + 0.5, z: gy + 0.5, h };
         tileCells.set(key, cell);
         terrainCellHeights.set(key, h);
-        byHeight[h].push(cell);
+        const chunkX = Math.floor(gx / terrainChunkSize);
+        const chunkY = Math.floor(gy / terrainChunkSize);
+        const chunkKey = chunkX + "," + chunkY;
+        let chunk = terrainChunks.get(chunkKey);
+        if (!chunk) {
+          chunk = { byHeight: [[], [], [], []] };
+          terrainChunks.set(chunkKey, chunk);
+        }
+        chunk.byHeight[h].push(cell);
       };
 
       if (data.mapMode === "expand" && data.placed.length) {
@@ -1450,40 +1460,43 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       };
 
       // 每格岩面保留些微色差，讓平台不再像單色網格。
-      for (let h = 0; h <= 3; h++) {
-        const list = byHeight[h];
-        if (!list.length) continue;
-        const top = groundTop(h);
-        const mesh = new THREE.InstancedMesh(
-          new THREE.BoxGeometry(0.98, top, 0.98),
-          shared.terrain[h],
-          list.length,
-        );
-        const matrix = new THREE.Matrix4();
-        const tint = new THREE.Color();
-        for (let i = 0; i < list.length; i++) {
-          const cell = list[i];
-          const seed = Math.abs(Math.sin(cell.x * 127.1 + cell.z * 311.7) * 43758.5453) % 1;
-          const shade = 0.92 + seed * 0.1;
-          const palette = regionTint[terrainRegion(cell)] ?? regionTint.meadow;
-          matrix.makeTranslation(cell.x, top / 2, cell.z);
-          mesh.setMatrixAt(i, matrix);
-          tint.setRGB(shade * palette[0], shade * palette[1], shade * palette[2]);
-          mesh.setColorAt(i, tint);
+      for (const chunk of terrainChunks.values()) {
+        for (let h = 0; h <= 3; h++) {
+          const list = chunk.byHeight[h];
+          if (!list.length) continue;
+          const top = groundTop(h);
+          const mesh = new THREE.InstancedMesh(
+            new THREE.BoxGeometry(0.98, top, 0.98),
+            shared.terrain[h],
+            list.length,
+          );
+          const matrix = new THREE.Matrix4();
+          const tint = new THREE.Color();
+          for (let i = 0; i < list.length; i++) {
+            const cell = list[i];
+            const seed = Math.abs(Math.sin(cell.x * 127.1 + cell.z * 311.7) * 43758.5453) % 1;
+            const shade = 0.92 + seed * 0.1;
+            const palette = regionTint[terrainRegion(cell)] ?? regionTint.meadow;
+            matrix.makeTranslation(cell.x, top / 2, cell.z);
+            mesh.setMatrixAt(i, matrix);
+            tint.setRGB(shade * palette[0], shade * palette[1], shade * palette[2]);
+            mesh.setColorAt(i, tint);
+          }
+          mesh.instanceMatrix.needsUpdate = true;
+          if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+          mesh.castShadow = h > 0;
+          mesh.receiveShadow = true;
+          mesh.computeBoundingSphere();
+          mesh.frustumCulled = true;
+          // InstancedMesh 的 instanceId 與 list 索引一致，直接保存對應的世界格座標。
+          mesh.userData.pickCells = list.map((cell) => ({
+            gx: Math.floor(cell.x),
+            gy: Math.floor(cell.z),
+            height: cell.h,
+          }));
+          terrainPickMeshes.push(mesh);
+          terrainRoot.add(mesh);
         }
-        mesh.instanceMatrix.needsUpdate = true;
-        if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-        mesh.castShadow = h > 0;
-        mesh.receiveShadow = true;
-        mesh.frustumCulled = false;
-        // InstancedMesh 的 instanceId 與 list 索引一致，直接保存對應的世界格座標。
-        mesh.userData.pickCells = list.map((cell) => ({
-          gx: Math.floor(cell.x),
-          gy: Math.floor(cell.z),
-          height: cell.h,
-        }));
-        terrainPickMeshes.push(mesh);
-        terrainRoot.add(mesh);
       }
 
       // 生態區交界以少量貼地石縫與植被色階銜接，避免地貌像硬切換色塊。
