@@ -591,7 +591,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
         );
         shader.vertexShader = shader.vertexShader.replace(
           "#include <begin_vertex>",
-          "#include <begin_vertex>\nvSanctuaryUv = uv;",
+          "#include <begin_vertex>\nvSanctuaryUv = position.xy / 10.8 + 0.5;",
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <common>",
@@ -630,7 +630,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
         );
         shader.vertexShader = shader.vertexShader.replace(
           "#include <begin_vertex>",
-          "#include <begin_vertex>\nvRoadFlowUv = uv;",
+          "#include <begin_vertex>\nvRoadFlowUv = vec2(position.x / 0.34 + 0.5, position.z / 0.038 + 0.5);",
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <common>",
