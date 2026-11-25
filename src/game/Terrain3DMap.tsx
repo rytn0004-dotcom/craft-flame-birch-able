@@ -526,7 +526,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       bridgeTrim: new THREE.MeshPhysicalMaterial({ color: "#b99560", metalness: 0.54, roughness: 0.36, roughnessMap: surfaceRoughnessMap, clearcoat: 0.48, clearcoatRoughness: 0.24, envMapIntensity: 1.02 }),
       grass: new THREE.MeshStandardMaterial({ color: "#83a878", roughness: 0.96 }),
       treeBark: new THREE.MeshStandardMaterial({ color: "#6e5943", roughness: 0.98, bumpMap: surfaceReliefMap, bumpScale: 0.018 }),
-      foliageWind: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.94, bumpMap: surfaceReliefMap, bumpScale: 0.008 }),
+      foliageWind: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.94, bumpMap: surfaceReliefMap, bumpScale: 0.008, side: THREE.DoubleSide }),
       meadowBloom: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.72, emissive: "#473b20", emissiveIntensity: 0.06 }),
       roadGuide: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.78, metalness: 0.12 }),
       terrainCrystal: new THREE.MeshStandardMaterial({
@@ -2567,7 +2567,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       const grassCells = Array.from(tileCells.values()).filter((cell) => {
         if (cell.h <= 0) return false;
         const seed = Math.abs(Math.sin(cell.x * 63.7 + cell.z * 29.3) * 18341.73) % 1;
-        if (seed < 0.955) return false;
+        if (seed < 0.945) return false;
         return !data.towers.some((tower) => {
           const tx = tower.x / CELL;
           const tz = tower.y / CELL;
@@ -2576,10 +2576,21 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
         });
       }).slice(0, 1400);
       if (grassCells.length) {
+        // 彎曲漸尖的葉片取代圓錐草刺；三片葉組成一簇，並共用樹冠風場材質。
+        const bladeGeometry = new THREE.BufferGeometry();
+        bladeGeometry.setAttribute("position", new THREE.Float32BufferAttribute([
+          -0.052, 0, 0, 0.052, 0, 0,
+          -0.037, 0.12, 0.012, 0.037, 0.12, 0.012,
+          -0.018, 0.23, 0.038, 0.018, 0.23, 0.038,
+          0, 0.32, 0.066,
+        ], 3));
+        bladeGeometry.setIndex([0, 2, 1, 1, 2, 3, 2, 4, 3, 3, 4, 5, 4, 6, 5]);
+        bladeGeometry.computeVertexNormals();
+        bladeGeometry.computeBoundingSphere();
         const bladeCount = grassCells.length * 3;
         const grass = new THREE.InstancedMesh(
-          new THREE.ConeGeometry(0.052, 0.22, 5),
-          shared.grass,
+          bladeGeometry,
+          shared.foliageWind,
           bladeCount,
         );
         const dummy = new THREE.Object3D();
@@ -2593,15 +2604,15 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             const radius = 0.08 + seed * 0.08;
             dummy.position.set(
               cell.x + Math.cos(angle) * radius,
-              groundTop(cell.h) + 0.12,
+              groundTop(cell.h) + 0.012,
               cell.z + Math.sin(angle) * radius,
             );
             dummy.rotation.set(
-              Math.cos(angle) * 0.16,
+              Math.cos(angle) * 0.11,
               angle,
-              Math.sin(angle) * -0.16,
+              Math.sin(angle) * -0.11,
             );
-            dummy.scale.set(0.82 + seed * 0.3, 0.72 + blade * 0.12, 0.82 + seed * 0.3);
+            dummy.scale.set(0.82 + seed * 0.3, 0.78 + blade * 0.13, 0.82 + seed * 0.3);
             dummy.updateMatrix();
             grass.setMatrixAt(index, dummy.matrix);
             tint.set(blade === 1 ? "#a0b879" : seed > 0.5 ? "#78966b" : "#648c70");
@@ -2610,6 +2621,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
         }
         grass.instanceMatrix.needsUpdate = true;
         if (grass.instanceColor) grass.instanceColor.needsUpdate = true;
+        grass.computeBoundingSphere();
         grass.castShadow = false;
         grass.receiveShadow = false;
         terrainRoot.add(grass);
