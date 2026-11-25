@@ -4767,7 +4767,7 @@ export function FoxTD() {
       { x: tileCenterX, y: tileCenterY, r: 8, max: TILE * CELL * 0.48, color: "#f0d79c", life: 1.05 },
     );
     endTileExpand(
-      `仙力牽引「${TEMPLATE_BY_ID[id]?.name || id}」自海底升起 · 道路已接通 · 黑霧退至外海 · 明潮砂 +1（${mingSandRef.current}）`,
+      `仙力牽引「${TEMPLATE_BY_ID[id]?.name || id}」自海底升起 · 道路已接通 · 黑霧從新地塊退散 · 明潮砂 +1（${mingSandRef.current}）`,
     );
   }
 
@@ -6040,7 +6040,7 @@ Alt＋左鍵環視 · 右鍵平移 · 滾輪縮放 · [H]對準聖地 · [空格
             </div>
             <div className="chip">金幣 {gold}</div>
             {phase === "play" && isExpandBoard(boardRef.current) && (
-              <div className="chip" title="聖地升級與潮紋祭壇加持會增強淨界，削弱外緣黑霧">
+              <div className="chip" title="聖地升級與潮紋祭壇加持會增強淨界，削弱未開拓海域黑霧">
                 聖地淨界 {Math.round(sanctuaryPowerForHud * 100)}%
               </div>
             )}
@@ -6168,7 +6168,7 @@ Alt＋左鍵環視 · 右鍵平移 · 滾輪縮放 · [H]對準聖地 · [空格
                       第 {wave} 波結束。每三波必須選擇並放置一塊新地，戰線才會延伸；完成前戰鬥保持暫停。
                     </p>
                     <p className="mb-2 text-xs leading-5 text-[#9ad7ff]">
-                      聖地以仙力牽引海底地脈，使新地塊升出海面；外緣黑霧持續侵蝕未淨化之地，升級聖地與建造潮紋祭壇可增強淨界。
+                      聖地以仙力牽引海底地脈，使新地塊升出海面；黑霧覆滿未開拓海域，已開啟地塊與聖地核心維持明亮。升級聖地與建造潮紋祭壇可增強淨界。
                     </p>
                     <p className="mb-2 text-xs text-[#9ad7ff]">
                       明潮砂 <b className="text-[#ffe08a]">{mingSand}</b>
@@ -6311,7 +6311,7 @@ Alt＋左鍵環視 · 右鍵平移 · 滾輪縮放 · [H]對準聖地 · [空格
                 <div className="menu-grid">
                 <section className="menu-card">
                   <h3 className="menu-card-title">選擇開局</h3>
-                  <p className="menu-card-hint">擴張模式每三波必須升起一塊新地，讓戰線延伸並把黑霧推回深海</p>
+                  <p className="menu-card-hint">擴張模式每三波必須升起一塊新地，讓戰線延伸並淨化新地塊上的黑霧</p>
                   <div className="menu-btn-row">
                     <button
                       className={"btn menu-pill" + (selectedLevelId === "mode-expand" ? " on" : " ghost")}
