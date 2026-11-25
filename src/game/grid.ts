@@ -1,5 +1,5 @@
-export const COLS = 200;
-export const ROWS = 200;
+export const COLS = 400;
+export const ROWS = 400;
 export const CELL = 32;
 export const VIEW_W = 960;
 export const VIEW_H = 640;
@@ -18,16 +18,17 @@ export function sameCell(a: Cell, b: Cell) {
 
 export function defaultEntrances(): Cell[] {
   return [
-    { c: 0, r: 40 },
-    { c: 0, r: 100 },
-    { c: 0, r: 160 },
+    { c: 0, r: 80 },
+    { c: 0, r: 200 },
+    { c: 0, r: 320 },
   ];
 }
 
 export function defaultExits(): Cell[] {
   return [
-    { c: COLS - 1, r: 70 },
-    { c: COLS - 1, r: 130 },
+    { c: COLS - 1, r: 100 },
+    { c: COLS - 1, r: 200 },
+    { c: COLS - 1, r: 300 },
   ];
 }
 
@@ -145,31 +146,31 @@ function columnWall(c: number, gaps: number[]) {
 
 export function presetMaps(): MapLayout[] {
   const ridge = emptyHeights();
-  for (let c = 8; c < COLS - 8; c += 2) {
-    ridge[48 * COLS + c] = c % 20 === 0 ? 3 : 2;
-    ridge[49 * COLS + c] = 1;
-    ridge[150 * COLS + c] = c % 16 === 0 ? 3 : 2;
-    ridge[151 * COLS + c] = 1;
+  for (let c = 16; c < COLS - 16; c += 4) {
+    ridge[96 * COLS + c] = c % 40 === 0 ? 3 : 2;
+    ridge[98 * COLS + c] = 1;
+    ridge[300 * COLS + c] = c % 32 === 0 ? 3 : 2;
+    ridge[302 * COLS + c] = 1;
   }
   const hills = emptyHeights();
-  stampHill(hills, 40, 50, 3);
-  stampHill(hills, 90, 30, 3, 3);
-  stampHill(hills, 150, 80, 2);
-  stampHill(hills, 70, 140, 3, 3);
-  stampHill(hills, 160, 150, 3);
+  stampHill(hills, 80, 100, 3, 4);
+  stampHill(hills, 180, 60, 3, 6);
+  stampHill(hills, 300, 160, 2, 4);
+  stampHill(hills, 140, 280, 3, 6);
+  stampHill(hills, 320, 300, 3, 4);
   const corridor = [
-    ...columnWall(50, [40, 41, 100, 101, 160, 161]),
-    ...columnWall(110, [30, 31, 90, 91, 140, 141]),
-    ...columnWall(160, [55, 56, 110, 111, 165, 166]),
+    ...columnWall(100, [80, 82, 200, 202, 320, 322]),
+    ...columnWall(220, [60, 62, 180, 182, 280, 282]),
+    ...columnWall(320, [110, 112, 220, 222, 330, 332]),
   ];
   const ring: string[] = [];
-  for (let c = 40; c <= 160; c++) {
-    ring.push(cellKey(c, 40), cellKey(c, 160));
+  for (let c = 80; c <= 320; c++) {
+    ring.push(cellKey(c, 80), cellKey(c, 320));
   }
-  for (let r = 40; r <= 160; r++) {
-    ring.push(cellKey(40, r), cellKey(160, r));
+  for (let r = 80; r <= 320; r++) {
+    ring.push(cellKey(80, r), cellKey(320, r));
   }
-  const ringOpen = new Set([cellKey(40, 100), cellKey(40, 101), cellKey(160, 100), cellKey(160, 101), cellKey(100, 40), cellKey(100, 160)]);
+  const ringOpen = new Set([cellKey(80, 200), cellKey(80, 201), cellKey(320, 200), cellKey(320, 201), cellKey(200, 80), cellKey(200, 320)]);
   return [
     {
       id: "preset-flat",
@@ -193,13 +194,13 @@ export function presetMaps(): MapLayout[] {
       blocked: [],
       heights: hills,
       entrances: [
-        { c: 0, r: 30 },
-        { c: 0, r: 100 },
-        { c: 0, r: 170 },
+        { c: 0, r: 60 },
+        { c: 0, r: 200 },
+        { c: 0, r: 340 },
       ],
       exits: [
-        { c: COLS - 1, r: 50 },
-        { c: COLS - 1, r: 150 },
+        { c: COLS - 1, r: 100 },
+        { c: COLS - 1, r: 300 },
       ],
     },
     {
@@ -208,13 +209,13 @@ export function presetMaps(): MapLayout[] {
       blocked: [],
       heights: emptyHeights(),
       entrances: [
-        { c: 0, r: 20 },
-        { c: 0, r: 100 },
-        { c: 0, r: 180 },
+        { c: 0, r: 40 },
+        { c: 0, r: 200 },
+        { c: 0, r: 360 },
       ],
       exits: [
-        { c: COLS - 1, r: 60 },
-        { c: COLS - 1, r: 140 },
+        { c: COLS - 1, r: 120 },
+        { c: COLS - 1, r: 280 },
       ],
     },
     {
@@ -231,12 +232,12 @@ export function presetMaps(): MapLayout[] {
       blocked: ring.filter((k) => !ringOpen.has(k)),
       heights: emptyHeights(),
       entrances: [
-        { c: 0, r: 100 },
-        { c: 100, r: 0 },
+        { c: 0, r: 200 },
+        { c: 200, r: 0 },
       ],
       exits: [
-        { c: COLS - 1, r: 100 },
-        { c: 100, r: ROWS - 1 },
+        { c: COLS - 1, r: 200 },
+        { c: 200, r: ROWS - 1 },
       ],
     },
   ];
