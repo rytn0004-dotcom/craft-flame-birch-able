@@ -676,16 +676,18 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
     installOceanSurface(shared.floor, "tide-ocean-floor-caustics-v1");
     installOceanSurface(shared.seaShelf, "tide-ocean-shelf-caustics-v1");
 
-    // 樹冠與草叢共用一個極輕量頂點風場；只扭動頂部頂點，不逐物件跑動畫迴圈。
-    shared.foliageWind.onBeforeCompile = (shader) => {
-      shader.uniforms.uFoliageTime = foliageWindUniform;
-      shader.vertexShader = shader.vertexShader.replace(
-        "#include <common>",
-        "#include <common>\nuniform float uFoliageTime;",
-      );
-      shader.vertexShader = shader.vertexShader.replace(
-        "#include <begin_vertex>",
-        `#include <begin_vertex>
+    // 草、花、樹冠與蘑菇共用頂點風場；每個實例只在 GPU 彎曲頂端，不逐物件跑動畫。
+    const installFoliageWind = (material: THREE.MeshStandardMaterial, cacheKey: string) => {
+      material.onBeforeCompile = (shader) => {
+        shader.uniforms.uFoliageTime = foliageWindUniform;
+        shader.vertexShader = shader.vertexShader.replace(
+          "#include <common>",
+          `#include <common>
+uniform float uFoliageTime;`,
+        );
+        shader.vertexShader = shader.vertexShader.replace(
+          "#include <begin_vertex>",
+          `#include <begin_vertex>
 #ifdef USE_INSTANCING
         float foliagePhase = dot(instanceMatrix[3].xz, vec2(0.17, 0.13));
         float foliageMask = smoothstep(-0.36, 0.42, position.y);
@@ -693,9 +695,13 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
         transformed.x += foliageBreeze * 0.052 * foliageMask;
         transformed.z += cos(uFoliageTime * 0.77 + foliagePhase * 1.31) * 0.032 * foliageMask;
 #endif`,
-      );
+        );
+      };
+      material.customProgramCacheKey = () => cacheKey;
     };
-    shared.foliageWind.customProgramCacheKey = () => "tide-foliage-wind-v1";
+    installFoliageWind(shared.foliageWind, "tide-foliage-wind-v1");
+    installFoliageWind(shared.grass, "tide-grass-stem-wind-v1");
+    installFoliageWind(shared.meadowBloom, "tide-meadow-bloom-wind-v1");
 
     // 所有地形區塊共用 4 種高度幾何，避免切塊後重複建立數百份相同頂點資料。
     const terrainGeometries = [0, 1, 2, 3].map(
@@ -3081,7 +3087,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
         terrainRoot.add(fireflyMesh);
       }
 
-      // 草甸與苔地加入低矮野花簇，使用兩個批次實例網格，不建立逐朵動畫。
+      // 草甸與苔地改為三朵一簇的野花組合；花莖與花冠都共用 GPU 風場。
       const flowerCells = Array.from(tileCells.values()).filter((cell) => {
         if (cell.h <= 0) return false;
         const region = terrainRegion(cell);
@@ -3093,35 +3099,44 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
         );
       }).slice(0, 180);
       if (flowerCells.length) {
+        const bloomPerCell = 3;
+        const bloomCount = flowerCells.length * bloomPerCell;
         const stems = new THREE.InstancedMesh(
           new THREE.ConeGeometry(0.018, 0.14, 5),
           shared.grass,
-          flowerCells.length,
+          bloomCount,
         );
         const flowerHeads = new THREE.InstancedMesh(
-          new THREE.DodecahedronGeometry(0.052, 0),
+          new THREE.DodecahedronGeometry(0.048, 0),
           shared.meadowBloom,
-          flowerCells.length,
+          bloomCount,
         );
         const flowerDummy = new THREE.Object3D();
         const flowerTint = new THREE.Color();
+        const flowerPalette = ["#f0d49a", "#d9b5c4", "#b4d9ca", "#e8dfb9"];
         for (let i = 0; i < flowerCells.length; i++) {
           const cell = flowerCells[i];
           const seed = Math.abs(Math.sin(cell.x * 127.1 + cell.z * 311.7) * 43758.5453) % 1;
-          const angle = seed * Math.PI * 2;
-          const x = cell.x + Math.cos(angle) * 0.19;
-          const z = cell.z + Math.sin(angle) * 0.19;
-          flowerDummy.position.set(x, groundTop(cell.h) + 0.065, z);
-          flowerDummy.rotation.set(0, angle, 0);
-          flowerDummy.scale.set(0.8 + seed * 0.3, 0.82 + seed * 0.25, 0.8 + seed * 0.3);
-          flowerDummy.updateMatrix();
-          stems.setMatrixAt(i, flowerDummy.matrix);
-          flowerDummy.position.y = groundTop(cell.h) + 0.145;
-          flowerDummy.scale.setScalar(0.78 + seed * 0.22);
-          flowerDummy.updateMatrix();
-          flowerHeads.setMatrixAt(i, flowerDummy.matrix);
-          flowerTint.set(seed > 0.66 ? "#f0d9a0" : seed > 0.33 ? "#d9c5a7" : "#b9d5bd");
-          flowerHeads.setColorAt(i, flowerTint);
+          for (let bloom = 0; bloom < bloomPerCell; bloom++) {
+            const index = i * bloomPerCell + bloom;
+            const angle = seed * Math.PI * 2 + bloom * (Math.PI * 2 / bloomPerCell);
+            const radius = bloom === 0 ? 0.015 : 0.145 + seed * 0.055;
+            const x = cell.x + Math.cos(angle) * radius;
+            const z = cell.z + Math.sin(angle) * radius;
+            const scale = bloom === 0 ? 1.0 : 0.72 + seed * 0.2;
+            flowerDummy.position.set(x, groundTop(cell.h) + 0.06, z);
+            flowerDummy.rotation.set((seed - 0.5) * 0.12, angle, (seed - 0.5) * 0.14);
+            flowerDummy.scale.set(scale, 0.82 + seed * 0.18, scale);
+            flowerDummy.updateMatrix();
+            stems.setMatrixAt(index, flowerDummy.matrix);
+
+            flowerDummy.position.y = groundTop(cell.h) + (bloom === 0 ? 0.145 : 0.116 + seed * 0.018);
+            flowerDummy.scale.setScalar((0.72 + seed * 0.2) * (bloom === 0 ? 1.0 : 0.82));
+            flowerDummy.updateMatrix();
+            flowerHeads.setMatrixAt(index, flowerDummy.matrix);
+            flowerTint.set(flowerPalette[(Math.floor(seed * 17) + bloom) % flowerPalette.length]);
+            flowerHeads.setColorAt(index, flowerTint);
+          }
         }
         stems.instanceMatrix.needsUpdate = true;
         flowerHeads.instanceMatrix.needsUpdate = true;
