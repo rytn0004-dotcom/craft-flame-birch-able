@@ -313,6 +313,8 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
     let waterRippleMesh: any = null;
     const waterGlintEntries: { x: number; z: number; phase: number; rot: number; scale: number }[] = [];
     let waterGlintMesh: any = null;
+    const fireflyEntries: { x: number; z: number; y: number; phase: number; radius: number; scale: number }[] = [];
+    let fireflyMesh: any = null;
     const blackMistEntries: { x: number; z: number; y: number; phase: number; rot: number; scaleX: number; scaleZ: number; driftX: number; driftZ: number }[] = [];
     let blackMistMesh: any = null;
     const blackMistCloudEntries: { x: number; z: number; phase: number; scaleX: number; scaleZ: number; driftX: number; driftZ: number }[] = [];
@@ -330,6 +332,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
     };
     const waterRippleDummy = new THREE.Object3D();
     const waterGlintDummy = new THREE.Object3D();
+    const fireflyDummy = new THREE.Object3D();
     const turretGroups: { group: any; tower: Terrain3DTower; index: number; flash: any; baseY: number; baseZ: number }[] = [];
     const installationAnimations: { group: any; targetY: number; age: number; duration: number; fromScale: number }[] = [];
     const installationRings: { mesh: any; material: any; age: number; duration: number }[] = [];
@@ -542,6 +545,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       shoreFoam: new THREE.MeshBasicMaterial({ color: "#b9e6d8", transparent: true, opacity: 0.76, depthWrite: false }),
       waterRipple: new THREE.MeshBasicMaterial({ color: "#c7eee0", transparent: true, opacity: 0.16, depthWrite: false, side: THREE.DoubleSide }),
       waterGlint: new THREE.MeshBasicMaterial({ color: "#d8f3e4", transparent: true, opacity: 0.2, depthWrite: false, side: THREE.DoubleSide, toneMapped: false }),
+      firefly: new THREE.MeshBasicMaterial({ color: "#b5f3d7", transparent: true, opacity: 0.48, depthWrite: false, toneMapped: false }),
       rockCrack: new THREE.MeshStandardMaterial({ color: "#263c3b", roughness: 1, bumpMap: surfaceReliefMap, bumpScale: 0.012 }),
       rockCrackEdge: new THREE.MeshStandardMaterial({ color: "#8f9075", roughness: 0.96, bumpMap: surfaceReliefMap, bumpScale: 0.008 }),
       contactShadow: new THREE.MeshBasicMaterial({
@@ -1475,6 +1479,8 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       waterRippleEntries.length = 0;
       waterGlintMesh = null;
       waterGlintEntries.length = 0;
+      fireflyMesh = null;
+      fireflyEntries.length = 0;
       blackMistVeilMesh = null;
       blackMistVeilEntries.length = 0;
       landmarkLights.length = 0;
@@ -1892,8 +1898,9 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
               if (lampKeys.has(lampKey)) continue;
               const seed = Math.abs(Math.sin(cell.x * 71.7 + cell.z * 39.1 + direction.dc * 17.3 + direction.dr * 29.1) * 24137.7) % 1;
               if (seed < 0.968) continue;
-              const x = cell.x + direction.dx * 0.56;
-              const z = cell.z + direction.dz * 0.56;
+              // 燈座完全落在道路外側高地，避免底座侵入石板通行面。
+              const x = cell.x + direction.dx * 0.68;
+              const z = cell.z + direction.dz * 0.68;
               if (protectedBuildings.some((building) => Math.hypot(x - building.x, z - building.z) < building.radius + 0.42)) continue;
               lampKeys.add(lampKey);
               lampCandidates.push({ x, z, y: groundTop(neighbor.h), seed });
@@ -2885,6 +2892,53 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
         mushroomStems.receiveShadow = false;
         mushroomCaps.receiveShadow = false;
         terrainRoot.add(mushroomStems, mushroomCaps);
+      }
+
+      // 苔地與古代刻紋附近漂浮少量潮光微粒；單一動態實例批次，模擬林間螢火與遺跡能量。
+      const moteCandidates = Array.from(tileCells.values()).filter((cell) => {
+        if (cell.h <= 0) return false;
+        const region = terrainRegion(cell);
+        if (region !== "moss" && region !== "ancient") return false;
+        const seed = Math.abs(Math.sin(cell.x * 31.7 + cell.z * 73.9) * 29171.7) % 1;
+        if (seed < 0.88) return false;
+        return !protectedBuildings.some((building) =>
+          Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 0.8,
+        );
+      });
+      const moteCount = Math.min(42, moteCandidates.length);
+      if (moteCount > 0) {
+        fireflyMesh = new THREE.InstancedMesh(
+          new THREE.OctahedronGeometry(0.028, 0),
+          shared.firefly,
+          moteCount,
+        );
+        fireflyMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        for (let i = 0; i < moteCount; i++) {
+          const cell = moteCandidates[Math.min(moteCandidates.length - 1, Math.floor((i + 0.5) * moteCandidates.length / moteCount))];
+          const seed = Math.abs(Math.sin(cell.x * 127.1 + cell.z * 311.7) * 43758.5453) % 1;
+          const phase = seed * Math.PI * 2 + i * 0.73;
+          const radius = 0.12 + seed * 0.2;
+          const scale = 0.72 + seed * 0.7;
+          const entry = {
+            x: cell.x + Math.cos(phase) * radius,
+            z: cell.z + Math.sin(phase) * radius,
+            y: groundTop(cell.h) + 0.32 + seed * 0.34,
+            phase,
+            radius: 0.08 + seed * 0.13,
+            scale,
+          };
+          fireflyEntries.push(entry);
+          fireflyDummy.position.set(entry.x, entry.y, entry.z);
+          fireflyDummy.scale.setScalar(scale);
+          fireflyDummy.updateMatrix();
+          fireflyMesh.setMatrixAt(i, fireflyDummy.matrix);
+        }
+        fireflyMesh.instanceMatrix.needsUpdate = true;
+        fireflyMesh.frustumCulled = false;
+        fireflyMesh.renderOrder = 4;
+        fireflyMesh.castShadow = false;
+        fireflyMesh.receiveShadow = false;
+        terrainRoot.add(fireflyMesh);
       }
 
       // 草甸與苔地加入低矮野花簇，使用兩個批次實例網格，不建立逐朵動畫。
@@ -4624,6 +4678,28 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       // 海面已由上方深海／淺灘雙層承接，移除舊的單色底板以露出水域。
     };
 
+    const updateFireflies = (time: number) => {
+      if (!fireflyMesh || !fireflyEntries.length) return;
+      let pulse = 0;
+      for (let i = 0; i < fireflyEntries.length; i++) {
+        const mote = fireflyEntries[i];
+        const drift = Math.sin(time * 0.00048 + mote.phase);
+        const orbit = time * 0.00016 + mote.phase;
+        fireflyDummy.position.set(
+          mote.x + Math.cos(orbit) * mote.radius,
+          mote.y + drift * 0.11,
+          mote.z + Math.sin(orbit) * mote.radius,
+        );
+        const shimmer = 0.72 + (Math.sin(time * 0.0017 + mote.phase) * 0.5 + 0.5) * 0.48;
+        fireflyDummy.scale.setScalar(mote.scale * shimmer);
+        fireflyDummy.updateMatrix();
+        fireflyMesh.setMatrixAt(i, fireflyDummy.matrix);
+        pulse += shimmer;
+      }
+      fireflyMesh.instanceMatrix.needsUpdate = true;
+      shared.firefly.opacity = 0.24 + (pulse / fireflyEntries.length) * 0.25;
+    };
+
     const updateWaterRipples = (time: number) => {
       waterBumpMap.offset.x = (time * 0.000006) % 1;
       waterBumpMap.offset.y = (time * 0.0000035) % 1;
@@ -5232,6 +5308,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       if (time - lastAmbientUpdateAt >= 1000 / 30) {
         lastAmbientUpdateAt = time;
         updateWaterRipples(time);
+        updateFireflies(time);
         updateLandmarkLights(time);
         updateBlackMist(data, time);
       }
@@ -5335,6 +5412,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       skyMaterial.dispose();
       shared.waterRipple.dispose();
       shared.waterGlint.dispose();
+      shared.firefly.dispose();
       shared.treeBark.dispose();
       shared.foliageWind.dispose();
       shared.meadowBloom.dispose();
