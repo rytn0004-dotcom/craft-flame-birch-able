@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { CELL, COLS, ROWS } from "./grid";
@@ -84,7 +84,7 @@ function groundTop(height: number) {
   return 0.14 + Math.max(0, Math.min(3, height)) * HEIGHT_STEP;
 }
 
-export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
+export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState("");
 
@@ -4876,4 +4876,4 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       )}
     </div>
   );
-}
+});
