@@ -39,9 +39,13 @@ export type Terrain3DSnapshot = {
   mapMode: "expand" | "layout";
 };
 
+export type Terrain3DCellHit = { gx: number; gy: number; height: number };
+
 export type Terrain3DApi = {
   screenToWorld: (clientX: number, clientY: number) => { x: number; y: number } | null;
-  /** 點擊時才使用實際地表 InstancedMesh 的 instanceId 取得準確網格，避免高地射線平面誤差。 */
+  /** 回傳實際命中的地表格與高度，所有放置模式共用，不再透過世界座標二次反算格子。 */
+  screenToCellPrecise: (clientX: number, clientY: number) => Terrain3DCellHit | null;
+  /** 相容用世界座標介面；內部同樣以精確格子命中為依據。 */
   screenToWorldPrecise: (clientX: number, clientY: number) => { x: number; y: number } | null;
   pickTower: (clientX: number, clientY: number) => number | null;
   focus: (x: number, y: number) => void;
@@ -275,6 +279,8 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     const pointer = new THREE.Vector2();
     // 快速平面映射供一般滑鼠移動使用；真正點擊時只射線測試這些地表實例網格。
     const terrainCellHeights = new Map<string, number>();
+    const terrainHeightAt = (gx: number, gy: number, heights: number[]) =>
+      terrainCellHeights.get(gx + "," + gy) ?? Math.max(0, Math.min(3, heights[gy * COLS + gx] ?? 0));
     const terrainPickMeshes: any[] = [];
     const terrainPickPlanes = [0, 1, 2, 3].map(
       (height) => new THREE.Plane(new THREE.Vector3(0, 1, 0), -groundTop(height)),
@@ -928,7 +934,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
 
     const createStake = (tower: Terrain3DTower, heights: number[]) => {
       const root = new THREE.Group();
-      root.position.set(tower.x / CELL, groundTop(heights[tower.gy * COLS + tower.gx] ?? 0), tower.y / CELL);
+      root.position.set(tower.x / CELL, groundTop(terrainHeightAt(tower.gx, tower.gy, heights)), tower.y / CELL);
       addContactShadow(root, 0.66);
       addBox(root, 0.96, 0.075, 0.96, 0, 0.0375, 0, shared.foundationStone);
       const stakeSeal = new THREE.Mesh(new THREE.TorusGeometry(0.54, 0.026, 6, 24), shared.foundationGold);
@@ -945,7 +951,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
 
     const createTowerBase = (tower: Terrain3DTower, heights: number[]) => {
       const root = new THREE.Group();
-      root.position.set(tower.x / CELL, groundTop(heights[tower.gy * COLS + tower.gx] ?? 0), tower.y / CELL);
+      root.position.set(tower.x / CELL, groundTop(terrainHeightAt(tower.gx, tower.gy, heights)), tower.y / CELL);
       addContactShadow(root, 1.08);
       const level = Math.max(1, Math.min(8, tower.level || 1));
       const definition = TOWERS[tower.def];
@@ -4099,7 +4105,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         const i = spriteIndex++;
         const sprite = ensureSprite(towerSprites, i, actorRoot);
         updateSpriteTexture(sprite, tower.image);
-        const h = data.heights[tower.gy * COLS + tower.gx] ?? 0;
+        const h = terrainHeightAt(tower.gx, tower.gy, data.heights);
         sprite.position.set(tower.x / CELL, groundTop(h) + 1.03 + Math.min(0.16, (tower.level - 1) * 0.025), tower.y / CELL);
         sprite.scale.set(1.42, 1.58, 1);
         sprite.renderOrder = 4;
@@ -4112,7 +4118,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         updateSpriteTexture(sprite, enemy.image);
         const gx = Math.max(0, Math.min(COLS - 1, Math.floor(enemy.x / CELL)));
         const gy = Math.max(0, Math.min(ROWS - 1, Math.floor(enemy.y / CELL)));
-        const h = data.heights[gy * COLS + gx] ?? 0;
+        const h = terrainHeightAt(gx, gy, data.heights);
         const size = Math.max(0.72, (enemy.r * 3.3) / CELL);
         const squash = enemy.hurt > 0 ? 0.78 : 1;
         sprite.position.set(enemy.x / CELL, groundTop(h) + size * 0.42, enemy.y / CELL);
@@ -4315,7 +4321,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       if (selectedTower && (selectedTower.range ?? 0) > 0) {
         const gx = Math.max(0, Math.min(COLS - 1, Math.floor(selectedTower.x / CELL)));
         const gy = Math.max(0, Math.min(ROWS - 1, Math.floor(selectedTower.y / CELL)));
-        const h = data.heights[gy * COLS + gx] ?? 0;
+        const h = terrainHeightAt(gx, gy, data.heights);
         selectedRange.visible = true;
         selectedRange.position.set(selectedTower.x / CELL, groundTop(h) + 0.045, selectedTower.y / CELL);
         selectedRange.scale.setScalar(selectedTower.range! / CELL);
@@ -4355,7 +4361,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       const snapshot = snapshotRef.current();
       const gx = Math.max(0, Math.min(COLS - 1, Math.floor(x / CELL)));
       const gy = Math.max(0, Math.min(ROWS - 1, Math.floor(y / CELL)));
-      controls.target.set(x / CELL, groundTop(snapshot.heights[gy * COLS + gx] ?? 0), y / CELL);
+      controls.target.set(x / CELL, groundTop(terrainHeightAt(gx, gy, snapshot.heights)), y / CELL);
       controls.update();
     };
 
@@ -4366,7 +4372,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       const centerZ = hq ? hq.y / CELL : ROWS / 2;
       const gx = Math.max(0, Math.min(COLS - 1, Math.floor(centerX)));
       const gy = Math.max(0, Math.min(ROWS - 1, Math.floor(centerZ)));
-      const terrainHeight = snapshot.heights[gy * COLS + gx] ?? 0;
+      const terrainHeight = terrainHeightAt(gx, gy, snapshot.heights);
       focus(centerX * CELL, centerZ * CELL);
       camera.position.set(centerX + 5, groundTop(terrainHeight) + 27, centerZ + 5);
       controls.update();
@@ -4403,24 +4409,27 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       return { x: point.x * CELL, y: point.z * CELL };
     };
 
-    const screenToWorldPrecise = (clientX: number, clientY: number) => {
+    const screenToCellPrecise = (clientX: number, clientY: number): Terrain3DCellHit | null => {
       if (!setPointerRay(clientX, clientY)) return null;
       // 地表格子由分塊 InstancedMesh 建立；先同步地形世界矩陣，
-      // 確保滑鼠移動與點擊都能命中已升起的 0～3 級地表，而不是落回黑霧底平面。
+      // 確保所有放置模式都取得相同的 gx／gy／height，不再從世界座標反算。
       terrainRoot.updateMatrixWorld(true);
       // 只測地表的四組高度 InstancedMesh，不碰水面、岩壁裝飾、塔體或粒子效果。
       const hits = raycaster.intersectObjects(terrainPickMeshes, false);
       for (const hit of hits) {
-        const cells = (hit.object as any).userData?.pickCells as
-          | { gx: number; gy: number; height: number }[]
-          | undefined;
+        const cells = (hit.object as any).userData?.pickCells as Terrain3DCellHit[] | undefined;
         const instanceId = hit.instanceId;
         if (!cells || instanceId == null) continue;
         const cell = cells[instanceId];
         if (!cell) continue;
-        return { x: (cell.gx + 0.5) * CELL, y: (cell.gy + 0.5) * CELL };
+        return cell;
       }
       return null;
+    };
+
+    const screenToWorldPrecise = (clientX: number, clientY: number) => {
+      const cell = screenToCellPrecise(clientX, clientY);
+      return cell ? { x: (cell.gx + 0.5) * CELL, y: (cell.gy + 0.5) * CELL } : null;
     };
 
     const pickTower = (clientX: number, clientY: number): number | null => {
@@ -4482,7 +4491,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       camera.position.set(centerX + 5, groundTop(h) + 27, centerZ + 5);
       controls.update();
 
-      apiRef.current = { screenToWorld, screenToWorldPrecise, pickTower, focus, reset };
+      apiRef.current = { screenToWorld, screenToCellPrecise, screenToWorldPrecise, pickTower, focus, reset };
       setError("");
     } catch {
       setError("此瀏覽器無法啟動 WebGL，請更新瀏覽器或啟用硬體加速。");
