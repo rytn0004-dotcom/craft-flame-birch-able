@@ -556,6 +556,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       tidalSand: new THREE.MeshPhysicalMaterial({ color: "#819d94", metalness: 0.06, roughness: 0.42, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.009, clearcoat: 0.34, clearcoatRoughness: 0.3 }),
       beachPebble: new THREE.MeshStandardMaterial({ color: "#a9a58e", roughness: 0.94, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.018 }),
       roadPaver: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.97, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.016 }),
+      roadWear: new THREE.MeshStandardMaterial({ color: "#344d58", roughness: 1, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.008 }),
       roadEdge: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.95, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.021 }),
       foundationStone: new THREE.MeshStandardMaterial({ color: "#b5b29f", roughness: 0.96, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.021 }),
       foundationGold: new THREE.MeshPhysicalMaterial({ color: "#c5a56c", metalness: 0.62, roughness: 0.32, roughnessMap: surfaceRoughnessMap, clearcoat: 0.56, clearcoatRoughness: 0.22, envMapIntensity: 1.08 }),
@@ -709,12 +710,18 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           float travelingRune = 1.0 - smoothstep(0.015, 0.11, abs(sin(sigilAngle * 0.5)));
           float corePulse = exp(-sigilRadius * sigilRadius * 18.0) * (0.6 + 0.4 * sin(uSigilTime * 1.4));
           float edgeFade = 1.0 - smoothstep(0.94, 1.0, sigilRadius);
+          float rootBand = smoothstep(0.24, 0.38, sigilRadius) * (1.0 - smoothstep(0.93, 1.0, sigilRadius));
+          float rootMain = 1.0 - smoothstep(0.035, 0.13, abs(sin(sigilAngle * 4.0 + sin(sigilRadius * 13.0) * 0.32)));
+          float rootBranch = 1.0 - smoothstep(0.04, 0.16, abs(sin(sigilAngle * 8.0 + sin(sigilRadius * 17.0 + uSigilTime * 0.16) * 0.58)));
+          float rootVeins = (rootMain * 0.12 + rootBranch * 0.055) * rootBand;
           float sigilPattern = outerRing * 0.38 + middleRing * 0.2 + innerRing * 0.12
-            + runeTicks * tickMask * 0.22 + travelingRune * outerRing * 0.26 + corePulse * 0.08;
+            + runeTicks * tickMask * 0.22 + travelingRune * outerRing * 0.26
+            + corePulse * 0.08 + rootVeins;
           float sigilBreath = 0.82 + 0.18 * sin(uSigilTime * 0.9 + sigilRadius * 5.0);
           diffuseColor.a *= clamp(sigilPattern, 0.0, 1.0) * edgeFade
             * sigilBreath * (0.38 + uSigilPower * 0.62);
-          diffuseColor.rgb *= 0.82 + uSigilPower * 0.3;`,
+          diffuseColor.rgb *= 0.82 + uSigilPower * 0.3;
+          diffuseColor.rgb += vec3(0.018, 0.095, 0.078) * rootVeins * (0.4 + uSigilPower * 0.5);`,
         );
       };
       material.customProgramCacheKey = () => "tide-sanctuary-sigil-v1";
@@ -2047,6 +2054,41 @@ uniform float uFoliageTime;`,
           pavers.castShadow = false;
           pavers.receiveShadow = true;
           terrainRoot.add(pavers);
+
+          // 使用少量嵌入式磨痕打破每片石板的制式感；固定種子、單一 InstancedMesh，上限 240。
+          const wornPaverCells = roadCells.filter((cell) => {
+            const seed = Math.abs(Math.sin(cell.x * 83.7 + cell.z * 47.1) * 21731.91) % 1;
+            return seed > 0.89;
+          }).slice(0, 240);
+          if (wornPaverCells.length) {
+            const roadWear = new THREE.InstancedMesh(
+              new THREE.BoxGeometry(0.22, 0.009, 0.018),
+              shared.roadWear,
+              wornPaverCells.length,
+            );
+            const wearDummy = new THREE.Object3D();
+            const wearTint = new THREE.Color();
+            for (let i = 0; i < wornPaverCells.length; i++) {
+              const cell = wornPaverCells[i];
+              const seed = Math.abs(Math.sin(cell.x * 83.7 + cell.z * 47.1) * 21731.91) % 1;
+              wearDummy.position.set(
+                cell.x + (seed - 0.5) * 0.34,
+                groundTop(0) + 0.031,
+                cell.z + (Math.abs(Math.sin(seed * 41.3)) - 0.5) * 0.34,
+              );
+              wearDummy.rotation.y = Math.floor(seed * 4) * (Math.PI / 2) + (seed - 0.5) * 0.16;
+              wearDummy.scale.set(0.58 + seed * 0.72, 1, 0.72 + seed * 0.5);
+              wearDummy.updateMatrix();
+              roadWear.setMatrixAt(i, wearDummy.matrix);
+              wearTint.set(seed > 0.955 ? "#a8aa93" : "#263e49");
+              roadWear.setColorAt(i, wearTint);
+            }
+            roadWear.instanceMatrix.needsUpdate = true;
+            if (roadWear.instanceColor) roadWear.instanceColor.needsUpdate = true;
+            roadWear.castShadow = false;
+            roadWear.receiveShadow = false;
+            terrainRoot.add(roadWear);
+          }
 
           const roadEdges: { x: number; z: number; rot: number; shade: string }[] = [];
           const edgeDirs = [
@@ -5781,6 +5823,7 @@ uniform float uFoliageTime;`,
       shared.foliageWind.dispose();
       shared.meadowBloom.dispose();
       shared.roadGuide.dispose();
+      shared.roadWear.dispose();
       shared.sanctuarySigil.dispose();
       shared.biomeSeam.dispose();
       shared.roadMedallion.dispose();
@@ -5814,7 +5857,7 @@ uniform float uFoliageTime;`,
           <div className="pointer-events-none absolute bottom-3 left-3 z-10 rounded-lg border border-[#8ec8ee33] bg-[#061525cc] px-3 py-2 text-[11px] text-[#9ec4de]">
             道路與聖地保留為禁建區 · 高地 Lv.1～3 可放置一般塔
             <span className="block mt-1 text-[#d8c89e]">高地保留高度差與射程優勢；未開拓區域持續受黑霧覆蓋</span>
-            <span className="block mt-1 text-[#83d9d5]">深淵霧覆蓋未開拓世界 · 聖地充能可削弱霧勢</span>
+            <span className="block mt-1 text-[#83d9d5]">深淵霧覆蓋未開拓世界 · 牽引升起的新地塊會驅散黑霧</span>
           </div>
           <button
             type="button"
