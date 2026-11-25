@@ -5201,6 +5201,11 @@ export function FoxTD() {
   function backToMenu() {
     pausedRef.current = false;
     setPaused(false);
+    stakeRef.current = false;
+    setStaking(false);
+    shrinePlaceRef.current = false;
+    pickRef.current = null;
+    setPick(null);
     phaseRef.current = "ready";
     setPhase("ready");
     setWorkshop(false);
@@ -5777,6 +5782,7 @@ export function FoxTD() {
     pickRef.current = null;
     setPick(null);
     stakeRef.current = false;
+    setStaking(false);
     setHover(`潮紋祭壇：點任意高地放置（圖紙×1 + ${SHRINE_PLACE_GOLD}金）· 可建多座 · Esc 取消`);
   }
 
@@ -5941,6 +5947,7 @@ export function FoxTD() {
         setSel(null);
         selRef.current = null;
         stakeRef.current = false;
+        setStaking(false);
         shrinePlaceRef.current = false;
         setHover("已取消選取");
         return;
@@ -6608,6 +6615,7 @@ Alt＋左鍵環視 · 右鍵平移 · 滾輪縮放 · [H]對準聖地 · [空格
                 setStaking((v) => {
                   const next = !v;
                   stakeRef.current = next;
+                  if (next) shrinePlaceRef.current = false;
                   setHover(
                     next
                       ? `路障模式：點可走路徑放置（${STAKE_COST} 金，可被近戰拆毀）`
