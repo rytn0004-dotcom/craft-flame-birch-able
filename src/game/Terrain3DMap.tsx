@@ -98,6 +98,97 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     const atmosphericFog = new THREE.Fog("#819b91", 72, 252);
     scene.fog = atmosphericFog;
 
+    // 程序化可平鋪微表面：不依賴外部貼圖，石材與水面共用少量 GPU 資源。
+    const makeSurfaceDataTexture = (size: number, sample: (u: number, v: number) => number) => {
+      const data = new Uint8Array(size * size * 4);
+      for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+        const value = Math.max(0, Math.min(255, Math.round(sample(x / size, y / size))));
+        const index = (y * size + x) * 4;
+        data[index] = value;
+        data[index + 1] = value;
+        data[index + 2] = value;
+        data[index + 3] = 255;
+      }
+      const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+      texture.wrapS = THREE.RepeatWrapping;
+      texture.wrapT = THREE.RepeatWrapping;
+      texture.magFilter = THREE.LinearFilter;
+      texture.minFilter = THREE.LinearMipmapLinearFilter;
+      texture.generateMipmaps = true;
+      texture.anisotropy = 4;
+      texture.needsUpdate = true;
+      return texture;
+    };
+    const tau = Math.PI * 2;
+    const surfaceReliefMap = makeSurfaceDataTexture(128, (u, v) => {
+      const broad = Math.sin(tau * (u * 3 + v * 2)) * 0.42 + Math.cos(tau * (v * 4 - u * 2)) * 0.32;
+      const grain = Math.sin(tau * (u * 19 + v * 13)) * 0.2 + Math.cos(tau * (u * 31 - v * 27)) * 0.13;
+      const pores = Math.sin(tau * (u * 47 + v * 37)) * 0.08 + Math.cos(tau * (u * 59 - v * 43)) * 0.07;
+      return 128 + (broad + grain + pores) * 30;
+    });
+    const surfaceRoughnessMap = makeSurfaceDataTexture(128, (u, v) => {
+      const patches = Math.sin(tau * (u * 4 + v * 3)) * 0.45 + Math.cos(tau * (u * 5 - v * 2)) * 0.3;
+      const grain = Math.sin(tau * (u * 17 + v * 23)) * 0.25 + Math.cos(tau * (u * 29 - v * 31)) * 0.18;
+      return 176 + (patches + grain) * 42;
+    });
+    const waterBumpMap = makeSurfaceDataTexture(128, (u, v) => {
+      const longWave = Math.sin(tau * (u * 3 + v * 2.2 + Math.sin(v * tau * 2) * 0.12));
+      const crossWave = Math.cos(tau * (v * 5 - u * 1.4 + Math.sin(u * tau * 3) * 0.08));
+      const fineWave = Math.sin(tau * (u * 13 + v * 9)) * 0.18;
+      return 128 + (longWave * 0.48 + crossWave * 0.38 + fineWave) * 22;
+    });
+    waterBumpMap.repeat.set(5, 5);
+
+    // 環境反射球：讓金屬、晶體和水面能反射天光，而不是只靠金屬度變暗。
+    const environmentCanvas = document.createElement("canvas");
+    environmentCanvas.width = 512;
+    environmentCanvas.height = 256;
+    const environmentContext = environmentCanvas.getContext("2d");
+    if (environmentContext) {
+      const skyGradient = environmentContext.createLinearGradient(0, 0, 0, 256);
+      skyGradient.addColorStop(0, "#55758b");
+      skyGradient.addColorStop(0.34, "#91a99f");
+      skyGradient.addColorStop(0.52, "#d1c5a3");
+      skyGradient.addColorStop(0.7, "#527d82");
+      skyGradient.addColorStop(1, "#173f50");
+      environmentContext.fillStyle = skyGradient;
+      environmentContext.fillRect(0, 0, 512, 256);
+      const sunGlow = environmentContext.createRadialGradient(356, 86, 2, 356, 86, 78);
+      sunGlow.addColorStop(0, "rgba(255,235,190,0.92)");
+      sunGlow.addColorStop(0.22, "rgba(255,220,170,0.38)");
+      sunGlow.addColorStop(1, "rgba(255,220,170,0)");
+      environmentContext.fillStyle = sunGlow;
+      environmentContext.fillRect(270, 0, 170, 170);
+      environmentContext.globalAlpha = 0.18;
+      environmentContext.fillStyle = "#e2e4cf";
+      for (let band = 0; band < 5; band++) environmentContext.fillRect(20 + band * 83, 104 + band % 2 * 8, 58, 2);
+      environmentContext.globalAlpha = 1;
+    }
+    const environmentTexture = new THREE.CanvasTexture(environmentCanvas);
+    environmentTexture.mapping = THREE.EquirectangularReflectionMapping;
+    environmentTexture.colorSpace = THREE.SRGBColorSpace;
+    environmentTexture.needsUpdate = true;
+    scene.environment = environmentTexture;
+
+    // 塔座接觸陰影使用徑向透明貼圖，補上建築與地面的重量感。
+    const contactShadowCanvas = document.createElement("canvas");
+    contactShadowCanvas.width = 128;
+    contactShadowCanvas.height = 128;
+    const contactShadowContext = contactShadowCanvas.getContext("2d");
+    if (contactShadowContext) {
+      const gradient = contactShadowContext.createRadialGradient(64, 64, 8, 64, 64, 64);
+      gradient.addColorStop(0, "rgba(7,17,22,0.48)");
+      gradient.addColorStop(0.48, "rgba(7,17,22,0.25)");
+      gradient.addColorStop(0.78, "rgba(7,17,22,0.09)");
+      gradient.addColorStop(1, "rgba(7,17,22,0)");
+      contactShadowContext.fillStyle = gradient;
+      contactShadowContext.fillRect(0, 0, 128, 128);
+    }
+    const contactShadowTexture = new THREE.CanvasTexture(contactShadowCanvas);
+    contactShadowTexture.colorSpace = THREE.SRGBColorSpace;
+    contactShadowTexture.needsUpdate = true;
+    const contactShadowGeometry = new THREE.CircleGeometry(1, 48);
+
     // 柔和的海天漸層穹頂：由深海青過渡到暖霧色，再到高空藍綠。
     const skyGeometry = new THREE.SphereGeometry(360, 40, 24);
     const skyPositions = skyGeometry.getAttribute("position");
@@ -180,10 +271,14 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       const key = /^#[0-9a-f]{6}$/i.test(color) ? color : "#78cfe8";
       let material = towerAccentMaterials.get(key);
       if (!material) {
-        material = new THREE.MeshStandardMaterial({
+        material = new THREE.MeshPhysicalMaterial({
           color: key,
-          metalness: 0.5,
-          roughness: 0.26,
+          metalness: 0.46,
+          roughness: 0.3,
+          roughnessMap: surfaceRoughnessMap,
+          clearcoat: 0.52,
+          clearcoatRoughness: 0.22,
+          envMapIntensity: 0.92,
           emissive: key,
           emissiveIntensity: 0.16,
         });
@@ -213,45 +308,48 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     const shotNodes: any[] = [];
     const ringNodes: any[] = [];
     const shared = {
-      stone: new THREE.MeshStandardMaterial({ color: MATERIALS.stone, roughness: 0.76 }),
-      ivory: new THREE.MeshStandardMaterial({ color: MATERIALS.ivory, roughness: 0.63 }),
-      blue: new THREE.MeshStandardMaterial({ color: MATERIALS.blue, metalness: 0.25, roughness: 0.43 }),
-      roof: new THREE.MeshStandardMaterial({ color: MATERIALS.roof, metalness: 0.25, roughness: 0.38 }),
-      gold: new THREE.MeshStandardMaterial({ color: MATERIALS.gold, metalness: 0.78, roughness: 0.28 }),
-      brightGold: new THREE.MeshStandardMaterial({ color: MATERIALS.brightGold, metalness: 0.7, roughness: 0.22, emissive: "#754c16", emissiveIntensity: 0.18 }),
-      crystal: new THREE.MeshStandardMaterial({ color: MATERIALS.crystal, metalness: 0.25, roughness: 0.18, emissive: "#008fe8", emissiveIntensity: 1.0 }),
-      chargeCrystal: new THREE.MeshStandardMaterial({ color: "#8af4e8", metalness: 0.24, roughness: 0.16, emissive: "#00a89c", emissiveIntensity: 0.8 }),
-      glass: new THREE.MeshStandardMaterial({ color: "#0e3945", roughness: 0.22, emissive: "#0a6070", emissiveIntensity: 0.42 }),
+      stone: new THREE.MeshStandardMaterial({ color: MATERIALS.stone, roughness: 0.84, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.026 }),
+      ivory: new THREE.MeshStandardMaterial({ color: MATERIALS.ivory, roughness: 0.72, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.014 }),
+      blue: new THREE.MeshPhysicalMaterial({ color: MATERIALS.blue, metalness: 0.3, roughness: 0.36, clearcoat: 0.48, clearcoatRoughness: 0.24, envMapIntensity: 0.82 }),
+      roof: new THREE.MeshPhysicalMaterial({ color: MATERIALS.roof, metalness: 0.28, roughness: 0.34, clearcoat: 0.3, clearcoatRoughness: 0.28, envMapIntensity: 0.78 }),
+      gold: new THREE.MeshPhysicalMaterial({ color: MATERIALS.gold, metalness: 0.74, roughness: 0.28, roughnessMap: surfaceRoughnessMap, clearcoat: 0.58, clearcoatRoughness: 0.22, envMapIntensity: 1.16 }),
+      brightGold: new THREE.MeshPhysicalMaterial({ color: MATERIALS.brightGold, metalness: 0.72, roughness: 0.2, roughnessMap: surfaceRoughnessMap, clearcoat: 0.82, clearcoatRoughness: 0.13, envMapIntensity: 1.28, emissive: "#754c16", emissiveIntensity: 0.18 }),
+      crystal: new THREE.MeshPhysicalMaterial({ color: MATERIALS.crystal, metalness: 0.28, roughness: 0.16, clearcoat: 0.82, clearcoatRoughness: 0.08, envMapIntensity: 1.28, emissive: "#008fe8", emissiveIntensity: 1.0 }),
+      chargeCrystal: new THREE.MeshPhysicalMaterial({ color: "#8af4e8", metalness: 0.22, roughness: 0.13, clearcoat: 0.9, clearcoatRoughness: 0.06, envMapIntensity: 1.35, emissive: "#00a89c", emissiveIntensity: 0.8 }),
+      glass: new THREE.MeshPhysicalMaterial({ color: "#0e3945", roughness: 0.2, metalness: 0.12, clearcoat: 0.92, clearcoatRoughness: 0.08, envMapIntensity: 1.05, emissive: "#0a6070", emissiveIntensity: 0.42 }),
       terrain: [
-        new THREE.MeshStandardMaterial({ color: MATERIALS.road, roughness: 0.95 }),
-        new THREE.MeshStandardMaterial({ color: MATERIALS.low, roughness: 0.92 }),
-        new THREE.MeshStandardMaterial({ color: MATERIALS.mid, roughness: 0.9 }),
-        new THREE.MeshStandardMaterial({ color: MATERIALS.high, roughness: 0.88 }),
+        new THREE.MeshStandardMaterial({ color: MATERIALS.road, roughness: 0.96, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.012 }),
+        new THREE.MeshStandardMaterial({ color: MATERIALS.low, roughness: 0.95, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.018 }),
+        new THREE.MeshStandardMaterial({ color: MATERIALS.mid, roughness: 0.93, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.021 }),
+        new THREE.MeshStandardMaterial({ color: MATERIALS.high, roughness: 0.91, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.024 }),
       ],
-      cliff: new THREE.MeshStandardMaterial({ color: "#344c4c", roughness: 0.97 }),
-      cliffBand: new THREE.MeshStandardMaterial({ color: "#637c6b", roughness: 0.88 }),
-      cliffBandLight: new THREE.MeshStandardMaterial({ color: "#9a9f7d", roughness: 0.82 }),
-      cliffCap: new THREE.MeshStandardMaterial({ color: "#d0c49b", roughness: 0.76 }),
-      rockDetail: new THREE.MeshStandardMaterial({ color: "#8b927d", roughness: 0.96 }),
-      terrainMoss: new THREE.MeshStandardMaterial({ color: "#66856a", roughness: 0.98 }),
-      terrainStrata: new THREE.MeshStandardMaterial({ color: "#c0b99d", roughness: 0.92 }),
+      cliff: new THREE.MeshStandardMaterial({ color: "#344c4c", roughness: 0.98, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.034 }),
+      cliffBand: new THREE.MeshStandardMaterial({ color: "#637c6b", roughness: 0.94, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.022 }),
+      cliffBandLight: new THREE.MeshStandardMaterial({ color: "#9a9f7d", roughness: 0.91, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.019 }),
+      cliffCap: new THREE.MeshStandardMaterial({ color: "#d0c49b", roughness: 0.84, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.022 }),
+      rockDetail: new THREE.MeshStandardMaterial({ color: "#8b927d", roughness: 0.98, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.03 }),
+      terrainMoss: new THREE.MeshStandardMaterial({ color: "#66856a", roughness: 0.99, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.01 }),
+      terrainStrata: new THREE.MeshStandardMaterial({ color: "#c0b99d", roughness: 0.96, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.018 }),
       terrainInlay: new THREE.MeshStandardMaterial({ color: "#e1d0a6", roughness: 0.82, metalness: 0.08 }),
-      roadPaver: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.94 }),
-      roadEdge: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.9 }),
-      foundationStone: new THREE.MeshStandardMaterial({ color: "#b5b29f", roughness: 0.9 }),
-      foundationGold: new THREE.MeshStandardMaterial({ color: "#c5a56c", metalness: 0.58, roughness: 0.38 }),
-      ruinStone: new THREE.MeshStandardMaterial({ color: "#a7a18d", roughness: 0.96 }),
+      roadPaver: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.97, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.016 }),
+      roadEdge: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.95, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.021 }),
+      foundationStone: new THREE.MeshStandardMaterial({ color: "#b5b29f", roughness: 0.96, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.021 }),
+      foundationGold: new THREE.MeshPhysicalMaterial({ color: "#c5a56c", metalness: 0.62, roughness: 0.32, roughnessMap: surfaceRoughnessMap, clearcoat: 0.56, clearcoatRoughness: 0.22, envMapIntensity: 1.08 }),
+      ruinStone: new THREE.MeshStandardMaterial({ color: "#a7a18d", roughness: 0.98, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.028 }),
       ruinShadow: new THREE.MeshStandardMaterial({ color: "#596c64", roughness: 0.94 }),
-      runeGlow: new THREE.MeshStandardMaterial({
+      runeGlow: new THREE.MeshPhysicalMaterial({
         color: "#79d9c8",
-        metalness: 0.18,
-        roughness: 0.3,
+        metalness: 0.22,
+        roughness: 0.27,
+        clearcoat: 0.58,
+        clearcoatRoughness: 0.18,
+        envMapIntensity: 1.05,
         emissive: "#147b70",
         emissiveIntensity: 0.72,
       }),
-      rampStep: new THREE.MeshStandardMaterial({ color: "#c0b69b", roughness: 0.92 }),
-      coastGrass: new THREE.MeshStandardMaterial({ color: "#86a98b", roughness: 0.97 }),
-      limestoneVein: new THREE.MeshStandardMaterial({ color: "#d7d0b9", roughness: 0.88 }),
+      rampStep: new THREE.MeshStandardMaterial({ color: "#c0b69b", roughness: 0.96, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.019 }),
+      coastGrass: new THREE.MeshStandardMaterial({ color: "#86a98b", roughness: 0.98, bumpMap: surfaceReliefMap, bumpScale: 0.01 }),
+      limestoneVein: new THREE.MeshStandardMaterial({ color: "#d7d0b9", roughness: 0.93, bumpMap: surfaceReliefMap, bumpScale: 0.012 }),
       ancientEtch: new THREE.MeshStandardMaterial({
         color: "#8acdc0",
         metalness: 0.12,
@@ -259,8 +357,8 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         emissive: "#165c57",
         emissiveIntensity: 0.36,
       }),
-      driftwood: new THREE.MeshStandardMaterial({ color: "#796c59", roughness: 0.98 }),
-      ridgePeak: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.96 }),
+      driftwood: new THREE.MeshStandardMaterial({ color: "#796c59", roughness: 0.99, bumpMap: surfaceReliefMap, bumpScale: 0.018 }),
+      ridgePeak: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.98, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.028 }),
       caveShadow: new THREE.MeshBasicMaterial({
         color: "#102c34",
         side: THREE.DoubleSide,
@@ -268,9 +366,9 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         opacity: 0.92,
         depthWrite: false,
       }),
-      caveRim: new THREE.MeshStandardMaterial({ color: "#68786e", roughness: 0.98 }),
-      bridgeStone: new THREE.MeshStandardMaterial({ color: "#c0b69b", roughness: 0.9 }),
-      bridgeTrim: new THREE.MeshStandardMaterial({ color: "#b99560", metalness: 0.46, roughness: 0.44 }),
+      caveRim: new THREE.MeshStandardMaterial({ color: "#68786e", roughness: 0.99, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.028 }),
+      bridgeStone: new THREE.MeshStandardMaterial({ color: "#c0b69b", roughness: 0.96, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.022 }),
+      bridgeTrim: new THREE.MeshPhysicalMaterial({ color: "#b99560", metalness: 0.54, roughness: 0.36, roughnessMap: surfaceRoughnessMap, clearcoat: 0.48, clearcoatRoughness: 0.24, envMapIntensity: 1.02 }),
       grass: new THREE.MeshStandardMaterial({ color: "#83a878", roughness: 0.96 }),
       terrainCrystal: new THREE.MeshStandardMaterial({
         color: "#55a6a2",
@@ -279,17 +377,29 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         emissive: "#1d6865",
         emissiveIntensity: 0.18,
       }),
-      floor: new THREE.MeshStandardMaterial({ color: "#123b49", metalness: 0.24, roughness: 0.34 }),
-      seaShelf: new THREE.MeshStandardMaterial({ color: "#28636a", metalness: 0.16, roughness: 0.42 }),
-      shoreSand: new THREE.MeshStandardMaterial({ color: "#d9c49a", roughness: 0.94 }),
+      floor: new THREE.MeshPhysicalMaterial({ color: "#123b49", metalness: 0.22, roughness: 0.25, bumpMap: waterBumpMap, bumpScale: 0.022, clearcoat: 0.72, clearcoatRoughness: 0.16, envMapIntensity: 1.18 }),
+      seaShelf: new THREE.MeshPhysicalMaterial({ color: "#28636a", metalness: 0.14, roughness: 0.29, bumpMap: waterBumpMap, bumpScale: 0.016, clearcoat: 0.66, clearcoatRoughness: 0.2, envMapIntensity: 1.12 }),
+      shoreSand: new THREE.MeshStandardMaterial({ color: "#d9c49a", roughness: 0.97, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.016 }),
       shoreFoam: new THREE.MeshBasicMaterial({ color: "#b9e6d8", transparent: true, opacity: 0.76, depthWrite: false }),
       waterRipple: new THREE.MeshBasicMaterial({ color: "#c7eee0", transparent: true, opacity: 0.16, depthWrite: false, side: THREE.DoubleSide }),
-      cliffLip: new THREE.MeshStandardMaterial({ color: "#c9b58b", roughness: 0.86 }),
-      cliffFacet: new THREE.MeshStandardMaterial({ color: "#718071", roughness: 0.96 }),
-      reefRock: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.94 }),
-      reefCoral: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.78 }),
-      heightRim: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.84 }),
-      ramp: new THREE.MeshStandardMaterial({ color: "#aeb49c", roughness: 0.9 }),
+      rockCrack: new THREE.MeshStandardMaterial({ color: "#263c3b", roughness: 1, bumpMap: surfaceReliefMap, bumpScale: 0.012 }),
+      rockCrackEdge: new THREE.MeshStandardMaterial({ color: "#8f9075", roughness: 0.96, bumpMap: surfaceReliefMap, bumpScale: 0.008 }),
+      contactShadow: new THREE.MeshBasicMaterial({
+        map: contactShadowTexture,
+        transparent: true,
+        opacity: 0.78,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        toneMapped: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+      }),
+      cliffLip: new THREE.MeshStandardMaterial({ color: "#c9b58b", roughness: 0.92, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.022 }),
+      cliffFacet: new THREE.MeshStandardMaterial({ color: "#718071", roughness: 0.98, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.028 }),
+      reefRock: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.98, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.025 }),
+      reefCoral: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.88, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.014 }),
+      heightRim: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.93, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.02 }),
+      ramp: new THREE.MeshStandardMaterial({ color: "#aeb49c", roughness: 0.95, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.02 }),
     };
 
     const getTexture = (image: HTMLImageElement) => {
@@ -301,6 +411,18 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         textureCache.set(image, texture);
       }
       return texture;
+    };
+
+    const addContactShadow = (parent: any, radius: number) => {
+      const shadow = new THREE.Mesh(contactShadowGeometry, shared.contactShadow);
+      shadow.rotation.x = -Math.PI / 2;
+      shadow.position.y = 0.006;
+      shadow.scale.set(radius, radius, 1);
+      shadow.renderOrder = 0;
+      shadow.castShadow = false;
+      shadow.frustumCulled = false;
+      parent.add(shadow);
+      return shadow;
     };
 
     const addBox = (parent: any, sx: number, sy: number, sz: number, x: number, y: number, z: number, material: any) => {
@@ -395,6 +517,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     const createSanctuary = (tower: Terrain3DTower, heights: number[], animateTurrets: boolean, animateMainUpgrade: boolean) => {
       const root = new THREE.Group();
       root.position.set(tower.x / CELL, groundTop(heights[tower.gy * COLS + tower.gx] ?? 0), tower.y / CELL);
+      addContactShadow(root, 3.34);
       // 六乘六格石造基座，金邊和階層清楚標示建築佔地
       addBox(root, 6.05, 0.24, 6.05, 0, 0.12, 0, shared.blue);
       addBox(root, 5.8, 0.16, 5.8, 0, 0.31, 0, shared.gold);
@@ -595,6 +718,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     const createStake = (tower: Terrain3DTower, heights: number[]) => {
       const root = new THREE.Group();
       root.position.set(tower.x / CELL, groundTop(heights[tower.gy * COLS + tower.gx] ?? 0), tower.y / CELL);
+      addContactShadow(root, 0.66);
       addBox(root, 0.96, 0.075, 0.96, 0, 0.0375, 0, shared.foundationStone);
       const stakeSeal = new THREE.Mesh(new THREE.TorusGeometry(0.54, 0.026, 6, 24), shared.foundationGold);
       stakeSeal.rotation.x = Math.PI / 2;
@@ -611,6 +735,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     const createTowerBase = (tower: Terrain3DTower, heights: number[]) => {
       const root = new THREE.Group();
       root.position.set(tower.x / CELL, groundTop(heights[tower.gy * COLS + tower.gx] ?? 0), tower.y / CELL);
+      addContactShadow(root, 1.08);
       const level = Math.max(1, Math.min(8, tower.level || 1));
       const definition = TOWERS[tower.def];
       const accent = getTowerAccentMaterial(definition?.color ?? "#78cfe8");
@@ -2278,6 +2403,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         { dc: -1, dr: 0, dx: -0.46, dz: 0, sx: 0.08, sz: 0.94 },
       ];
       const cliffFaces: { x: number; y: number; z: number; sx: number; sy: number; sz: number; bandY: number; upperBandY: number }[] = [];
+      const rockCracks: { x: number; y: number; z: number; nx: number; nz: number; height: number; width: number; seed: number }[] = [];
       const caveEntrances: { x: number; y: number; z: number; rot: number; scale: number }[] = [];
       const cliffRibs: { x: number; y: number; z: number; rot: number; height: number; tint: string }[] = [];
       const cliffLedges: { x: number; y: number; z: number; rot: number }[] = [];
@@ -2332,6 +2458,20 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
 
           // 斷層表面隨機生成薄片狀岩角，角度、厚度和色階有細微變化，避免連續牆面像積木。
           const faceSeed = Math.abs(Math.sin(cell.x * 43.17 + cell.z * 91.73 + d.dc * 17.1 + d.dr * 31.7) * 28543.31) % 1;
+          const crackSeed = Math.abs(Math.sin(cell.x * 97.3 + cell.z * 41.9 + d.dc * 23.1 + d.dr * 17.7) * 26173.91) % 1;
+          if (cell.h >= 2 && crackSeed > 0.84 && rockCracks.length < 620) {
+            const along = (crackSeed - 0.5) * 0.54;
+            rockCracks.push({
+              x: cell.x + d.dx * 1.015 + (d.dc === 0 ? along : 0),
+              y: low + (high - low) * (0.34 + crackSeed * 0.2),
+              z: cell.z + d.dz * 1.015 + (d.dr === 0 ? along : 0),
+              nx: d.dc,
+              nz: d.dr,
+              height: 0.16 + crackSeed * 0.18,
+              width: 0.018 + crackSeed * 0.012,
+              seed: crackSeed,
+            });
+          }
           if (cell.h >= 1 && faceSeed > 0.42) {
             const vertical = high - low;
             const along = (faceSeed - 0.5) * 0.48;
@@ -2462,6 +2602,45 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         capMesh.castShadow = true;
         capMesh.receiveShadow = true;
         terrainRoot.add(cliffMesh, bandMesh, upperBandMesh, capMesh);
+      }
+      if (rockCracks.length) {
+        const crackMesh = new THREE.InstancedMesh(
+          new THREE.BoxGeometry(1, 1, 1),
+          shared.rockCrack,
+          rockCracks.length,
+        );
+        const crackEdgeMesh = new THREE.InstancedMesh(
+          new THREE.BoxGeometry(1, 1, 1),
+          shared.rockCrackEdge,
+          rockCracks.length,
+        );
+        const crackDummy = new THREE.Object3D();
+        for (let i = 0; i < rockCracks.length; i++) {
+          const crack = rockCracks[i];
+          const faceX = crack.nx !== 0;
+          crackDummy.position.set(
+            crack.x + (faceX ? crack.nx * 0.009 : 0),
+            crack.y,
+            crack.z + (faceX ? 0 : crack.nz * 0.009),
+          );
+          crackDummy.rotation.set(0, 0, (crack.seed - 0.5) * 0.16);
+          crackDummy.scale.set(faceX ? 0.014 : crack.width, crack.height, faceX ? crack.width : 0.014);
+          crackDummy.updateMatrix();
+          crackMesh.setMatrixAt(i, crackDummy.matrix);
+
+          crackDummy.position.x += faceX ? 0 : crack.width * 0.8;
+          crackDummy.position.z += faceX ? -crack.width * 0.8 : 0;
+          crackDummy.scale.set(faceX ? 0.01 : crack.width * 0.36, crack.height * 0.62, faceX ? crack.width * 0.36 : 0.01);
+          crackDummy.updateMatrix();
+          crackEdgeMesh.setMatrixAt(i, crackDummy.matrix);
+        }
+        crackMesh.instanceMatrix.needsUpdate = true;
+        crackEdgeMesh.instanceMatrix.needsUpdate = true;
+        crackMesh.castShadow = false;
+        crackMesh.receiveShadow = false;
+        crackEdgeMesh.castShadow = false;
+        crackEdgeMesh.receiveShadow = false;
+        terrainRoot.add(crackMesh, crackEdgeMesh);
       }
       if (caveEntrances.length) {
         const caveMouths = new THREE.InstancedMesh(
@@ -2705,6 +2884,8 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     };
 
     const updateWaterRipples = (time: number) => {
+      waterBumpMap.offset.x = (time * 0.000006) % 1;
+      waterBumpMap.offset.y = (time * 0.0000035) % 1;
       if (!waterRippleMesh || !waterRippleEntries.length) return;
       for (let i = 0; i < waterRippleEntries.length; i++) {
         const ripple = waterRippleEntries[i];
@@ -3180,6 +3361,13 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       skyGeometry.dispose();
       skyMaterial.dispose();
       shared.waterRipple.dispose();
+      shared.contactShadow.dispose();
+      surfaceReliefMap.dispose();
+      surfaceRoughnessMap.dispose();
+      waterBumpMap.dispose();
+      environmentTexture.dispose();
+      contactShadowTexture.dispose();
+      contactShadowGeometry.dispose();
       for (const texture of textureCache.values()) texture.dispose();
       for (const material of towerAccentMaterials.values()) material.dispose();
       renderer.dispose();
