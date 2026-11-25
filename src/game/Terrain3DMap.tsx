@@ -4405,7 +4405,10 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
 
     const screenToWorldPrecise = (clientX: number, clientY: number) => {
       if (!setPointerRay(clientX, clientY)) return null;
-      // 只測地表的四組 InstancedMesh，不碰水面、岩壁裝飾、塔體或粒子效果。
+      // 地表格子由分塊 InstancedMesh 建立；先同步地形世界矩陣，
+      // 確保滑鼠移動與點擊都能命中已升起的 0～3 級地表，而不是落回黑霧底平面。
+      terrainRoot.updateMatrixWorld(true);
+      // 只測地表的四組高度 InstancedMesh，不碰水面、岩壁裝飾、塔體或粒子效果。
       const hits = raycaster.intersectObjects(terrainPickMeshes, false);
       for (const hit of hits) {
         const cells = (hit.object as any).userData?.pickCells as
