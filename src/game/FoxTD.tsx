@@ -4788,9 +4788,14 @@ export function FoxTD() {
 
   function canPlaceReason(gx: number, gy: number): string | null {
     if (gx < 0 || gy < 0 || gx >= COLS || gy >= ROWS) return "超出世界範圍";
-    // 建塔規則簡化：已升起的地塊都能建造，包含道路與 Lv0～3 高地。
-    // 只保留未解鎖區域及已被建築佔用格的保護，不再限制道路、入口或高低差。
-    if (!isCellOnBoard(boardRef.current, gx, gy)) return "黑霧尚未散去，這塊地還沒升起";
+    if (isExpandBoard(boardRef.current)) {
+      // 地塊擴張：只要地塊已升起，道路與 0～3 級高地一律可建。
+      if (!isCellOnBoard(boardRef.current, gx, gy)) return "黑霧尚未散去，這塊地還沒升起";
+    } else if (sim.current.blocked.has(cellKey(gx, gy))) {
+      // 完整關卡：仍保留原有牆體、障礙及路障保護。
+      return "障礙／路障不可建";
+    }
+    // 只保留同格不能重疊；不再限制擴張地塊上的道路、入口或高低差。
     if (sim.current.towers.some((t) => t.gx === gx && t.gy === gy)) return "此格已有建築";
     return null;
   }
