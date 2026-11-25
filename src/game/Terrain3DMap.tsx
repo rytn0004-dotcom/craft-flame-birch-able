@@ -99,7 +99,8 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
 
     const scene = new THREE.Scene();
     scene.background = null;
-    const atmosphericFog = new THREE.Fog("#819b91", 72, 252);
+    // 黑潮環境霧延伸至遠海；前景開啟地塊仍清晰，遠方未探索海域逐漸沉入深淵色霧。
+    const atmosphericFog = new THREE.Fog("#111a2b", 96, 430);
     scene.fog = atmosphericFog;
 
     // 程序化可平鋪微表面：不依賴外部貼圖，石材與水面共用少量 GPU 資源。
@@ -194,7 +195,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     const contactShadowGeometry = new THREE.CircleGeometry(1, 48);
 
     // 柔和的海天漸層穹頂：由深海青過渡到暖霧色，再到高空藍綠。
-    const skyGeometry = new THREE.SphereGeometry(360, 40, 24);
+    const skyGeometry = new THREE.SphereGeometry(900, 40, 24);
     const skyPositions = skyGeometry.getAttribute("position");
     const skyColors = new Float32Array(skyPositions.count * 3);
     const skyBottom = new THREE.Color("#173e4b");
@@ -202,7 +203,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     const skyZenith = new THREE.Color("#365c72");
     const skyColor = new THREE.Color();
     for (let i = 0; i < skyPositions.count; i++) {
-      const height = THREE.MathUtils.clamp((skyPositions.getY(i) / 360 + 1) * 0.5, 0, 1);
+      const height = THREE.MathUtils.clamp((skyPositions.getY(i) / 900 + 1) * 0.5, 0, 1);
       if (height < 0.5) skyColor.lerpColors(skyBottom, skyHorizon, height * 2);
       else skyColor.lerpColors(skyHorizon, skyZenith, (height - 0.5) * 2);
       skyColors[i * 3] = skyColor.r;
@@ -223,7 +224,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     skyDome.frustumCulled = false;
     scene.add(skyDome);
 
-    const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 500);
+    const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 1200);
     const terrainRoot = new THREE.Group();
     const buildingRoot = new THREE.Group();
     const actorRoot = new THREE.Group();
@@ -302,7 +303,10 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     let waterRippleMesh: any = null;
     const blackMistEntries: { x: number; z: number; y: number; phase: number; rot: number; scaleX: number; scaleZ: number; driftX: number; driftZ: number }[] = [];
     let blackMistMesh: any = null;
+    const blackMistCloudEntries: { x: number; z: number; phase: number; scaleX: number; scaleZ: number; driftX: number; driftZ: number }[] = [];
+    let blackMistCloudMesh: any = null;
     const blackMistDummy = new THREE.Object3D();
+    const blackMistCloudDummy = new THREE.Object3D();
     const landmarkLights: { light: THREE.PointLight; phase: number; intensity: number }[] = [];
     const updateLandmarkLights = (time: number) => {
       for (const entry of landmarkLights) {
@@ -344,6 +348,8 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
 
     // 全地圖深淵霧幕：覆蓋 200×200 可探索範圍；地塊地表位於霧幕上方，因此已開啟區域自然保持明亮。
     const blackMistFieldSize = 256;
+    const blackMistFieldWidth = COLS + 180;
+    const blackMistFieldDepth = ROWS + 180;
     const blackMistFieldPixels = new Uint8Array(blackMistFieldSize * blackMistFieldSize * 4);
     const blackMistFieldMaskPixels = new Uint8Array(blackMistFieldSize * blackMistFieldSize * 4);
     // 初始 HQ 地塊固定在地圖中央槽位；淨界核心對齊該地塊中心（110, 110）。
@@ -359,8 +365,9 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       const fine = Math.sin(tau * (u * 23 + v * 19)) * 0.06
         + Math.cos(tau * (v * 29 - u * 17)) * 0.05;
       const density = THREE.MathUtils.clamp(0.76 + broad * 0.16 + medium * 0.12 + fine, 0.48, 0.96);
-      const worldX = u * COLS;
-      const worldZ = (1 - v) * ROWS;
+      // 將霧場延伸到可遊玩棋盤外圍的遠海，而不是只貼齊地圖格線。
+      const worldX = (u - 0.5) * blackMistFieldWidth + COLS / 2;
+      const worldZ = (0.5 - v) * blackMistFieldDepth + ROWS / 2;
       const centerDistance = Math.hypot(worldX - sanctuaryCenterX, worldZ - sanctuaryCenterZ);
       // 中央遮罩獨立於流動噪聲貼圖，確保淨界核心不會隨霧紋漂移。
       const coreClearance = THREE.MathUtils.smoothstep(centerDistance, 9, 17);
@@ -415,6 +422,15 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         depthWrite: false,
         side: THREE.DoubleSide,
         toneMapped: false,
+      }),
+      blackMistCloud: new THREE.MeshBasicMaterial({
+        color: "#080e1e",
+        transparent: true,
+        opacity: 0.22,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        toneMapped: false,
+        fog: false,
       }),
       stone: new THREE.MeshStandardMaterial({ color: MATERIALS.stone, roughness: 0.84, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.026 }),
       ivory: new THREE.MeshStandardMaterial({ color: MATERIALS.ivory, roughness: 0.72, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.014 }),
@@ -1318,6 +1334,8 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       terrainPickMeshes.length = 0;
       blackMistEntries.length = 0;
       blackMistMesh = null;
+      blackMistCloudEntries.length = 0;
+      blackMistCloudMesh = null;
       waterRippleMesh = null;
       waterRippleEntries.length = 0;
       landmarkLights.length = 0;
@@ -1654,10 +1672,10 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       const expandMode = data.mapMode === "expand";
       const seaCenterX = expandMode ? COLS / 2 : mapCenterX;
       const seaCenterZ = expandMode ? ROWS / 2 : mapCenterZ;
-      const deepSeaWidth = expandMode ? COLS + 36 : mapWidth + 36;
-      const deepSeaDepth = expandMode ? ROWS + 36 : mapDepth + 36;
-      const shelfSeaWidth = expandMode ? COLS + 12 : mapWidth + 12;
-      const shelfSeaDepth = expandMode ? ROWS + 12 : mapDepth + 12;
+      const deepSeaWidth = expandMode ? COLS + 240 : mapWidth + 72;
+      const deepSeaDepth = expandMode ? ROWS + 240 : mapDepth + 72;
+      const shelfSeaWidth = expandMode ? COLS + 104 : mapWidth + 28;
+      const shelfSeaDepth = expandMode ? ROWS + 104 : mapDepth + 28;
       const deepWater = new THREE.Mesh(
         new THREE.PlaneGeometry(deepSeaWidth, deepSeaDepth),
         shared.floor,
@@ -1677,7 +1695,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       // 黑霧底層覆蓋整張棋盤，未鋪設地塊的海域都會被深淵侵染；已開啟地塊因地表高於霧層而保持清亮。
       if (expandMode) {
         const blackMistField = new THREE.Mesh(
-          new THREE.PlaneGeometry(COLS, ROWS),
+          new THREE.PlaneGeometry(blackMistFieldWidth, blackMistFieldDepth),
           shared.blackMistField,
         );
         blackMistField.rotation.x = -Math.PI / 2;
@@ -1687,6 +1705,50 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         blackMistField.castShadow = false;
         blackMistField.receiveShadow = false;
         terrainRoot.add(blackMistField);
+
+        // 低成本 3D 深淵雲團：沿整個世界與外圍海域疏散分布，置於地表下方，不遮住已解鎖地塊。
+        const cloudPositions = 9;
+        const cloudMargin = 72;
+        for (let row = 0; row < cloudPositions; row++) {
+          for (let col = 0; col < cloudPositions; col++) {
+            const seed = Math.abs(Math.sin((col + 1) * 127.1 + (row + 3) * 311.7) * 43758.5453) % 1;
+            if (seed < 0.2) continue;
+            const x = -cloudMargin + ((col + 0.5) / cloudPositions) * (COLS + cloudMargin * 2);
+            const z = -cloudMargin + ((row + 0.5) / cloudPositions) * (ROWS + cloudMargin * 2);
+            if (tileCells.has(Math.floor(x) + "," + Math.floor(z))) continue;
+            const scaleSeed = Math.abs(Math.sin(x * 17.3 + z * 31.7) * 19341.7) % 1;
+            blackMistCloudEntries.push({
+              x, z,
+              phase: seed * 19.3 + scaleSeed * 7.1,
+              scaleX: 8 + scaleSeed * 13,
+              scaleZ: 7 + seed * 12,
+              driftX: (seed - 0.5) * 0.45,
+              driftZ: (scaleSeed - 0.5) * 0.45,
+            });
+          }
+        }
+        if (blackMistCloudEntries.length) {
+          blackMistCloudMesh = new THREE.InstancedMesh(
+            new THREE.SphereGeometry(1, 10, 7),
+            shared.blackMistCloud,
+            blackMistCloudEntries.length,
+          );
+          blackMistCloudMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+          for (let i = 0; i < blackMistCloudEntries.length; i++) {
+            const cloud = blackMistCloudEntries[i];
+            blackMistCloudDummy.position.set(cloud.x, -0.145, cloud.z);
+            blackMistCloudDummy.scale.set(cloud.scaleX, 0.19, cloud.scaleZ);
+            blackMistCloudDummy.rotation.y = cloud.phase;
+            blackMistCloudDummy.updateMatrix();
+            blackMistCloudMesh.setMatrixAt(i, blackMistCloudDummy.matrix);
+          }
+          blackMistCloudMesh.instanceMatrix.needsUpdate = true;
+          blackMistCloudMesh.frustumCulled = false;
+          blackMistCloudMesh.renderOrder = 1;
+          blackMistCloudMesh.castShadow = false;
+          blackMistCloudMesh.receiveShadow = false;
+          terrainRoot.add(blackMistCloudMesh);
+        }
       }
 
 
@@ -4107,6 +4169,25 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         blackMistMesh.instanceMatrix.needsUpdate = true;
       }
 
+      if (blackMistCloudMesh && blackMistCloudEntries.length) {
+        shared.blackMistCloud.opacity = 0.24 - power * 0.08;
+        for (let i = 0; i < blackMistCloudEntries.length; i++) {
+          const cloud = blackMistCloudEntries[i];
+          const drift = Math.sin(time * 0.00012 + cloud.phase);
+          blackMistCloudDummy.position.set(
+            cloud.x + cloud.driftX * drift * 2.2,
+            -0.145 + Math.sin(time * 0.00018 + cloud.phase) * 0.018,
+            cloud.z + cloud.driftZ * drift * 2.2,
+          );
+          const pulse = 1 + Math.sin(time * 0.0003 + cloud.phase) * 0.035;
+          blackMistCloudDummy.scale.set(cloud.scaleX * pulse, 0.19, cloud.scaleZ * pulse);
+          blackMistCloudDummy.rotation.y = cloud.phase + drift * 0.025;
+          blackMistCloudDummy.updateMatrix();
+          blackMistCloudMesh.setMatrixAt(i, blackMistCloudDummy.matrix);
+        }
+        blackMistCloudMesh.instanceMatrix.needsUpdate = true;
+      }
+
       const hq = data.towers.find((tower) => tower.sanctuary);
       if (!hq || data.mapMode !== "expand") {
         purificationAura.visible = false;
@@ -4354,7 +4435,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       controls.rotateSpeed = 0.62;
       controls.panSpeed = 0.8;
       controls.minDistance = 6;
-      controls.maxDistance = 260;
+      controls.maxDistance = 560;
       controls.minPolarAngle = THREE.MathUtils.degToRad(8);
       controls.maxPolarAngle = THREE.MathUtils.degToRad(76);
       controls.mouseButtons = {
@@ -4469,8 +4550,8 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       }
       // 鏡頭拉遠時霧層更柔和、遠景更自然；拉近時保留地表紋理與建築邊緣。
       const viewDistance = camera.position.distanceTo(controls.target);
-      atmosphericFog.near = THREE.MathUtils.clamp(viewDistance * 1.28, 58, 108);
-      atmosphericFog.far = THREE.MathUtils.clamp(viewDistance * 3.45, 205, 365);
+      atmosphericFog.near = THREE.MathUtils.clamp(viewDistance * 1.08, 82, 185);
+      atmosphericFog.far = THREE.MathUtils.clamp(viewDistance * 3.7, 320, 860);
       for (const ring of rings) ring.rotation.y += dt * 0.42;
       for (let i = installationAnimations.length - 1; i >= 0; i--) {
         const animation = installationAnimations[i];
@@ -4552,6 +4633,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       purificationAuraMaterial.dispose();
       shared.blackMist.dispose();
       shared.blackMistField.dispose();
+      shared.blackMistCloud.dispose();
       blackMistTexture.dispose();
       blackMistFieldTexture.dispose();
       blackMistFieldMaskTexture.dispose();
