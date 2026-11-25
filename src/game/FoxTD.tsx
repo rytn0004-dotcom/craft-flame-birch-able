@@ -4484,29 +4484,24 @@ export function FoxTD() {
       }
       // 沒有放置工具時，先以 3D 建築實際網格命中選取，再用地面距離作備援。
       // 這可避免點聖地屋頂／城牆時，因高度投影誤差而選不到本陣。
-      if (!stakeRef.current && !shrinePlaceRef.current) {
-        // 真正點中 3D 建築碰撞盒時，無論是否選著塔卡都可選取建築。
+      if (!stakeRef.current && !shrinePlaceRef.current && pickRef.current === null) {
+        // 只有未選取塔卡時才進入建築選取；有塔卡時，地面點擊絕不被建築命中攔截。
         const pickedTower = terrain3DApiRef.current?.pickTower(ev.clientX, ev.clientY);
         if (pickedTower != null && s.towers[pickedTower]) {
           selRef.current = pickedTower;
           setSel(pickedTower);
-          pickRef.current = null;
           setPick(null);
           return;
         }
-        // 2D 像素距離是舊版 Canvas 的備援；3D 透視下不可在放置模式使用，否則會吞掉地面建塔點擊。
-        // 只有未選取塔卡時才啟用近距離選取備援，並縮小 HQ 判定半徑。
-        if (pickRef.current === null) {
-          for (let i = 0; i < s.towers.length; i++) {
-            const tw = s.towers[i];
-            const hitR = tw.sanctuary ? 96 : 44;
-            if (Math.hypot(tw.x - p.x, tw.y - p.y) < hitR) {
-              selRef.current = i;
-              setSel(i);
-              pickRef.current = null;
-              setPick(null);
-              return;
-            }
+        // 2D 距離僅保留為 3D 建築射線未命中時的選取備援，半徑縮小以避免誤選。
+        for (let i = 0; i < s.towers.length; i++) {
+          const tw = s.towers[i];
+          const hitR = tw.sanctuary ? 96 : 44;
+          if (Math.hypot(tw.x - p.x, tw.y - p.y) < hitR) {
+            selRef.current = i;
+            setSel(i);
+            setPick(null);
+            return;
           }
         }
       }
