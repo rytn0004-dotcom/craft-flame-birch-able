@@ -4765,12 +4765,11 @@ export function FoxTD() {
    * 擴張模式的 blocked=true 代表非道路高地；完整地圖的 blocked=true 代表障礙。
    */
   function isBuildableSurface(gx: number, gy: number) {
-    const key = cellKey(gx, gy);
-    const blocked = sim.current.blocked.has(key);
+    const blocked = sim.current.blocked.has(cellKey(gx, gy));
     if (isExpandBoard(boardRef.current)) {
-      // 擴張地塊的道路固定為 Lv0；非道路高地為 Lv1～3。
-      // blocked 仍作主要地形依據，height>0 則作 3D／尋路快照不同步時的安全補判。
-      return blocked || cellHeight(sim.current.heights, gx, gy) > 0;
+      // 擴張地塊以高度資料作唯一地表分類：道路固定 Lv0；可建高地固定 Lv1～3。
+      // 不再用共用 blocked 集合推斷塔位，避免路障／尋路狀態混入地形建造判定。
+      return cellHeight(sim.current.heights, gx, gy) > 0;
     }
     return !blocked;
   }
