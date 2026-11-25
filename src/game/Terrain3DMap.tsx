@@ -3516,7 +3516,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         terrainRoot.add(supports, supportCaps);
       }
 
-      if (cliffFragments.length) {      if (cliffFragments.length) {
+      if (cliffFragments.length) {
         const fragments = new THREE.InstancedMesh(
           new THREE.DodecahedronGeometry(0.22, 0),
           shared.cliffFacet,
