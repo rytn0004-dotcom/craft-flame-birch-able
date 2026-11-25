@@ -39,6 +39,7 @@ export type Terrain3DSnapshot = {
 
 export type Terrain3DApi = {
   screenToWorld: (clientX: number, clientY: number) => { x: number; y: number } | null;
+  pickTower: (clientX: number, clientY: number) => number | null;
   focus: (x: number, y: number) => void;
   reset: () => void;
 };
@@ -264,7 +265,12 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
 
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
-    const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    // 每個格子只記錄可見頂面高度；滑鼠命中不再穿過岩壁、礦晶、海面等裝飾物。
+    const terrainCellHeights = new Map<string, number>();
+    const terrainPickPlanes = [0, 1, 2, 3].map(
+      (height) => new THREE.Plane(new THREE.Vector3(0, 1, 0), -groundTop(height)),
+    );
+    const floorPlane = terrainPickPlanes[0];
     const textureCache = new Map<HTMLImageElement, any>();
     const towerAccentMaterials = new Map<string, any>();
     const getTowerAccentMaterial = (color: string) => {
@@ -1197,6 +1203,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
 
     const rebuildTerrain = (data: Terrain3DSnapshot) => {
       clearGroup(terrainRoot);
+      terrainCellHeights.clear();
       waterRippleMesh = null;
       waterRippleEntries.length = 0;
       landmarkLights.length = 0;
@@ -1214,6 +1221,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         h = Math.max(0, Math.min(3, h | 0));
         const cell = { x: gx + 0.5, z: gy + 0.5, h };
         tileCells.set(key, cell);
+        terrainCellHeights.set(key, h);
         byHeight[h].push(cell);
       };
 
@@ -3762,10 +3770,15 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       installationRings.length = 0;
       buildFlashEffects.length = 0;
       chargeCores.length = 0;
-      for (const tower of data.towers) {
+      for (let i = 0; i < data.towers.length; i++) {
+        const tower = data.towers[i];
+        const childIndex = buildingRoot.children.length;
         if (tower.sanctuary) createSanctuary(tower, data.heights, animateTurrets, animateMainUpgrade);
         else if (tower.stake) createStake(tower, data.heights);
         else createTowerBase(tower, data.heights);
+        // 讓 3D 點擊能直接對應遊戲塔陣列索引，不再只靠地面距離猜測。
+        const hitRoot = buildingRoot.children[childIndex];
+        if (hitRoot) hitRoot.userData.gameTowerIndex = i;
       }
     };
 
@@ -3991,18 +4004,46 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       controls.update();
     };
 
-    const screenToWorld = (clientX: number, clientY: number) => {
-      if (!renderer) return null;
+    const setPointerRay = (clientX: number, clientY: number) => {
+      if (!renderer) return false;
       const rect = renderer.domElement.getBoundingClientRect();
-      if (!rect.width || !rect.height) return null;
+      if (!rect.width || !rect.height) return false;
       pointer.set(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
       raycaster.setFromCamera(pointer, camera);
-      const hit = raycaster.intersectObject(terrainRoot, true)[0];
-      if (hit) return { x: hit.point.x * CELL, y: hit.point.z * CELL };
+      return true;
+    };
+
+    const screenToWorld = (clientX: number, clientY: number) => {
+      if (!setPointerRay(clientX, clientY)) return null;
       const point = new THREE.Vector3();
-      const intersection = raycaster.ray.intersectPlane(floorPlane, point);
-      if (!intersection) return null;
-      return { x: intersection.x * CELL, y: intersection.z * CELL };
+      // 由高至低測試四個頂面平面。只有交點所在格子的實際高度吻合才接受，
+      // 這樣裝飾物、岩壁側面、海面與基地模型都不會把放置座標拉偏。
+      for (let height = 3; height >= 0; height--) {
+        const intersection = raycaster.ray.intersectPlane(terrainPickPlanes[height], point);
+        if (!intersection) continue;
+        const gx = Math.floor(point.x);
+        const gy = Math.floor(point.z);
+        if (terrainCellHeights.get(gx + "," + gy) !== height) continue;
+        return { x: point.x * CELL, y: point.z * CELL };
+      }
+      // 指向島外或空格時仍回傳平地投影，讓 UI 能顯示不可建提示。
+      const fallback = raycaster.ray.intersectPlane(floorPlane, point);
+      if (!fallback) return null;
+      return { x: point.x * CELL, y: point.z * CELL };
+    };
+
+    const pickTower = (clientX: number, clientY: number): number | null => {
+      if (!setPointerRay(clientX, clientY)) return null;
+      const hits = raycaster.intersectObject(buildingRoot, true);
+      for (const hit of hits) {
+        let node: any = hit.object;
+        while (node && node !== buildingRoot) {
+          const index = node.userData?.gameTowerIndex;
+          if (Number.isInteger(index)) return index as number;
+          node = node.parent;
+        }
+      }
+      return null;
     };
 
     try {
@@ -4049,7 +4090,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       camera.position.set(centerX + 5, groundTop(h) + 27, centerZ + 5);
       controls.update();
 
-      apiRef.current = { screenToWorld, focus, reset };
+      apiRef.current = { screenToWorld, pickTower, focus, reset };
       setError("");
     } catch {
       setError("此瀏覽器無法啟動 WebGL，請更新瀏覽器或啟用硬體加速。");
