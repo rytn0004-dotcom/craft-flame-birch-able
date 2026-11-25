@@ -425,6 +425,12 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
     const foliageWindUniform = { value: 0 };
     const sanctuarySigilUniforms = { time: { value: 0 }, power: { value: 0.18 } };
     const roadGuideUniforms = { time: { value: 0 } };
+    const blackMistFrontUniforms = {
+      time: { value: 0 },
+      power: { value: 0.12 },
+      center: { value: new THREE.Vector2(sanctuaryCenterX, sanctuaryCenterZ) },
+      worldSize: { value: new THREE.Vector2(blackMistFieldWidth, blackMistFieldDepth) },
+    };
     const shared = {
       blackMist: new THREE.MeshBasicMaterial({
         color: "#182038",
@@ -579,6 +585,51 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       heightRim: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.93, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.02 }),
       ramp: new THREE.MeshStandardMaterial({ color: "#aeb49c", roughness: 0.95, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.02 }),
     };
+
+    // 黑霧淨界前緣：以世界座標在 GPU 推進安全半徑，邊界帶有緩慢潮汐起伏。
+    // 保留原本中央固定遮罩作為保底；動態擴張只改材質透明度，不重建地形或霧粒子。
+    const installBlackMistFront = (material: THREE.MeshBasicMaterial) => {
+      material.onBeforeCompile = (shader) => {
+        shader.uniforms.uMistTime = blackMistFrontUniforms.time;
+        shader.uniforms.uMistPower = blackMistFrontUniforms.power;
+        shader.uniforms.uMistCenter = blackMistFrontUniforms.center;
+        shader.uniforms.uMistWorldSize = blackMistFrontUniforms.worldSize;
+        shader.vertexShader = shader.vertexShader.replace(
+          "#include <common>",
+          "#include <common>\\nvarying vec2 vMistFieldUv;",
+        );
+        shader.vertexShader = shader.vertexShader.replace(
+          "#include <begin_vertex>",
+          "#include <begin_vertex>\\nvMistFieldUv = uv;",
+        );
+        shader.fragmentShader = shader.fragmentShader.replace(
+          "#include <common>",
+          "#include <common>\\nvarying vec2 vMistFieldUv;\\nuniform float uMistTime;\\nuniform float uMistPower;\\nuniform vec2 uMistCenter;\\nuniform vec2 uMistWorldSize;",
+        );
+        shader.fragmentShader = shader.fragmentShader.replace(
+          "#include <alphamap_fragment>",
+          `#include <alphamap_fragment>
+          vec2 mistWorld = vec2(
+            (vMistFieldUv.x - 0.5) * uMistWorldSize.x + uMistCenter.x,
+            (0.5 - vMistFieldUv.y) * uMistWorldSize.y + uMistCenter.y
+          );
+          vec2 mistOffset = mistWorld - uMistCenter;
+          float mistDistance = length(mistOffset);
+          float mistAngle = atan(mistOffset.y, mistOffset.x);
+          float edgeTide = sin(mistAngle * 5.0 + uMistTime * 0.14) * 1.35
+            + sin(mistAngle * 9.0 - uMistTime * 0.085) * 0.72;
+          float safeRadius = 11.0 + uMistPower * 36.0
+            + edgeTide * (0.22 + uMistPower * 0.78);
+          float safeFeather = 7.0 + uMistPower * 4.0;
+          float sanctuaryClear = 1.0 - smoothstep(safeRadius, safeRadius + safeFeather, mistDistance);
+          float wardFront = exp(-pow((mistDistance - safeRadius) / 2.7, 2.0));
+          diffuseColor.a *= 1.0 - sanctuaryClear * (0.2 + uMistPower * 0.76);
+          diffuseColor.rgb += vec3(0.012, 0.046, 0.064) * wardFront * (0.08 + uMistPower * 0.38);`,
+        );
+      };
+      material.customProgramCacheKey = () => "tide-black-mist-sanctuary-front-v1";
+    };
+    installBlackMistFront(shared.blackMistField);
 
     // 聖地地面符印與道路導光使用材質內動畫；不額外建立逐顆動畫物件。
     const installSanctuarySigil = (material: THREE.MeshBasicMaterial) => {
@@ -5022,6 +5073,8 @@ uniform float uFoliageTime;`,
       if (data.mapMode === "expand") {
         // 淨化力量只能削弱黑霧濃度，不會讓尚未開拓的海域整片恢復安全。
         shared.blackMistField.opacity = 0.88 - power * 0.24;
+        blackMistFrontUniforms.time.value = time * 0.001;
+        blackMistFrontUniforms.power.value = power;
         blackMistFieldTexture.offset.set((time * 0.000006) % 1, (time * 0.000004) % 1);
       }
       if (blackMistMesh && blackMistEntries.length) {
