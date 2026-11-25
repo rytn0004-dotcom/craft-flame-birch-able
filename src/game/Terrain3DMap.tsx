@@ -1787,14 +1787,14 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
           let instance = 0;
           for (const edge of fogEdges) {
             for (let layer = 0; layer < 2; layer++) {
-              // 第一層覆在岸上非道路地面，第二層延伸至外海，讓黑霧確實侵蝕未淨化地塊。
-              const outward = layer === 0 ? -0.12 : 0.52;
+              // 兩層漂霧都維持在海面高度：已開啟地塊的地表／岩壁會遮住霧，不再污染亮地。
+              const outward = layer === 0 ? 0.24 : 0.72;
               const tangent = (edge.seed - 0.5) * 0.54 + (layer === 0 ? -0.12 : 0.14);
               const x = edge.x + edge.dx * outward + (edge.dz !== 0 ? tangent : 0);
               const z = edge.z + edge.dz * outward + (edge.dx !== 0 ? tangent : 0);
               const scaleX = layer === 0 ? 1.32 + edge.seed * 0.76 : 1.55 + edge.seed * 1.12;
               const scaleZ = layer === 0 ? 0.96 + edge.seed * 0.42 : 0.98 + edge.seed * 0.58;
-              const y = groundTop(edge.h) + (layer === 0 ? 0.055 : 0.2);
+              const y = -0.218 + layer * 0.008;
               blackMistEntries.push({
                 x, z, y,
                 phase: edge.seed * 17.3 + layer * 2.1,
