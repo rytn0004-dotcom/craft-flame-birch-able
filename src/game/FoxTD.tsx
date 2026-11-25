@@ -4300,14 +4300,10 @@ export function FoxTD() {
         y: ((ev.clientY - rect.top) / Math.max(1, rect.height)) * VIEWH,
       };
     };
-    const local = (ev: PointerEvent, precise = false) => {
-      const api = terrain3DApiRef.current;
-      // 點擊時優先命中實際地表 InstancedMesh，直接取得 instanceId 對應的格子中心；
-      // 只有地表縫隙或尚未載入完成時才退回平面投影，避免高度交界把點擊送到鄰格。
-      const preciseHit = precise ? api?.screenToWorldPrecise(ev.clientX, ev.clientY) : null;
-      const projected = api?.screenToWorld(ev.clientX, ev.clientY);
-      const world = preciseHit ?? projected;
-      if (world) return world;
+    // 滑鼠移動只取輕量平面投影來維持畫面游標位置；精確地表射線只在 pointerdown 執行一次。
+    const local = (ev: PointerEvent) => {
+      const projected = terrain3DApiRef.current?.screenToWorld(ev.clientX, ev.clientY);
+      if (projected) return projected;
       const screen = screenOf(ev);
       const cam = sim.current.cam;
       const zoom = cam.zoom || 1;
@@ -4323,7 +4319,7 @@ export function FoxTD() {
       return ev.clientX >= rect.left && ev.clientX <= rect.right && ev.clientY >= rect.top && ev.clientY <= rect.bottom;
     };
 
-    // 診斷只在格子／判定結果改變時更新 React 狀態；滑鼠每幀移動不會反覆觸發重繪。
+    // 診斷只在點擊當下更新一次；滑鼠移動不執行格子／建造驗證，也不改寫診斷面板。
     let lastPlacementDebugKey = "";
     const updatePlacementDebug = (
       world: { x: number; y: number },
@@ -4365,10 +4361,8 @@ export function FoxTD() {
       }
       const apiReady = terrain3DApiRef.current !== null;
       const ray = preciseHit === null
-        ? (apiReady ? "3D 平面射線預覽（點擊時驗證地表網格）" : "3D API 未就緒，使用 2D 備援")
-        : preciseHit
-          ? "已命中 3D 地表網格"
-          : "未命中 3D 網格，使用投影備援";
+        ? (apiReady ? "3D 點擊投影備援（本次未命中地表網格）" : "3D API 未就緒，使用 2D 備援")
+        : "點擊時已完成一次 3D 地表網格驗證";
       // 只在格子／判定變更時更新診斷面板，直接寫入獨立 DOM 節點，
       // 不觸發 React 狀態更新，避免整個遊戲樹重繪造成頻閃。
       const pointer = preciseHit ? "3D 地表格網命中" : "平面座標備援";
@@ -4395,37 +4389,10 @@ export function FoxTD() {
         sim.current.pointer.inside = false;
         return;
       }
-      // 滑鼠移動也直接命中實際地表格網；已升起地面回傳真正命中的 instanceId 格子，
-      // 只有黑霧／島外等沒有地表網格的區域才退回平面投影顯示不可建提示。
-      const preciseCellHit = terrain3DApiRef.current?.screenToCellPrecise(ev.clientX, ev.clientY) ?? null;
-      const preciseWorldHit = preciseCellHit
-        ? { x: (preciseCellHit.gx + 0.5) * CELL, y: (preciseCellHit.gy + 0.5) * CELL }
-        : null;
-      const world = preciseWorldHit ?? local(ev);
+      // 只更新游標世界位置供畫面提示使用；不做 Raycaster 地表命中、不跑建造合法性、
+      // 不更新診斷 DOM，也不因游標移動觸發 React 狀態變更。
+      const world = local(ev);
       sim.current.pointer = { ...world, down: sim.current.pointer.down, inside: true };
-      updatePlacementDebug(world, preciseCellHit !== null, preciseCellHit);
-      // 擴張預覽：游標移到最新接口時提示可否放置
-      if (tileOfferRef.current && pickTemplateRef.current && phaseRef.current === "play") {
-        const tid = pickTemplateRef.current;
-        const gx = Math.floor(world.x / CELL);
-        const gy = Math.floor(world.y / CELL);
-        const tc = Math.floor(gx / TILE);
-        const tr = Math.floor(gy / TILE);
-        const preview = getTilePlacementPreview(boardRef.current, tid);
-        const slotChoices = preview.bySlot.get(tc + "," + tr) ?? [];
-        const hitRot = slotChoices.includes(pickRotRef.current) ? pickRotRef.current : slotChoices[0];
-        if (hitRot !== undefined) {
-          if (hitRot !== pickRotRef.current) {
-            pickRotRef.current = hitRot;
-            setPickRot(hitRot);
-          }
-          setHover("接口 (" + tc + "," + tr + ") 可接「" + (TEMPLATE_BY_ID[tid]?.name || tid) + "」· 點擊放置");
-        } else if (preview.frontierKeys.has(tc + "," + tr)) {
-          setHover(`接口 (${tc},${tr}) 與目前圖塊／旋轉無法銜接 · 按旋轉或換一塊`);
-        }
-      }
-
-      // 塔位判定只在點擊當下執行；滑鼠移動時不反覆掃描地表與塔陣。
     };
     const onUp = () => {
       sim.current.pointer.down = false;
@@ -4494,7 +4461,19 @@ export function FoxTD() {
       if (tileOfferRef.current && tileOfferRef.current.length && pickTemplateRef.current) {
         const gx = Math.floor(p.x / GRID);
         const gy = Math.floor(p.y / GRID);
-        confirmPlaceTile(Math.floor(gx / TILE), Math.floor(gy / TILE));
+        const tc = Math.floor(gx / TILE);
+        const tr = Math.floor(gy / TILE);
+        // 拼接旋轉只在點擊時驗證一次；不再隨滑鼠移動重算／自動切換旋轉。
+        const preview = getTilePlacementPreview(boardRef.current, pickTemplateRef.current);
+        const slotChoices = preview.bySlot.get(tc + "," + tr) ?? [];
+        const clickRotation = slotChoices.includes(pickRotRef.current)
+          ? pickRotRef.current
+          : slotChoices[0];
+        if (clickRotation !== undefined && clickRotation !== pickRotRef.current) {
+          pickRotRef.current = clickRotation;
+          setPickRot(clickRotation);
+        }
+        confirmPlaceTile(tc, tr);
         return;
       }
       // 所有放置模式共用這次 3D 地表命中結果；若射線未命中，才退回同一份 2D 座標備援。
@@ -6129,7 +6108,7 @@ Alt＋左鍵環視 · 右鍵平移 · 滾輪縮放 · [H]對準聖地 · [空格
             >
               <div className="mb-1 font-semibold tracking-wide text-[#f2d89b]">建塔／地塊診斷</div>
               <div ref={placementDebugRef} className="whitespace-pre-line text-[#d8e8f5]">
-                移動滑鼠到戰場地面，查看格子座標與建造判定
+                點擊戰場地面時，才執行一次格子與建造判定
               </div>
             </div>
           )}
