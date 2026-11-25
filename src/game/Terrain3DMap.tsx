@@ -872,6 +872,8 @@ uniform float uFoliageTime;`,
     installFoliageWind(shared.foliageWind, "tide-foliage-wind-v1");
     installFoliageWind(shared.grass, "tide-grass-stem-wind-v1");
     installFoliageWind(shared.meadowBloom, "tide-meadow-bloom-wind-v1");
+    installFoliageWind(shared.coastGrass, "tide-coast-reed-wind-v1");
+    installFoliageWind(shared.reefCoral, "tide-reef-coral-current-v1");
 
     // 所有地形區塊共用 4 種高度幾何，避免切塊後重複建立數百份相同頂點資料。
     const terrainGeometries = [0, 1, 2, 3].map(
@@ -3005,18 +3007,26 @@ uniform float uFoliageTime;`,
         terrainRoot.add(rocks);
       }
 
-      // 高地縫隙長出零星短草，採固定種子分布並避開塔座／聖地，讓地貌有生命感但不干擾戰鬥辨識。
+      // 草叢沿草甸與苔地的低頻生態帶聚集；海岸、石灰岩與古遺跡保留較裸露的地貌。
+      // 低頻場決定草叢斑塊，高頻固定種子決定單格是否長草，避免平均撒滿棋盤。
       const grassCells = Array.from(tileCells.values()).filter((cell) => {
         if (cell.h <= 0) return false;
+        const region = terrainRegion(cell);
+        if (region !== "meadow" && region !== "moss") return false;
+        const patchField = Math.sin(cell.x * 0.19 + Math.cos(cell.z * 0.11) * 1.7)
+          + Math.cos(cell.z * 0.16 - cell.x * 0.08);
+        if (patchField < -0.28) return false;
         const seed = Math.abs(Math.sin(cell.x * 63.7 + cell.z * 29.3) * 18341.73) % 1;
-        if (seed < 0.945) return false;
+        if (seed < 0.925) return false;
         return !data.towers.some((tower) => {
           const tx = tower.x / CELL;
           const tz = tower.y / CELL;
           const clearance = tower.sanctuary ? 4.1 : 1.05;
           return Math.hypot(cell.x - tx, cell.z - tz) < clearance;
-        });
-      }).slice(0, 1400);
+        }) && !protectedBuildings.some((building) =>
+          Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 0.38,
+        );
+      }).slice(0, 1600);
       if (grassCells.length) {
         // 彎曲漸尖的葉片取代圓錐草刺；三片葉組成一簇，並共用樹冠風場材質。
         const bladeGeometry = new THREE.BufferGeometry();
@@ -3054,10 +3064,18 @@ uniform float uFoliageTime;`,
               angle,
               Math.sin(angle) * -0.11,
             );
-            dummy.scale.set(0.82 + seed * 0.3, 0.78 + blade * 0.13, 0.82 + seed * 0.3);
+            const mossPatch = terrainRegion(cell) === "moss";
+            const heightVariation = 0.72 + ((seed * 7.3 + blade * 0.31) % 1) * 0.52;
+            dummy.scale.set(
+              0.76 + seed * 0.34,
+              heightVariation + (mossPatch ? 0.08 : 0),
+              0.76 + seed * 0.34,
+            );
             dummy.updateMatrix();
             grass.setMatrixAt(index, dummy.matrix);
-            tint.set(blade === 1 ? "#a0b879" : seed > 0.5 ? "#78966b" : "#648c70");
+            tint.set(mossPatch
+              ? (blade === 1 ? "#a0b879" : seed > 0.5 ? "#78966b" : "#527e68")
+              : (blade === 1 ? "#b0bd7a" : seed > 0.5 ? "#829c68" : "#658b69"));
             grass.setColorAt(index, tint);
           }
         }
@@ -3094,6 +3112,16 @@ uniform float uFoliageTime;`,
           shared.treeBark,
           groveCells.length,
         );
+        const rootFlare = new THREE.InstancedMesh(
+          new THREE.CylinderGeometry(0.025, 0.072, 0.42, 5),
+          shared.treeBark,
+          groveCells.length * 3,
+        );
+        const sideCanopies = new THREE.InstancedMesh(
+          new THREE.IcosahedronGeometry(0.31, 0),
+          shared.foliageWind,
+          groveCells.length * 2,
+        );
         const lowerCanopies = new THREE.InstancedMesh(
           new THREE.DodecahedronGeometry(0.55, 0),
           shared.foliageWind,
@@ -3117,6 +3145,24 @@ uniform float uFoliageTime;`,
           groveDummy.updateMatrix();
           trunks.setMatrixAt(i, groveDummy.matrix);
 
+          // 三條短根向地表鋪開，讓樹幹扎根在土壤裡，而不是圓柱直接插入草地。
+          for (let root = 0; root < 3; root++) {
+            const rootAngle = angle + root * (Math.PI * 2 / 3) + 0.18;
+            groveDummy.position.set(
+              cell.x + Math.cos(rootAngle) * 0.16,
+              groundTop(cell.h) + 0.12,
+              cell.z + Math.sin(rootAngle) * 0.16,
+            );
+            groveDummy.rotation.set(
+              Math.cos(rootAngle) * 0.82,
+              rootAngle,
+              -Math.sin(rootAngle) * 0.82,
+            );
+            groveDummy.scale.set(0.9, 0.72 + seed * 0.22, 0.9);
+            groveDummy.updateMatrix();
+            rootFlare.setMatrixAt(i * 3 + root, groveDummy.matrix);
+          }
+
           groveDummy.position.set(cell.x, groundTop(cell.h) + 0.91 * scale, cell.z);
           groveDummy.rotation.set(seed * 0.08, angle, (seed - 0.5) * 0.08);
           groveDummy.scale.set(0.9 + seed * 0.16, 0.9 + seed * 0.18, 0.9 + seed * 0.16);
@@ -3124,6 +3170,24 @@ uniform float uFoliageTime;`,
           lowerCanopies.setMatrixAt(i, groveDummy.matrix);
           groveTint.set(terrainRegion(cell) === "moss" ? "#527b62" : "#5e8969");
           lowerCanopies.setColorAt(i, groveTint);
+
+          // 左右兩側補出不對稱樹冠，打破單一球狀樹型，並與主樹冠共用風場。
+          for (let side = 0; side < 2; side++) {
+            const sideAngle = angle + (side === 0 ? 1.18 : -1.04);
+            groveDummy.position.set(
+              cell.x + Math.cos(sideAngle) * 0.34 * scale,
+              groundTop(cell.h) + (0.98 + side * 0.16) * scale,
+              cell.z + Math.sin(sideAngle) * 0.34 * scale,
+            );
+            groveDummy.rotation.set((seed - 0.5) * 0.2, sideAngle, (seed - 0.5) * 0.18);
+            groveDummy.scale.set(0.78 + seed * 0.16, 0.78 + (1 - side) * 0.14, 0.78 + seed * 0.16);
+            groveDummy.updateMatrix();
+            sideCanopies.setMatrixAt(i * 2 + side, groveDummy.matrix);
+            groveTint.set(terrainRegion(cell) === "moss"
+              ? (side === 0 ? "#426f5a" : "#70936b")
+              : (side === 0 ? "#527e60" : "#93ad72"));
+            sideCanopies.setColorAt(i * 2 + side, groveTint);
+          }
 
           groveDummy.position.set(cell.x + Math.cos(angle) * 0.06, groundTop(cell.h) + 1.34 * scale, cell.z + Math.sin(angle) * 0.06);
           groveDummy.rotation.set(0, angle + 0.42, 0);
@@ -3133,7 +3197,7 @@ uniform float uFoliageTime;`,
           groveTint.set(seed > 0.62 ? "#9eb879" : "#7ea873");
           upperCanopies.setColorAt(i, groveTint);
         }
-        for (const mesh of [trunks, lowerCanopies, upperCanopies]) {
+        for (const mesh of [trunks, rootFlare, lowerCanopies, sideCanopies, upperCanopies]) {
           mesh.instanceMatrix.needsUpdate = true;
           if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
           mesh.castShadow = false;
