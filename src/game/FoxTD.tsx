@@ -4332,7 +4332,12 @@ export function FoxTD() {
 
     // 診斷只在格子／判定結果改變時更新 React 狀態；滑鼠每幀移動不會反覆觸發重繪。
     let lastPlacementDebugKey = "";
-    const updatePlacementDebug = (world: { x: number; y: number }, preciseHit: boolean | null, ev: PointerEvent) => {
+    const updatePlacementDebug = (
+      world: { x: number; y: number },
+      preciseHit: boolean | null,
+      ev: PointerEvent,
+      hitCell?: { gx: number; gy: number; height: number } | null,
+    ) => {
       const gx = Math.floor(world.x / CELL);
       const gy = Math.floor(world.y / CELL);
       const inBounds = gx >= 0 && gy >= 0 && gx < COLS && gy < ROWS;
@@ -4344,7 +4349,7 @@ export function FoxTD() {
         : expandMode
           ? (onBoard ? "地塊已升起" : "黑霧未開拓")
           : (sim.current.blocked.has(key) ? "障礙／路障格" : "完整地圖地面");
-      const height = inBounds ? cellHeight(sim.current.heights, gx, gy) : -1;
+      const height = inBounds ? (hitCell?.gx === gx && hitCell?.gy === gy ? hitCell.height : cellHeight(sim.current.heights, gx, gy)) : -1;
       const placementReason = inBounds ? canPlaceReason(gx, gy) : "超出世界範圍";
       const selectedId = pickRef.current;
       const selectedDef = selectedId === null
@@ -4388,10 +4393,13 @@ export function FoxTD() {
       }
       // 滑鼠移動也直接命中實際地表格網；已升起地面回傳真正命中的 instanceId 格子，
       // 只有黑霧／島外等沒有地表網格的區域才退回平面投影顯示不可建提示。
-      const preciseWorldHit = terrain3DApiRef.current?.screenToWorldPrecise(ev.clientX, ev.clientY) ?? null;
+      const preciseCellHit = terrain3DApiRef.current?.screenToCellPrecise(ev.clientX, ev.clientY) ?? null;
+      const preciseWorldHit = preciseCellHit
+        ? { x: (preciseCellHit.gx + 0.5) * CELL, y: (preciseCellHit.gy + 0.5) * CELL }
+        : null;
       const world = preciseWorldHit ?? local(ev);
       sim.current.pointer = { ...world, down: sim.current.pointer.down, inside: true };
-      updatePlacementDebug(world, preciseWorldHit !== null, ev);
+      updatePlacementDebug(world, preciseCellHit !== null, ev, preciseCellHit);
       // 擴張預覽：游標移到最新接口時提示可否放置
       if (tileOfferRef.current && pickTemplateRef.current && phaseRef.current === "play") {
         const tid = pickTemplateRef.current;
@@ -4424,9 +4432,12 @@ export function FoxTD() {
     };
     const onDown = (ev: PointerEvent) => {
       if (!isGameSurface(ev) || ev.button !== 0 || ev.altKey) return;
-      const preciseWorldHit = terrain3DApiRef.current?.screenToWorldPrecise(ev.clientX, ev.clientY) ?? null;
+      const preciseCellHit = terrain3DApiRef.current?.screenToCellPrecise(ev.clientX, ev.clientY) ?? null;
+      const preciseWorldHit = preciseCellHit
+        ? { x: (preciseCellHit.gx + 0.5) * CELL, y: (preciseCellHit.gy + 0.5) * CELL }
+        : null;
       const p = preciseWorldHit ?? local(ev);
-      updatePlacementDebug(p, preciseWorldHit !== null, ev);
+      updatePlacementDebug(p, preciseCellHit !== null, ev, preciseCellHit);
       sim.current.pointer = { ...p, down: true, inside: true };
       if (phaseRef.current !== "play") {
         if (!workshopRef.current) return;
@@ -4482,8 +4493,8 @@ export function FoxTD() {
         confirmPlaceTile(Math.floor(gx / TILE), Math.floor(gy / TILE));
         return;
       }
-      const gx0 = Math.floor(p.x / GRID);
-      const gy0 = Math.floor(p.y / GRID);
+      const gx0 = preciseCellHit?.gx ?? Math.floor(p.x / GRID);
+      const gy0 = preciseCellHit?.gy ?? Math.floor(p.y / GRID);
       // 路障模式優先：點地圖即放，不先選中塔
       if (stakeRef.current && phaseRef.current === "play") {
         const gx = gx0;
@@ -4605,7 +4616,11 @@ export function FoxTD() {
       }
       goldRef.current -= cost;
       setGold(goldRef.current);
-      const bonus = rangeBonus(cellHeight(s.heights, pgx, pgy));
+      // 放置射線命中的高度為地表網格的權威高度；只有 2D 備援才讀模擬高度陣列。
+      const placedHeight = preciseCellHit?.gx === pgx && preciseCellHit?.gy === pgy
+        ? preciseCellHit.height
+        : cellHeight(s.heights, pgx, pgy);
+      const bonus = rangeBonus(placedHeight);
       s.towers.push({
         def: id,
         x: pgx * GRID + GRID / 2,
@@ -4633,7 +4648,7 @@ export function FoxTD() {
         skillShots: 0,
         special: base.special,
       });
-      const hh = cellHeight(s.heights, pgx, pgy);
+      const hh = placedHeight;
       const niche = hh >= 3 ? " · 峭擊" : hh === 2 ? " · 高擊" : " · 路邊伏擊";
       // 放置當下若鄰格組成狐緣，立刻提示（不必等開火）
       let bondHint = "";
