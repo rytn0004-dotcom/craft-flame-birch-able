@@ -2540,7 +2540,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         }
       }
 
-      const ruinWallSites: { x: number; z: number; y: number; rot: number; width: number; height: number; seed: number }[] = [];      const ruinWallSites: { x: number; z: number; y: number; rot: number; width: number; height: number; seed: number }[] = [];
+      const ruinWallSites: { x: number; z: number; y: number; rot: number; width: number; height: number; seed: number }[] = [];
       const ruinOuterRingSites: { x: number; z: number; y: number; angle: number }[] = [];
       if (ruinSites.length) {
         const plinths = new THREE.InstancedMesh(
