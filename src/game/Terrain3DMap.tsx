@@ -343,6 +343,9 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     const blackMistFieldSize = 256;
     const blackMistFieldPixels = new Uint8Array(blackMistFieldSize * blackMistFieldSize * 4);
     const blackMistFieldMaskPixels = new Uint8Array(blackMistFieldSize * blackMistFieldSize * 4);
+    // 初始 HQ 地塊固定在地圖中央槽位；淨界核心對齊該地塊中心（110, 110）。
+    const sanctuaryCenterX = COLS / 2 + TILE / 2;
+    const sanctuaryCenterZ = ROWS / 2 + TILE / 2;
     for (let y = 0; y < blackMistFieldSize; y++) for (let x = 0; x < blackMistFieldSize; x++) {
       const u = x / blackMistFieldSize;
       const v = y / blackMistFieldSize;
@@ -353,7 +356,9 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       const fine = Math.sin(tau * (u * 23 + v * 19)) * 0.06
         + Math.cos(tau * (v * 29 - u * 17)) * 0.05;
       const density = THREE.MathUtils.clamp(0.76 + broad * 0.16 + medium * 0.12 + fine, 0.48, 0.96);
-      const centerDistance = Math.hypot((u - 0.5) * COLS, (v - 0.5) * ROWS);
+      const worldX = u * COLS;
+      const worldZ = (1 - v) * ROWS;
+      const centerDistance = Math.hypot(worldX - sanctuaryCenterX, worldZ - sanctuaryCenterZ);
       // 中央遮罩獨立於流動噪聲貼圖，確保淨界核心不會隨霧紋漂移。
       const coreClearance = THREE.MathUtils.smoothstep(centerDistance, 9, 17);
       const index = (y * blackMistFieldSize + x) * 4;
