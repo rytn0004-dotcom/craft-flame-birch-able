@@ -780,15 +780,15 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
         shader.uniforms.uShoreFoamTime = shoreFoamUniforms.time;
         shader.vertexShader = shader.vertexShader.replace(
           "#include <common>",
-          "#include <common>\\nvarying vec2 vShoreFoamUv;\\nvarying float vShoreFoamPhase;",
+          "#include <common>\nvarying vec2 vShoreFoamUv;\nvarying float vShoreFoamPhase;",
         );
         shader.vertexShader = shader.vertexShader.replace(
           "#include <begin_vertex>",
-          "#include <begin_vertex>\\nvShoreFoamUv = uv;\\n#ifdef USE_INSTANCING\\nvShoreFoamPhase = dot(instanceMatrix[3].xz, vec2(0.19, 0.13));\\n#else\\nvShoreFoamPhase = dot(position.xz, vec2(0.19, 0.13));\\n#endif",
+          "#include <begin_vertex>\nvShoreFoamUv = vec2(position.x, position.z);\n#ifdef USE_INSTANCING\nvShoreFoamPhase = dot(instanceMatrix[3].xz, vec2(0.19, 0.13));\n#else\nvShoreFoamPhase = dot(position.xz, vec2(0.19, 0.13));\n#endif",
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <common>",
-          "#include <common>\\nvarying vec2 vShoreFoamUv;\\nvarying float vShoreFoamPhase;\\nuniform float uShoreFoamTime;",
+          "#include <common>\nvarying vec2 vShoreFoamUv;\nvarying float vShoreFoamPhase;\nuniform float uShoreFoamTime;",
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <color_fragment>",
@@ -799,7 +799,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             "float foamCrest = smoothstep(0.72, 0.98, shoreFlowA * (0.72 + shoreFlowB * 0.28));",
             "diffuseColor.rgb += vec3(0.075, 0.16, 0.135) * foamCrest;",
             "diffuseColor.a *= 0.88 + foamCrest * 0.12;",
-          ].join("\\n"),
+          ].join("\n"),
         );
       };
       material.customProgramCacheKey = () => "tide-shore-foam-flow-v1";
@@ -812,15 +812,15 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
         shader.uniforms.uCliffStrataTime = cliffStrataUniforms.time;
         shader.vertexShader = shader.vertexShader.replace(
           "#include <common>",
-          "#include <common>\\nvarying vec2 vCliffStrataUv;",
+          "#include <common>\nvarying vec2 vCliffStrataUv;",
         );
         shader.vertexShader = shader.vertexShader.replace(
           "#include <begin_vertex>",
-          "#include <begin_vertex>\\nvCliffStrataUv = uv;",
+          "#include <begin_vertex>\nvCliffStrataUv = uv;",
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <common>",
-          "#include <common>\\nvarying vec2 vCliffStrataUv;\\nuniform float uCliffStrataTime;",
+          "#include <common>\nvarying vec2 vCliffStrataUv;\nuniform float uCliffStrataTime;",
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <color_fragment>",
@@ -832,7 +832,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             "float mineralVein = pow(max(0.0, sin(vCliffStrataUv.x * 26.0 - uCliffStrataTime * 0.22 + vCliffStrataUv.y * 5.0)), 18.0);",
             "diffuseColor.rgb *= 0.94 + strataLine * strataBreak * 0.09;",
             "diffuseColor.rgb += vec3(0.018, 0.065, 0.052) * mineralVein * strataBreak * 0.55;",
-          ].join("\\n"),
+          ].join("\n"),
         );
       };
       material.customProgramCacheKey = () => "tide-cliff-strata-mineral-v1";
