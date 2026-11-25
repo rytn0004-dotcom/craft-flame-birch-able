@@ -2475,8 +2475,8 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
           }
 
           // 四面鄰格皆為同高度障礙地形時才補外圈儀式環，避免碰觸可建造格。
-          const ringNeighbors = wallDirections.map((direction) => {
-            const key = (Math.floor(site.x) + direction.dc) + "," + (Math.floor(site.z) + direction.dr);
+          const ringNeighbors = ruinNeighborOffsets.map(([dc, dr]) => {
+            const key = (Math.floor(site.x) + dc) + "," + (Math.floor(site.z) + dr);
             const neighbor = tileCells.get(key);
             return !!neighbor && data.blocked.has(key) && neighbor.h === site.h;
           });
@@ -2601,7 +2601,8 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         for (const mesh of [plinths, columns, runeSlabs, runeLines, runeRings, rubble, lintels, gateArches, ruinMoss, pillarFootings, wallSegments, wallPosts, outerRings]) {
           mesh.instanceMatrix.needsUpdate = true;
           if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-          mesh.castShadow = mesh === columns || mesh === runeSlabs || mesh === lintels;
+          mesh.castShadow =
+            mesh === columns || mesh === runeSlabs || mesh === lintels || mesh === wallSegments || mesh === wallPosts;
           mesh.receiveShadow = true;
           terrainRoot.add(mesh);
         }
