@@ -34,6 +34,8 @@ export type Terrain3DSnapshot = {
   shots: Terrain3DShot[];
   rings: Terrain3DRing[];
   placement?: { gx: number; gy: number; height: number; valid: boolean; snapped?: boolean } | null;
+  /** 聖地淨界力量 0..1；由聖地升級與祭壇加持計算，只影響黑霧與結界視覺。 */
+  sanctuaryPower?: number;
   mapMode: "expand" | "layout";
 };
 
@@ -296,6 +298,9 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     const gems: any[] = [];
     const waterRippleEntries: { x: number; z: number; phase: number; speed: number }[] = [];
     let waterRippleMesh: any = null;
+    const blackMistEntries: { x: number; z: number; y: number; phase: number; rot: number; scaleX: number; scaleZ: number; driftX: number; driftZ: number }[] = [];
+    let blackMistMesh: any = null;
+    const blackMistDummy = new THREE.Object3D();
     const landmarkLights: { light: THREE.PointLight; phase: number; intensity: number }[] = [];
     const updateLandmarkLights = (time: number) => {
       for (const entry of landmarkLights) {
@@ -313,7 +318,38 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     const enemyHealthBars: { back: any; fill: any }[] = [];
     const shotNodes: any[] = [];
     const ringNodes: any[] = [];
+    // 程序化黑霧貼圖：柔邊噪聲雲，不依賴外部圖檔，並以單一 InstancedMesh 控制效能。
+    const blackMistSize = 64;
+    const blackMistPixels = new Uint8Array(blackMistSize * blackMistSize * 4);
+    for (let y = 0; y < blackMistSize; y++) for (let x = 0; x < blackMistSize; x++) {
+      const u = (x + 0.5) / blackMistSize * 2 - 1;
+      const v = (y + 0.5) / blackMistSize * 2 - 1;
+      const radius = Math.sqrt(u * u * 0.78 + v * v * 1.22);
+      const edge = Math.max(0, 1 - radius);
+      const turbulence = 0.72
+        + Math.sin(x * 0.39 + y * 0.13) * 0.11
+        + Math.sin(y * 0.31 - x * 0.17) * 0.09;
+      const alpha = Math.max(0, Math.min(255, Math.round(Math.pow(edge, 1.65) * turbulence * 255)));
+      const index = (y * blackMistSize + x) * 4;
+      blackMistPixels[index] = 255;
+      blackMistPixels[index + 1] = 255;
+      blackMistPixels[index + 2] = 255;
+      blackMistPixels[index + 3] = alpha;
+    }
+    const blackMistTexture = new THREE.DataTexture(blackMistPixels, blackMistSize, blackMistSize, THREE.RGBAFormat);
+    blackMistTexture.colorSpace = THREE.SRGBColorSpace;
+    blackMistTexture.needsUpdate = true;
+
     const shared = {
+      blackMist: new THREE.MeshBasicMaterial({
+        color: "#182038",
+        map: blackMistTexture,
+        transparent: true,
+        opacity: 0.72,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        toneMapped: false,
+      }),
       stone: new THREE.MeshStandardMaterial({ color: MATERIALS.stone, roughness: 0.84, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.026 }),
       ivory: new THREE.MeshStandardMaterial({ color: MATERIALS.ivory, roughness: 0.72, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.014 }),
       blue: new THREE.MeshPhysicalMaterial({ color: MATERIALS.blue, metalness: 0.3, roughness: 0.36, clearcoat: 0.48, clearcoatRoughness: 0.24, envMapIntensity: 0.82 }),
@@ -1204,6 +1240,8 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     const rebuildTerrain = (data: Terrain3DSnapshot) => {
       clearGroup(terrainRoot);
       terrainCellHeights.clear();
+      blackMistEntries.length = 0;
+      blackMistMesh = null;
       waterRippleMesh = null;
       waterRippleEntries.length = 0;
       landmarkLights.length = 0;
@@ -1650,6 +1688,57 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
           });
         }
       }
+      // 黑霧只沿擴張地圖的外露岸線生成，避開怪物道路與主要建築區；
+      // 地塊每次拼接後重新計算邊界，形成「海底升陸、外海黑霧退至新岸線」的效果。
+      if (data.mapMode === "expand" && coastEdges.length) {
+        const fogEdges = coastEdges.filter((edge) => edge.seed > 0.12).slice(0, 320);
+        if (fogEdges.length) {
+          blackMistMesh = new THREE.InstancedMesh(
+            new THREE.PlaneGeometry(1, 1),
+            shared.blackMist,
+            fogEdges.length * 2,
+          );
+          blackMistMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+          const fogTint = new THREE.Color();
+          let instance = 0;
+          for (const edge of fogEdges) {
+            for (let layer = 0; layer < 2; layer++) {
+              const outward = layer === 0 ? 0.46 : 0.98;
+              const tangent = (edge.seed - 0.5) * 0.54 + (layer === 0 ? -0.12 : 0.14);
+              const x = edge.x + edge.dx * outward + (edge.dz !== 0 ? tangent : 0);
+              const z = edge.z + edge.dz * outward + (edge.dx !== 0 ? tangent : 0);
+              const scaleX = 1.25 + edge.seed * 1.55 - layer * 0.22;
+              const scaleZ = 0.82 + edge.seed * 0.66 - layer * 0.12;
+              const y = groundTop(edge.h) + 0.22 + layer * 0.12;
+              blackMistEntries.push({
+                x, z, y,
+                phase: edge.seed * 17.3 + layer * 2.1,
+                rot: edge.rot,
+                scaleX,
+                scaleZ,
+                driftX: edge.dx === 0 ? (edge.seed - 0.5) * 0.1 : edge.dx,
+                driftZ: edge.dz === 0 ? (0.5 - edge.seed) * 0.1 : edge.dz,
+              });
+              blackMistDummy.position.set(x, y, z);
+              blackMistDummy.rotation.set(-Math.PI / 2, edge.rot, 0);
+              blackMistDummy.scale.set(scaleX, scaleZ, 1);
+              blackMistDummy.updateMatrix();
+              blackMistMesh.setMatrixAt(instance, blackMistDummy.matrix);
+              fogTint.set(edge.seed > 0.76 ? "#293149" : edge.seed > 0.42 ? "#1c263d" : "#111b30");
+              blackMistMesh.setColorAt(instance, fogTint);
+              instance++;
+            }
+          }
+          blackMistMesh.instanceMatrix.needsUpdate = true;
+          if (blackMistMesh.instanceColor) blackMistMesh.instanceColor.needsUpdate = true;
+          blackMistMesh.frustumCulled = false;
+          blackMistMesh.renderOrder = 2;
+          blackMistMesh.castShadow = false;
+          blackMistMesh.receiveShadow = false;
+          terrainRoot.add(blackMistMesh);
+        }
+      }
+
       if (coastEdges.length) {
         const sand = new THREE.InstancedMesh(
           new THREE.BoxGeometry(0.94, 0.032, 0.14),
@@ -3858,6 +3947,59 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       }
     };
 
+    const purificationAuraMaterial = new THREE.MeshBasicMaterial({
+      color: "#77e8dc",
+      transparent: true,
+      opacity: 0.16,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      toneMapped: false,
+    });
+    const purificationAura = new THREE.Mesh(
+      new THREE.TorusGeometry(1, 0.035, 8, 112),
+      purificationAuraMaterial,
+    );
+    purificationAura.rotation.x = Math.PI / 2;
+    purificationAura.visible = false;
+    effectRoot.add(purificationAura);
+
+    const updateBlackMist = (data: Terrain3DSnapshot, time: number) => {
+      const power = THREE.MathUtils.clamp(data.sanctuaryPower ?? 0.12, 0, 1);
+      if (blackMistMesh && blackMistEntries.length) {
+        // 聖地升級／祭壇加持越高，黑霧越稀薄，但深淵邊界仍持續存在。
+        shared.blackMist.opacity = 0.72 - power * 0.43;
+        for (let i = 0; i < blackMistEntries.length; i++) {
+          const entry = blackMistEntries[i];
+          const drift = Math.sin(time * 0.00034 + entry.phase);
+          const pulse = 1 + Math.sin(time * 0.0011 + entry.phase) * 0.055;
+          blackMistDummy.position.set(
+            entry.x + entry.driftX * drift * 0.11,
+            entry.y + Math.sin(time * 0.00072 + entry.phase) * 0.075,
+            entry.z + entry.driftZ * drift * 0.11,
+          );
+          blackMistDummy.rotation.set(-Math.PI / 2, entry.rot + drift * 0.035, 0);
+          blackMistDummy.scale.set(entry.scaleX * pulse, entry.scaleZ * pulse, 1);
+          blackMistDummy.updateMatrix();
+          blackMistMesh.setMatrixAt(i, blackMistDummy.matrix);
+        }
+        blackMistMesh.instanceMatrix.needsUpdate = true;
+      }
+
+      const hq = data.towers.find((tower) => tower.sanctuary);
+      if (!hq || data.mapMode !== "expand") {
+        purificationAura.visible = false;
+        return;
+      }
+      const gx = Math.max(0, Math.min(COLS - 1, Math.floor(hq.x / CELL)));
+      const gy = Math.max(0, Math.min(ROWS - 1, Math.floor(hq.y / CELL)));
+      const height = data.heights[gy * COLS + gx] ?? 0;
+      purificationAura.visible = true;
+      purificationAura.position.set(hq.x / CELL, groundTop(height) + 0.09, hq.y / CELL);
+      purificationAura.scale.setScalar(5.8 + power * 7.2);
+      purificationAura.rotation.y = Math.sin(time * 0.00022) * 0.045;
+      purificationAuraMaterial.opacity = 0.11 + power * 0.13;
+    };
+
     const selectedRangeMaterial = new THREE.MeshBasicMaterial({ color: "#a7e8dc", transparent: true, opacity: 0.34, side: THREE.DoubleSide, depthWrite: false });
     const selectedRange = new THREE.Mesh(new THREE.TorusGeometry(1, 0.018, 8, 96), selectedRangeMaterial);
     selectedRange.rotation.x = Math.PI / 2;
@@ -4161,6 +4303,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       updateEffects(data);
       updateWaterRipples(time);
       updateLandmarkLights(time);
+      updateBlackMist(data, time);
       // 鏡頭拉遠時霧層更柔和、遠景更自然；拉近時保留地表紋理與建築邊緣。
       const viewDistance = camera.position.distanceTo(controls.target);
       atmosphericFog.near = THREE.MathUtils.clamp(viewDistance * 1.28, 58, 108);
@@ -4245,6 +4388,9 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         bar.fill.material.dispose();
       }
       selectedRangeMaterial.dispose();
+      purificationAuraMaterial.dispose();
+      shared.blackMist.dispose();
+      blackMistTexture.dispose();
       placementFillMaterial.dispose();
       placementOutlineMaterial.dispose();
       clearGroup(effectRoot);
