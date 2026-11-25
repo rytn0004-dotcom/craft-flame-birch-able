@@ -4298,10 +4298,11 @@ export function FoxTD() {
     };
     const local = (ev: PointerEvent, precise = false) => {
       const api = terrain3DApiRef.current;
-      // 預覽與點擊統一先用相同的高度平面投影，避免分塊 InstancedMesh 射線命中與游標格子不一致。
-      const projected = api?.screenToWorld(ev.clientX, ev.clientY);
+      // 點擊時優先命中實際地表 InstancedMesh，直接取得 instanceId 對應的格子中心；
+      // 只有地表縫隙或尚未載入完成時才退回平面投影，避免高度交界把點擊送到鄰格。
       const preciseHit = precise ? api?.screenToWorldPrecise(ev.clientX, ev.clientY) : null;
-      const world = projected ?? preciseHit;
+      const projected = api?.screenToWorld(ev.clientX, ev.clientY);
+      const world = preciseHit ?? projected;
       if (world) return world;
       const screen = screenOf(ev);
       const cam = sim.current.cam;
