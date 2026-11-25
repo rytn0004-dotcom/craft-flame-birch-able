@@ -4376,6 +4376,9 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       if (!renderer) return false;
       const rect = renderer.domElement.getBoundingClientRect();
       if (!rect.width || !rect.height) return false;
+      // 捕捉事件可能早於下一幀 render；先同步 OrbitControls 剛更新的相機世界矩陣，
+      // 避免使用上一幀的 camera.matrixWorld 計算滑鼠射線。
+      camera.updateMatrixWorld(true);
       pointer.set(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
       raycaster.setFromCamera(pointer, camera);
       return true;
