@@ -34,7 +34,7 @@ export type Terrain3DSnapshot = {
   shots: Terrain3DShot[];
   rings: Terrain3DRing[];
   placement?: { gx: number; gy: number; height: number; valid: boolean; snapped?: boolean } | null;
-  /** 聖地淨界力量 0..1；由聖地升級與祭壇加持計算，只影響黑霧與結界視覺。 */
+  /** 聖地力量 0..1；只強化符印與開拓邊界的視覺，不會替未取得地塊解除黑霧。 */
   sanctuaryPower?: number;
   mapMode: "expand" | "layout";
 };
@@ -365,15 +365,12 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
     blackMistTexture.colorSpace = THREE.SRGBColorSpace;
     blackMistTexture.needsUpdate = true;
 
-    // 全世界深淵霧幕：覆蓋 400×400 可探索範圍並向外延伸 90 格；已升起地表在霧幕上方保持明亮。
-    const blackMistFieldSize = 256;
+    // 全世界深淵霧幕：覆蓋可探索範圍並延伸至遠海；遮罩只依實際已取得的地塊更新。
+    const blackMistFieldSize = 512;
     const blackMistFieldWidth = COLS + 180;
     const blackMistFieldDepth = ROWS + 180;
     const blackMistFieldPixels = new Uint8Array(blackMistFieldSize * blackMistFieldSize * 4);
     const blackMistFieldMaskPixels = new Uint8Array(blackMistFieldSize * blackMistFieldSize * 4);
-    // 初始 HQ 地塊固定在 20×20 棋盤中央槽位；淨界核心對齊該地塊中心（210, 210）。
-    const sanctuaryCenterX = COLS / 2 + TILE / 2;
-    const sanctuaryCenterZ = ROWS / 2 + TILE / 2;
     for (let y = 0; y < blackMistFieldSize; y++) for (let x = 0; x < blackMistFieldSize; x++) {
       const u = x / blackMistFieldSize;
       const v = y / blackMistFieldSize;
@@ -384,12 +381,6 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       const fine = Math.sin(tau * (u * 23 + v * 19)) * 0.06
         + Math.cos(tau * (v * 29 - u * 17)) * 0.05;
       const density = THREE.MathUtils.clamp(0.76 + broad * 0.16 + medium * 0.12 + fine, 0.48, 0.96);
-      // 將霧場延伸到可遊玩棋盤外圍的遠海，而不是只貼齊地圖格線。
-      const worldX = (u - 0.5) * blackMistFieldWidth + COLS / 2;
-      const worldZ = (0.5 - v) * blackMistFieldDepth + ROWS / 2;
-      const centerDistance = Math.hypot(worldX - sanctuaryCenterX, worldZ - sanctuaryCenterZ);
-      // 中央遮罩獨立於流動噪聲貼圖，確保淨界核心不會隨霧紋漂移。
-      const coreClearance = THREE.MathUtils.smoothstep(centerDistance, 9, 17);
       const index = (y * blackMistFieldSize + x) * 4;
       const shade = Math.round(166 + density * 89);
       blackMistFieldPixels[index] = shade;
@@ -397,7 +388,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       blackMistFieldPixels[index + 2] = shade;
       blackMistFieldPixels[index + 3] = 255;
       blackMistFieldMaskPixels[index] = 255;
-      blackMistFieldMaskPixels[index + 1] = Math.round(coreClearance * 255);
+      blackMistFieldMaskPixels[index + 1] = 255;
       blackMistFieldMaskPixels[index + 2] = 255;
       blackMistFieldMaskPixels[index + 3] = 255;
     }
@@ -422,15 +413,80 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
     blackMistFieldMaskTexture.minFilter = THREE.LinearFilter;
     blackMistFieldMaskTexture.needsUpdate = true;
 
+    // 黑霧退散遮罩：只辨識真正已放置的地塊；聖地力量不再把未開拓海域變成安全區。
+    // 以 tile slot 建立緊湊 occupancy，再將聯通地塊視為一整片陸地，避免相鄰地塊接縫重新冒霧。
+    // 512² 遮罩只在地形資料變更時更新，不放進 30Hz 動畫迴圈。
+    const refreshBlackMistRevealMask = (placed: PlacedTile[], enabled: boolean) => {
+      const slotMinX = Math.floor((COLS / 2 - blackMistFieldWidth / 2) / TILE) - 1;
+      const slotMinZ = Math.floor((ROWS / 2 - blackMistFieldDepth / 2) / TILE) - 1;
+      const slotCols = Math.ceil(blackMistFieldWidth / TILE) + 4;
+      const slotRows = Math.ceil(blackMistFieldDepth / TILE) + 4;
+      const openedSlots = new Uint8Array(slotCols * slotRows);
+      if (enabled) {
+        for (const tile of placed) {
+          const sx = tile.tc - slotMinX;
+          const sz = tile.tr - slotMinZ;
+          if (sx >= 0 && sx < slotCols && sz >= 0 && sz < slotRows) {
+            openedSlots[sz * slotCols + sx] = 1;
+          }
+        }
+      }
+      const isOpened = (tc: number, tr: number) => {
+        const sx = tc - slotMinX;
+        const sz = tr - slotMinZ;
+        return sx >= 0 && sx < slotCols && sz >= 0 && sz < slotRows
+          && openedSlots[sz * slotCols + sx] === 1;
+      };
+      const feather = 2.25;
+      for (let py = 0; py < blackMistFieldSize; py++) {
+        const v = (py + 0.5) / blackMistFieldSize;
+        const worldZ = (0.5 - v) * blackMistFieldDepth + ROWS / 2;
+        const tr = Math.floor(worldZ / TILE);
+        const localZ = worldZ - tr * TILE;
+        for (let px = 0; px < blackMistFieldSize; px++) {
+          const u = (px + 0.5) / blackMistFieldSize;
+          const worldX = (u - 0.5) * blackMistFieldWidth + COLS / 2;
+          const tc = Math.floor(worldX / TILE);
+          const localX = worldX - tc * TILE;
+          let signedDistance = feather;
+          if (isOpened(tc, tr)) {
+            // 地塊內側：只對外露邊緣做柔化；與另一塊已開拓地相接的邊不會出現黑霧縫。
+            let inwardDistance = feather;
+            if (!isOpened(tc - 1, tr)) inwardDistance = Math.min(inwardDistance, localX);
+            if (!isOpened(tc + 1, tr)) inwardDistance = Math.min(inwardDistance, TILE - localX);
+            if (!isOpened(tc, tr - 1)) inwardDistance = Math.min(inwardDistance, localZ);
+            if (!isOpened(tc, tr + 1)) inwardDistance = Math.min(inwardDistance, TILE - localZ);
+            signedDistance = -Math.min(feather, inwardDistance);
+          } else {
+            // 未開拓側：只檢查相鄰 3×3 tile slots，讓霧線在新地塊外側自然羽化。
+            let nearest = feather;
+            for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+              const nx = tc + dx;
+              const nz = tr + dz;
+              if (!isOpened(nx, nz)) continue;
+              const left = nx * TILE;
+              const top = nz * TILE;
+              const gapX = worldX < left ? left - worldX : worldX > left + TILE ? worldX - left - TILE : 0;
+              const gapZ = worldZ < top ? top - worldZ : worldZ > top + TILE ? worldZ - top - TILE : 0;
+              nearest = Math.min(nearest, Math.hypot(gapX, gapZ));
+            }
+            signedDistance = Math.min(feather, nearest);
+          }
+          const fogAlpha = THREE.MathUtils.smoothstep(signedDistance, -feather, feather);
+          const index = (py * blackMistFieldSize + px) * 4;
+          blackMistFieldMaskPixels[index] = 255;
+          blackMistFieldMaskPixels[index + 1] = Math.round(fogAlpha * 255);
+          blackMistFieldMaskPixels[index + 2] = 255;
+          blackMistFieldMaskPixels[index + 3] = 255;
+        }
+      }
+      blackMistFieldMaskTexture.needsUpdate = true;
+    };
+
     const foliageWindUniform = { value: 0 };
     const sanctuarySigilUniforms = { time: { value: 0 }, power: { value: 0.18 } };
     const roadGuideUniforms = { time: { value: 0 } };
-    const blackMistFrontUniforms = {
-      time: { value: 0 },
-      power: { value: 0.12 },
-      center: { value: new THREE.Vector2(sanctuaryCenterX, sanctuaryCenterZ) },
-      worldSize: { value: new THREE.Vector2(blackMistFieldWidth, blackMistFieldDepth) },
-    };
+    const blackMistFrontUniforms = { time: { value: 0 }, power: { value: 0.12 } };
     const shared = {
       blackMist: new THREE.MeshBasicMaterial({
         color: "#182038",
@@ -592,8 +648,6 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       material.onBeforeCompile = (shader) => {
         shader.uniforms.uMistTime = blackMistFrontUniforms.time;
         shader.uniforms.uMistPower = blackMistFrontUniforms.power;
-        shader.uniforms.uMistCenter = blackMistFrontUniforms.center;
-        shader.uniforms.uMistWorldSize = blackMistFrontUniforms.worldSize;
         shader.vertexShader = shader.vertexShader.replace(
           "#include <common>",
           "#include <common>\nvarying vec2 vMistFieldUv;",
@@ -604,30 +658,22 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <common>",
-          "#include <common>\nvarying vec2 vMistFieldUv;\nuniform float uMistTime;\nuniform float uMistPower;\nuniform vec2 uMistCenter;\nuniform vec2 uMistWorldSize;",
+          "#include <common>\nvarying vec2 vMistFieldUv;\nuniform float uMistTime;\nuniform float uMistPower;",
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <alphamap_fragment>",
           `#include <alphamap_fragment>
-          vec2 mistWorld = vec2(
-            (vMistFieldUv.x - 0.5) * uMistWorldSize.x + uMistCenter.x,
-            (0.5 - vMistFieldUv.y) * uMistWorldSize.y + uMistCenter.y
+          // alphaMap 的綠色通道來自已取得地塊遮罩；只有地塊外緣形成流動的潮汐亮線。
+          float mistRevealMask = texture2D(alphaMap, vAlphaMapUv).g;
+          float revealEdge = 1.0 - smoothstep(0.035, 0.24, abs(mistRevealMask - 0.5));
+          float edgePulse = 0.78 + 0.22 * sin(
+            uMistTime * 1.25 + vMistFieldUv.x * 34.0 + sin(vMistFieldUv.y * 29.0) * 1.8
           );
-          vec2 mistOffset = mistWorld - uMistCenter;
-          float mistDistance = length(mistOffset);
-          float mistAngle = atan(mistOffset.y, mistOffset.x);
-          float edgeTide = sin(mistAngle * 5.0 + uMistTime * 0.14) * 1.35
-            + sin(mistAngle * 9.0 - uMistTime * 0.085) * 0.72;
-          float safeRadius = 11.0 + uMistPower * 36.0
-            + edgeTide * (0.22 + uMistPower * 0.78);
-          float safeFeather = 7.0 + uMistPower * 4.0;
-          float sanctuaryClear = 1.0 - smoothstep(safeRadius, safeRadius + safeFeather, mistDistance);
-          float wardFront = exp(-pow((mistDistance - safeRadius) / 2.7, 2.0));
-          diffuseColor.a *= 1.0 - sanctuaryClear * (0.2 + uMistPower * 0.76);
-          diffuseColor.rgb += vec3(0.012, 0.046, 0.064) * wardFront * (0.08 + uMistPower * 0.38);`,
+          diffuseColor.rgb += vec3(0.035, 0.13, 0.15)
+            * revealEdge * edgePulse * (0.12 + uMistPower * 0.2);`,
         );
       };
-      material.customProgramCacheKey = () => "tide-black-mist-sanctuary-front-v1";
+      material.customProgramCacheKey = () => "tide-black-mist-tile-front-v2";
     };
     installBlackMistFront(shared.blackMistField);
 
@@ -1665,6 +1711,7 @@ uniform float uFoliageTime;`,
     };
 
     const rebuildTerrain = (data: Terrain3DSnapshot) => {
+      refreshBlackMistRevealMask(data.placed, data.mapMode === "expand");
       clearGroup(terrainRoot);
       terrainCellHeights.clear();
       terrainPickMeshes.length = 0;
@@ -5071,15 +5118,15 @@ uniform float uFoliageTime;`,
     const updateBlackMist = (data: Terrain3DSnapshot, time: number) => {
       const power = THREE.MathUtils.clamp(data.sanctuaryPower ?? 0.12, 0, 1);
       if (data.mapMode === "expand") {
-        // 淨化力量只能削弱黑霧濃度，不會讓尚未開拓的海域整片恢復安全。
-        shared.blackMistField.opacity = 0.88 - power * 0.24;
+        // 黑霧覆蓋強度固定；真正的退霧只能由已取得地塊遮罩觸發。
+        shared.blackMistField.opacity = 0.86;
         blackMistFrontUniforms.time.value = time * 0.001;
         blackMistFrontUniforms.power.value = power;
         blackMistFieldTexture.offset.set((time * 0.000006) % 1, (time * 0.000004) % 1);
       }
       if (blackMistMesh && blackMistEntries.length) {
-        // 聖地升級／祭壇加持越高，岸線漂浮黑霧越稀薄，但深淵邊界仍持續存在。
-        shared.blackMist.opacity = 0.78 - power * 0.46;
+        // 岸線霧絲維持穩定密度，不隨聖地升級而把未取得區域變淡。
+        shared.blackMist.opacity = 0.72;
         for (let i = 0; i < blackMistEntries.length; i++) {
           const entry = blackMistEntries[i];
           const drift = Math.sin(time * 0.00034 + entry.phase);
@@ -5098,7 +5145,7 @@ uniform float uFoliageTime;`,
       }
 
       if (blackMistVeilMesh && blackMistVeilEntries.length) {
-        shared.blackMistVeil.opacity = 0.48 - power * 0.2;
+        shared.blackMistVeil.opacity = 0.46;
         for (let i = 0; i < blackMistVeilEntries.length; i++) {
           const veil = blackMistVeilEntries[i];
           const drift = Math.sin(time * 0.00023 + veil.phase);
@@ -5117,7 +5164,7 @@ uniform float uFoliageTime;`,
       }
 
       if (blackMistCloudMesh && blackMistCloudEntries.length) {
-        shared.blackMistCloud.opacity = 0.27 - power * 0.09;
+        shared.blackMistCloud.opacity = 0.25;
         for (let i = 0; i < blackMistCloudEntries.length; i++) {
           const cloud = blackMistCloudEntries[i];
           const drift = Math.sin(time * 0.00012 + cloud.phase);
@@ -5145,7 +5192,8 @@ uniform float uFoliageTime;`,
       const height = data.heights[gy * COLS + gx] ?? 0;
       purificationAura.visible = true;
       purificationAura.position.set(hq.x / CELL, groundTop(height) + 0.09, hq.y / CELL);
-      purificationAura.scale.setScalar(5.8 + power * 7.2);
+      // 聖地只保留貼近核心的結界圈；升級不再把視覺安全區無限放大。
+      purificationAura.scale.setScalar(5.8);
       purificationAura.rotation.y = Math.sin(time * 0.00022) * 0.045;
       purificationAuraMaterial.opacity = 0.11 + power * 0.13;
     };
