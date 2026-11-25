@@ -1364,7 +1364,7 @@ uniform float uFoliageTime;`,
       const plazaTint = new THREE.Color();
       for (let i = 0; i < plazaPaverCount; i++) {
         const angle = (i / plazaPaverCount) * Math.PI * 2;
-        const radius = 4.16 + Math.sin(i * 2.31) * 0.035;
+        const radius = 4.58 + Math.sin(i * 2.31) * 0.035;
         const x = Math.cos(angle) * radius;
         const z = Math.sin(angle) * radius;
         plazaDummy.position.set(x, 0.052, z);
