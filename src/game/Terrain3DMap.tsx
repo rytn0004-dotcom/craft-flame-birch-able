@@ -66,7 +66,7 @@ const MATERIALS = {
 
 function clearGroup(group: any) {
   group.traverse((node: any) => {
-    if (node.geometry) node.geometry.dispose();
+    if (node.geometry && !node.userData?.sharedGeometry) node.geometry.dispose();
   });
   group.clear();
 }
@@ -415,6 +415,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
 
     const addContactShadow = (parent: any, radius: number) => {
       const shadow = new THREE.Mesh(contactShadowGeometry, shared.contactShadow);
+      shadow.userData.sharedGeometry = true;
       shadow.rotation.x = -Math.PI / 2;
       shadow.position.y = 0.006;
       shadow.scale.set(radius, radius, 1);
@@ -2623,7 +2624,11 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
             crack.y,
             crack.z + (faceX ? 0 : crack.nz * 0.009),
           );
-          crackDummy.rotation.set(0, 0, (crack.seed - 0.5) * 0.16);
+          crackDummy.rotation.set(
+            faceX ? (crack.seed - 0.5) * 0.16 : 0,
+            0,
+            faceX ? 0 : (crack.seed - 0.5) * 0.16,
+          );
           crackDummy.scale.set(faceX ? 0.014 : crack.width, crack.height, faceX ? crack.width : 0.014);
           crackDummy.updateMatrix();
           crackMesh.setMatrixAt(i, crackDummy.matrix);
