@@ -1538,6 +1538,82 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       shelfWater.receiveShadow = false;
       terrainRoot.add(deepWater, shelfWater);
 
+
+      // 海平線外的低矮島礁剪影：固定在地塊包圍盒之外，提供遠景尺度而不佔用地圖格。
+      const horizonSites = Array.from({ length: 8 }, (_, i) => {
+        const angle = (i / 8) * Math.PI * 2 + 0.18;
+        const rx = mapWidth * 0.5 + 9.5;
+        const rz = mapDepth * 0.5 + 9.5;
+        const seed = Math.abs(Math.sin(i * 19.7 + mapCenterX * 0.31 + mapCenterZ * 0.17) * 28391.7) % 1;
+        return {
+          x: mapCenterX + Math.cos(angle) * rx,
+          z: mapCenterZ + Math.sin(angle) * rz,
+          angle,
+          seed,
+        };
+      });
+      if (horizonSites.length) {
+        const horizonBases = new THREE.InstancedMesh(
+          new THREE.DodecahedronGeometry(1, 0),
+          shared.reefRock,
+          horizonSites.length,
+        );
+        const horizonStacks = new THREE.InstancedMesh(
+          new THREE.DodecahedronGeometry(1, 0),
+          shared.cliffFacet,
+          horizonSites.length * 2,
+        );
+        const horizonCaps = new THREE.InstancedMesh(
+          new THREE.ConeGeometry(0.6, 1, 5),
+          shared.ridgePeak,
+          horizonSites.length,
+        );
+        const dummy = new THREE.Object3D();
+        const tint = new THREE.Color();
+        for (let i = 0; i < horizonSites.length; i++) {
+          const site = horizonSites[i];
+          dummy.position.set(site.x, -0.17, site.z);
+          dummy.rotation.set(0.08 * Math.sin(site.angle), site.angle, 0.08 * Math.cos(site.angle));
+          dummy.scale.set(1.5 + site.seed * 0.9, 0.38 + site.seed * 0.2, 1.15 + site.seed * 0.7);
+          dummy.updateMatrix();
+          horizonBases.setMatrixAt(i, dummy.matrix);
+          tint.set(site.seed > 0.55 ? "#647d78" : "#4c6c70");
+          horizonBases.setColorAt(i, tint);
+
+          for (let stack = 0; stack < 2; stack++) {
+            const index = i * 2 + stack;
+            const scale = (stack === 0 ? 0.75 : 0.48) + site.seed * (stack === 0 ? 0.45 : 0.32);
+            const offset = stack === 0 ? -0.38 : 0.42;
+            dummy.position.set(
+              site.x + Math.cos(site.angle + stack * 1.9) * offset,
+              0.22 + scale * 0.34,
+              site.z + Math.sin(site.angle + stack * 1.9) * offset,
+            );
+            dummy.rotation.set(0.12 * Math.sin(site.angle), site.angle + stack * 0.8, 0.1 * Math.cos(site.angle));
+            dummy.scale.set(scale * 0.72, scale * 1.18, scale * 0.78);
+            dummy.updateMatrix();
+            horizonStacks.setMatrixAt(index, dummy.matrix);
+            tint.set(stack === 0 ? "#8b9688" : "#71877f");
+            horizonStacks.setColorAt(index, tint);
+          }
+
+          dummy.position.set(site.x + Math.cos(site.angle) * 0.1, 0.72 + site.seed * 0.38, site.z - Math.sin(site.angle) * 0.1);
+          dummy.rotation.set(0.1, site.angle, -0.08);
+          dummy.scale.set(0.72 + site.seed * 0.28, 0.82 + site.seed * 0.35, 0.72 + site.seed * 0.28);
+          dummy.updateMatrix();
+          horizonCaps.setMatrixAt(i, dummy.matrix);
+        }
+        for (const mesh of [horizonBases, horizonStacks, horizonCaps]) {
+          mesh.instanceMatrix.needsUpdate = true;
+          if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+          mesh.castShadow = false;
+          mesh.receiveShadow = false;
+          terrainRoot.add(mesh);
+        }
+      }
+
+      terrainRoot.add(deepWater, shelfWater);
+
       // 外露地塊的岸線：沙色石沿收邊，海面再以稀疏泡沫切出水陸交界。
       // 僅處理已放置地塊的非道路格，並避開現有建築 footprint。
       const coastDirections = [
@@ -1734,7 +1810,35 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
           terrainRoot.add(foam);
         }
 
-        // 少量潮汐微光環沿岸緩慢擴散；集中在單一 InstancedMesh，不逐個建立動畫物件。
+
+        // 第二道破碎浪沫落在更外側的淺海，長度與間距不規則，讓岸線呈現兩層潮汐節奏。
+        const outerFoamEdges = coastEdges.filter((edge) => edge.seed > 0.24).slice(0, 520);
+        if (outerFoamEdges.length) {
+          const outerFoam = new THREE.InstancedMesh(
+            new THREE.BoxGeometry(0.26, 0.01, 0.026),
+            shared.shoreFoam,
+            outerFoamEdges.length,
+          );
+          const foamDummy = new THREE.Object3D();
+          for (let i = 0; i < outerFoamEdges.length; i++) {
+            const edge = outerFoamEdges[i];
+            foamDummy.position.set(
+              edge.x + edge.dx * (0.96 + edge.seed * 0.12),
+              -0.259 + edge.seed * 0.006,
+              edge.z + edge.dz * (0.96 + edge.seed * 0.12),
+            );
+            foamDummy.rotation.y = edge.rot;
+            foamDummy.scale.set(0.65 + edge.seed * 0.7, 1, 0.72 + edge.seed * 0.45);
+            foamDummy.updateMatrix();
+            outerFoam.setMatrixAt(i, foamDummy.matrix);
+          }
+          outerFoam.instanceMatrix.needsUpdate = true;
+          outerFoam.castShadow = false;
+          outerFoam.receiveShadow = false;
+          terrainRoot.add(outerFoam);
+        }
+
+        // 少量潮汐微光環沿岸緩慢擴散；集中在單一 InstancedMesh，不逐個建立動畫物件。        // 少量潮汐微光環沿岸緩慢擴散；集中在單一 InstancedMesh，不逐個建立動畫物件。
         const rippleCandidates = coastEdges.filter((edge) => edge.seed > 0.72);
         const rippleCount = Math.min(18, rippleCandidates.length);
         if (rippleCount > 0) {
