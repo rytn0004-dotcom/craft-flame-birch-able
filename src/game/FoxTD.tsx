@@ -4471,7 +4471,8 @@ export function FoxTD() {
       }
       // 沒有放置工具時，先以 3D 建築實際網格命中選取，再用地面距離作備援。
       // 這可避免點聖地屋頂／城牆時，因高度投影誤差而選不到本陣。
-      if (pickRef.current === null && !stakeRef.current && !shrinePlaceRef.current) {
+      if (!stakeRef.current && !shrinePlaceRef.current) {
+        // 即使仍選著塔卡，也優先命中既有建築；避免放置模式鎖住聖地選取。
         const pickedTower = terrain3DApiRef.current?.pickTower(ev.clientX, ev.clientY);
         if (pickedTower != null && s.towers[pickedTower]) {
           selRef.current = pickedTower;
@@ -4482,7 +4483,7 @@ export function FoxTD() {
         }
         for (let i = 0; i < s.towers.length; i++) {
           const tw = s.towers[i];
-          const hitR = tw.sanctuary ? 112 : 42;
+          const hitR = tw.sanctuary ? 176 : 56;
           if (Math.hypot(tw.x - p.x, tw.y - p.y) < hitR) {
             selRef.current = i;
             setSel(i);
@@ -4786,13 +4787,10 @@ export function FoxTD() {
   }
 
   function canPlaceReason(gx: number, gy: number): string | null {
-    if (gx < 0 || gy < 0 || gx >= COLS || gy >= ROWS) return "超出地圖";
-    if (!isCellOnBoard(boardRef.current, gx, gy)) return "未解鎖地塊";
-    if (gateHere(gx, gy)) return "出入口不可建";
-    if (isSanctuaryFootprint(gx, gy)) return "聖地範圍不可建";
-    if (!isBuildableSurface(gx, gy)) {
-      return isExpandBoard(boardRef.current) ? "道路不可建，請點高地" : "障礙／路障不可建";
-    }
+    if (gx < 0 || gy < 0 || gx >= COLS || gy >= ROWS) return "超出世界範圍";
+    // 建塔規則簡化：已升起的地塊都能建造，包含道路與 Lv0～3 高地。
+    // 只保留未解鎖區域及已被建築佔用格的保護，不再限制道路、入口或高低差。
+    if (!isCellOnBoard(boardRef.current, gx, gy)) return "黑霧尚未散去，這塊地還沒升起";
     if (sim.current.towers.some((t) => t.gx === gx && t.gy === gy)) return "此格已有建築";
     return null;
   }
