@@ -1115,10 +1115,11 @@ export function validPlacements(board: TileBoard, templateId: string): { tc: num
  * 每個已佔用鄰邊都精確匹配道路／非道路狀態與端口索引，避免選地塊流程無牌可選。
  */
 export function createTidalLiftTemplate(board: TileBoard): TileTemplate | null {
-  const id = "tide_lift";
   const center = Math.floor(TILE / 2);
   const slots = frontierSlots(board);
   for (const slot of slots) {
+    // 唯一 ID 保留每塊浮島自己的道路雕刻，後續擴張不會改寫已放置浮島的模板。
+    const id = `tide_lift_${board.placed.length}_${slot.tc}_${slot.tr}`;
     const blocked = emptyBlocked(true);
     const ports: Port[] = [];
     let adjacent = false;
@@ -1173,7 +1174,7 @@ export function createTidalLiftTemplate(board: TileBoard): TileTemplate | null {
     TEMPLATE_BY_ID[id] = template;
     if (validPlacements(board, id).length) return template;
     if (previous) TEMPLATE_BY_ID[id] = previous;
-    // 若此前沒有保底模板，留下這個候選只作內部暫存；不在 OFFERABLE_IDS 中，不會自行出現在選項。
+    else delete TEMPLATE_BY_ID[id];
   }
   return null;
 }
