@@ -1454,32 +1454,12 @@ export function FoxTD() {
     const activeCharge = Math.max(0, Math.min(1, sanctuary?.hqCharge ?? 0));
     // 永久升級／祭壇加持形成淨界根基，聖地蓄能時再短暫推高驅霧強度；不修改戰鬥數值。
     const sanctuaryPower = Math.max(0.12, Math.min(1, 0.12 + coreProgress * 0.58 + buffProgress * 0.22 + shrineProgress * 0.08 + activeCharge * 0.08));
-    const placementActive =
-      current.pointer.inside &&
-      phaseRef.current === "play" &&
-      pickRef.current !== null &&
-      !stakeRef.current &&
-      !shrinePlaceRef.current &&
-      !tileOfferRef.current;
-    let placement: Terrain3DSnapshot["placement"] = null;
-    if (placementActive) {
-      const rawGx = Math.floor(current.pointer.x / CELL);
-      const rawGy = Math.floor(current.pointer.y / CELL);
-      const snapped = snapPlaceCell(rawGx, rawGy);
-      const target = snapped ?? { gx: rawGx, gy: rawGy };
-      placement = {
-        gx: target.gx,
-        gy: target.gy,
-        height: cellHeight(current.heights, target.gx, target.gy),
-        valid: !!snapped,
-        snapped: !!snapped && (snapped.gx !== rawGx || snapped.gy !== rawGy),
-      };
-    }
+    // 塔位預覽尚未啟用：不要在 30Hz 的 3D 快照中反覆掃描可建造格與鄰格。
     return {
       placed: boardRef.current.placed,
       heights: current.heights,
       blocked: current.blocked,
-      placement,
+      placement: null,
       sanctuaryPower,
       mapMode: mapModeRef.current,
       towers: current.towers.map((tower, index) => {
@@ -3742,56 +3722,7 @@ export function FoxTD() {
         ctx.fill();
       }
 
-      if (pickRef.current !== null && !stakeRef.current && phaseRef.current === "play") {
-        const def = TOWERS[pickRef.current];
-        const gx = Math.floor(s.pointer.x / GRID);
-        const gy = Math.floor(s.pointer.y / GRID);
-        const px = gx * GRID + GRID / 2;
-        const py = gy * GRID + GRID / 2;
-        const bonus = rangeBonus(cellHeight(s.heights, gx, gy));
-        const ok = canPlace(gx, gy);
-        // 格線落點
-        ctx.fillStyle = ok ? "rgba(120,200,255,0.18)" : "rgba(255,70,70,0.2)";
-        ctx.fillRect(gx * GRID + 2, gy * GRID + 2, GRID - 4, GRID - 4);
-        ctx.strokeStyle = ok ? "rgba(180,230,255,0.85)" : "rgba(255,100,100,0.9)";
-        ctx.lineWidth = 2;
-        ctx.strokeRect(gx * GRID + 2, gy * GRID + 2, GRID - 4, GRID - 4);
-        ctx.beginPath();
-        ctx.arc(px, py, def.range + bonus, 0, Math.PI * 2);
-        ctx.fillStyle = ok ? "rgba(120,200,255,0.1)" : "rgba(255,80,80,0.12)";
-        ctx.fill();
-        ctx.strokeStyle = ok ? "rgba(140,210,255,0.55)" : "rgba(255,90,90,0.6)";
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-        const cost = Math.max(1, Math.round(def.cost * (getDifficulty(difficultyId).towerCostMul ?? 1)));
-        ctx.font = "bold 11px sans-serif";
-        ctx.fillStyle = ok ? "#dff6ff" : "#ffb0b0";
-        ctx.fillText(ok ? `💰${cost}` : "無法放置", px - 18, py + 4);
-        // 視野內可建格淡綠框，避免只靠游標猜高地
-        const pad = 2;
-        const c0 = Math.max(0, x0 - pad);
-        const c1 = Math.min(COLS - 1, x1 + pad);
-        const r0 = Math.max(0, y0 - pad);
-        const r1 = Math.min(ROWS - 1, y1 + pad);
-        ctx.save();
-        for (let rr = r0; rr <= r1; rr++) {
-          for (let cc = c0; cc <= c1; cc++) {
-            if (cc === gx && rr === gy) continue;
-            if (!canPlace(cc, rr)) continue;
-            const hx = cc * CELL;
-            const hy = rr * CELL;
-            ctx.strokeStyle = "rgba(140, 230, 170, 0.55)";
-            ctx.lineWidth = 1.5;
-            ctx.strokeRect(hx + 3, hy + 3, CELL - 6, CELL - 6);
-          }
-        }
-        ctx.restore();
-        if (bonus > 0 && ok) {
-          ctx.fillStyle = "#ffe08a";
-          ctx.fillText(`高地 +${bonus}`, px - 28, py - 34);
-        }
-      }
-
+      // 塔位的 2D 格線／範圍預覽暫停；避免 WebGL 載入或 fallback 時仍掃描整片可建區域。
       // 高地模塊已在 blocked 層繪製（height0～3）
       ctx.textAlign = "left";
 
@@ -4359,8 +4290,11 @@ export function FoxTD() {
         y: ((ev.clientY - rect.top) / Math.max(1, rect.height)) * VIEWH,
       };
     };
-    const local = (ev: PointerEvent) => {
-      const world = terrain3DApiRef.current?.screenToWorld(ev.clientX, ev.clientY);
+    const local = (ev: PointerEvent, precise = false) => {
+      const api = terrain3DApiRef.current;
+      const world = precise
+        ? (api?.screenToWorldPrecise(ev.clientX, ev.clientY) ?? api?.screenToWorld(ev.clientX, ev.clientY))
+        : api?.screenToWorld(ev.clientX, ev.clientY);
       if (world) return world;
       const screen = screenOf(ev);
       const cam = sim.current.cam;
@@ -4398,15 +4332,7 @@ export function FoxTD() {
         }
       }
 
-      // 選塔放置：游標下格即時提示可否建造
-      if (pickRef.current !== null && phaseRef.current === "play" && !tileOfferRef.current) {
-        const gx = Math.floor(world.x / CELL);
-        const gy = Math.floor(world.y / CELL);
-        const why = canPlaceReason(gx, gy);
-        const hh = cellHeight(sim.current.heights, gx, gy);
-        if (!why) setHover(`可放置 · 地勢 Lv${hh} · 射程 +${hh * 30}`);
-        else setHover(`不可放：${why}`);
-      }
+      // 塔位判定只在點擊當下執行；滑鼠移動時不反覆掃描地表與塔陣。
     };
     const onUp = () => {
       sim.current.pointer.down = false;
@@ -4417,7 +4343,7 @@ export function FoxTD() {
     };
     const onDown = (ev: PointerEvent) => {
       if (!isGameSurface(ev) || ev.button !== 0 || ev.altKey) return;
-      const p = local(ev);
+      const p = local(ev, true);
       sim.current.pointer = { ...p, down: true, inside: true };
       if (phaseRef.current !== "play") {
         if (!workshopRef.current) return;
@@ -4578,14 +4504,15 @@ export function FoxTD() {
       const diff = difficultyRef.current;
       const cost = Math.max(1, Math.round(base.cost * (diff.towerCostMul ?? 1)));
       const dmg = base.damage * (diff.towerDmgMul ?? 1);
-      const snapped = snapPlaceCell(gx, gy);
-      if (!snapped) {
-        setHover(canPlaceReason(gx, gy) || (isExpandBoard(boardRef.current) ? "請點高地建塔" : "此格不可建塔"));
+      const placementReason = canPlaceReason(gx, gy);
+      if (placementReason) {
+        setHover(`無法放置：${placementReason}`);
         return;
       }
-      const pgx = snapped.gx;
-      const pgy = snapped.gy;
-      const snappedAway = pgx !== gx || pgy !== gy;
+      // 直接使用精確射線命中的格子，不再做鄰格吸附或反覆預覽掃描。
+      const pgx = gx;
+      const pgy = gy;
+      const snappedAway = false;
       if (goldRef.current < cost) {
         setHover("金幣不夠");
         return;
@@ -4838,8 +4765,14 @@ export function FoxTD() {
    * 擴張模式的 blocked=true 代表非道路高地；完整地圖的 blocked=true 代表障礙。
    */
   function isBuildableSurface(gx: number, gy: number) {
-    const blocked = sim.current.blocked.has(cellKey(gx, gy));
-    return isExpandBoard(boardRef.current) ? blocked : !blocked;
+    const key = cellKey(gx, gy);
+    const blocked = sim.current.blocked.has(key);
+    if (isExpandBoard(boardRef.current)) {
+      // 擴張地塊的道路固定為 Lv0；非道路高地為 Lv1～3。
+      // blocked 仍作主要地形依據，height>0 則作 3D／尋路快照不同步時的安全補判。
+      return blocked || cellHeight(sim.current.heights, gx, gy) > 0;
+    }
+    return !blocked;
   }
 
   function canPlace(gx: number, gy: number) {
@@ -4851,33 +4784,6 @@ export function FoxTD() {
     if (!isBuildableSurface(gx, gy)) return false;
     if (sim.current.towers.some((t) => t.gx === gx && t.gy === gy)) return false;
     return true;
-  }
-
-  /** 點到路／邊緣時，改放到游標最近的鄰格高地（切比雪夫 1） */
-  function snapPlaceCell(gx: number, gy: number): { gx: number; gy: number } | null {
-    if (canPlace(gx, gy)) return { gx, gy };
-    const px = sim.current.pointer.x;
-    const py = sim.current.pointer.y;
-    let best: { gx: number; gy: number } | null = null;
-    let bestD = Infinity;
-    for (let dr = -1; dr <= 1; dr++) {
-      for (let dc = -1; dc <= 1; dc++) {
-        if (dc === 0 && dr === 0) continue;
-        const x = gx + dc;
-        const y = gy + dr;
-        if (!canPlace(x, y)) continue;
-        const d = Math.hypot(x * CELL + CELL / 2 - px, y * CELL + CELL / 2 - py);
-        if (d < bestD) {
-          bestD = d;
-          best = { gx: x, gy: y };
-        }
-      }
-    }
-    // 只在游標其實更靠近那一格中心時吸附，避免隔一條路亂跳
-    if (!best) return null;
-    const here = Math.hypot(gx * CELL + CELL / 2 - px, gy * CELL + CELL / 2 - py);
-    if (bestD + 6 < here) return best;
-    return null;
   }
 
   function canPlaceReason(gx: number, gy: number): string | null {
