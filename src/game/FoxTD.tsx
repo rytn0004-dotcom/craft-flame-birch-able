@@ -39,6 +39,7 @@ import {
   buildHeights,
   bestRotForSlot,
   canPlaceTile,
+  createTidalLiftTemplate,
   collectGates,
   EXPAND_EVERY,
   frontierSlots,
@@ -2333,7 +2334,12 @@ export function FoxTD() {
             !tileOfferRef.current &&
             lastExpandWaveRef.current !== s.wave
           ) {
-            const opts = pickOfferTemplates(OFFER_COUNT, boardRef.current, runTileBias);
+            let opts = pickOfferTemplates(OFFER_COUNT, boardRef.current, runTileBias);
+            // 常規模板全部無法銜接時，生成一塊依現有端口雕出的淨界浮島，仍必須完成放置。
+            if (!opts.length && frontierSlots(boardRef.current).length) {
+              const fallback = createTidalLiftTemplate(boardRef.current);
+              if (fallback) opts = [fallback.id];
+            }
             if (opts.length && frontierSlots(boardRef.current).length) {
               lastExpandWaveRef.current = s.wave;
               mingSandRef.current += 1;
