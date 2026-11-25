@@ -1419,8 +1419,9 @@ export function FoxTD() {
     const coreProgress = Math.max(0, Math.min(1, ((sanctuary?.hqCoreLv ?? 1) - 1) / 10));
     const buffProgress = Math.max(0, Math.min(1, hqBuffRef.current.tier / 3));
     const shrineProgress = Math.max(0, Math.min(1, hqBuffRef.current.shrineCount / 4));
-    // 只作黑霧濃度與聖地結界的視覺進度，不修改任何戰鬥數值。
-    const sanctuaryPower = Math.max(0.12, Math.min(1, 0.12 + coreProgress * 0.58 + buffProgress * 0.22 + shrineProgress * 0.08));
+    const activeCharge = Math.max(0, Math.min(1, sanctuary?.hqCharge ?? 0));
+    // 永久升級／祭壇加持形成淨界根基，聖地蓄能時再短暫推高驅霧強度；不修改戰鬥數值。
+    const sanctuaryPower = Math.max(0.12, Math.min(1, 0.12 + coreProgress * 0.58 + buffProgress * 0.22 + shrineProgress * 0.08 + activeCharge * 0.08));
     const placementActive =
       current.pointer.inside &&
       phaseRef.current === "play" &&
@@ -5974,9 +5975,10 @@ export function FoxTD() {
   const sanctuaryCoreProgress = Math.max(0, Math.min(1, ((sanctuaryForHud?.hqCoreLv ?? 1) - 1) / 10));
   const sanctuaryBuffProgress = Math.max(0, Math.min(1, hqBuffRef.current.tier / 3));
   const sanctuaryShrineProgress = Math.max(0, Math.min(1, hqBuffRef.current.shrineCount / 4));
+  const sanctuaryChargeProgress = Math.max(0, Math.min(1, sanctuaryForHud?.hqCharge ?? 0));
   const sanctuaryPowerForHud = Math.max(
     0.12,
-    Math.min(1, 0.12 + sanctuaryCoreProgress * 0.58 + sanctuaryBuffProgress * 0.22 + sanctuaryShrineProgress * 0.08),
+    Math.min(1, 0.12 + sanctuaryCoreProgress * 0.58 + sanctuaryBuffProgress * 0.22 + sanctuaryShrineProgress * 0.08 + sanctuaryChargeProgress * 0.08),
   );
 
   return (
