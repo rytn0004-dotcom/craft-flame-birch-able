@@ -4355,10 +4355,15 @@ export function FoxTD() {
       const selectedDef = selectedId === null
         ? null
         : (towerBookRef.current[selectedId] ?? TOWERS[selectedId]);
-      const tower = selectedDef?.name ?? (stakeRef.current ? "路障模式" : shrinePlaceRef.current ? "祭壇模式" : "未選擇塔卡");
+      // 顯示真正接管點擊的模式，避免路障仍啟用時診斷卻只顯示已選塔卡。
+      const tower = stakeRef.current
+        ? "路障模式（目前優先接管點擊）"
+        : shrinePlaceRef.current
+          ? "祭壇模式"
+          : selectedDef?.name ?? "未選擇塔卡";
       let verdict = placementReason ?? "地形與佔用判定通過";
       if (!placementReason && tileOfferRef.current && pickTemplateRef.current) verdict = "地塊拼接模式";
-      else if (!placementReason && stakeRef.current) verdict = "路障模式";
+      else if (!placementReason && stakeRef.current) verdict = "路障模式仍在接管點擊，請先關閉路障";
       else if (!placementReason && shrinePlaceRef.current) verdict = "祭壇模式";
       else if (!placementReason && selectedId === null) verdict = "請先選擇塔卡";
       else if (!placementReason && selectedDef) {
@@ -5998,11 +6003,15 @@ export function FoxTD() {
           setHover(`金幣不足：${TOWERS[id].name} 需要 ${cost}`);
           return;
         }
+        // 一般塔卡與路障／祭壇為互斥模式；選塔時立即關閉其他放置工具。
+        stakeRef.current = false;
+        setStaking(false);
+        shrinePlaceRef.current = false;
         setPick(id);
         pickRef.current = id;
         setSel(null);
         selRef.current = null;
-        setHover(`已選 ${TOWERS[id].name} [${key}] · 點地圖放置`);
+        setHover(`已選 ${TOWERS[id].name} [${key}] · 一般塔模式 · 點地圖放置`);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -7085,12 +7094,16 @@ Alt＋左鍵環視 · 右鍵平移 · 滾輪縮放 · [H]對準聖地 · [空格
                     setHover(`金幣不足：需要 ${showCost}`);
                     return;
                   }
+                  // 點選一般塔卡必須離開路障／祭壇模式，確保 onDown 走一般塔建造分支。
+                  stakeRef.current = false;
+                  setStaking(false);
+                  shrinePlaceRef.current = false;
                   setPick(t.id);
                   pickRef.current = t.id;
                   setSel(null);
                   selRef.current = null;
                   setHover(
-                    `${t.name}：${t.trait} · 傷 ${Math.round(t.damage * (getDifficulty(difficultyId).towerDmgMul ?? 1))} · [${hotkey}]`,
+                    `${t.name}：${t.trait} · 傷 ${Math.round(t.damage * (getDifficulty(difficultyId).towerCostMul ?? 1))} · 一般塔模式 · [${hotkey}]`,
                   );
                 }}
               >
