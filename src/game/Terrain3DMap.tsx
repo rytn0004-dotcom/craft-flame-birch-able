@@ -1871,6 +1871,89 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             terrainRoot.add(waymarks);
           }
 
+          // 道路外側的潮汐路燈：只放在道路與高地交界，燈座不侵入路面，也不建立額外即時光源。
+          const lampCandidates: { x: number; z: number; y: number; seed: number }[] = [];
+          const lampKeys = new Set<string>();
+          const lampDirections = [
+            { dc: 0, dr: -1, dx: 0, dz: -1 },
+            { dc: 1, dr: 0, dx: 1, dz: 0 },
+            { dc: 0, dr: 1, dx: 0, dz: 1 },
+            { dc: -1, dr: 0, dx: -1, dz: 0 },
+          ];
+          for (const cell of roadCells) {
+            if (lampCandidates.length >= 48) break;
+            const gx = Math.floor(cell.x);
+            const gy = Math.floor(cell.z);
+            for (const direction of lampDirections) {
+              const neighborKey = (gx + direction.dc) + "," + (gy + direction.dr);
+              const neighbor = tileCells.get(neighborKey);
+              if (!neighbor || !data.blocked.has(neighborKey) || neighbor.h <= 0) continue;
+              const lampKey = gx + "," + gy + ":" + direction.dc + "," + direction.dr;
+              if (lampKeys.has(lampKey)) continue;
+              const seed = Math.abs(Math.sin(cell.x * 71.7 + cell.z * 39.1 + direction.dc * 17.3 + direction.dr * 29.1) * 24137.7) % 1;
+              if (seed < 0.968) continue;
+              const x = cell.x + direction.dx * 0.56;
+              const z = cell.z + direction.dz * 0.56;
+              if (protectedBuildings.some((building) => Math.hypot(x - building.x, z - building.z) < building.radius + 0.42)) continue;
+              lampKeys.add(lampKey);
+              lampCandidates.push({ x, z, y: groundTop(neighbor.h), seed });
+              if (lampCandidates.length >= 48) break;
+            }
+          }
+          if (lampCandidates.length) {
+            const lampBases = new THREE.InstancedMesh(
+              new THREE.CylinderGeometry(0.16, 0.21, 0.13, 8),
+              shared.foundationStone,
+              lampCandidates.length,
+            );
+            const lampPosts = new THREE.InstancedMesh(
+              new THREE.CylinderGeometry(0.035, 0.055, 0.44, 6),
+              shared.foundationGold,
+              lampCandidates.length,
+            );
+            const lampCores = new THREE.InstancedMesh(
+              new THREE.OctahedronGeometry(0.105, 1),
+              shared.chargeCrystal,
+              lampCandidates.length,
+            );
+            const lampCaps = new THREE.InstancedMesh(
+              new THREE.ConeGeometry(0.15, 0.16, 6),
+              shared.bridgeTrim,
+              lampCandidates.length,
+            );
+            const lampDummy = new THREE.Object3D();
+            for (let i = 0; i < lampCandidates.length; i++) {
+              const lamp = lampCandidates[i];
+              lampDummy.position.set(lamp.x, lamp.y + 0.075, lamp.z);
+              lampDummy.rotation.set(0, lamp.seed * Math.PI * 2, 0);
+              lampDummy.scale.setScalar(0.9 + lamp.seed * 0.2);
+              lampDummy.updateMatrix();
+              lampBases.setMatrixAt(i, lampDummy.matrix);
+
+              lampDummy.position.y = lamp.y + 0.34;
+              lampDummy.scale.set(1, 1, 1);
+              lampDummy.updateMatrix();
+              lampPosts.setMatrixAt(i, lampDummy.matrix);
+
+              lampDummy.position.y = lamp.y + 0.63;
+              lampDummy.rotation.set(0, lamp.seed * Math.PI * 2, 0);
+              lampDummy.scale.setScalar(0.82 + lamp.seed * 0.18);
+              lampDummy.updateMatrix();
+              lampCores.setMatrixAt(i, lampDummy.matrix);
+
+              lampDummy.position.y = lamp.y + 0.82;
+              lampDummy.scale.set(0.9 + lamp.seed * 0.18, 0.82 + lamp.seed * 0.18, 0.9 + lamp.seed * 0.18);
+              lampDummy.updateMatrix();
+              lampCaps.setMatrixAt(i, lampDummy.matrix);
+            }
+            for (const mesh of [lampBases, lampPosts, lampCores, lampCaps]) {
+              mesh.instanceMatrix.needsUpdate = true;
+              mesh.castShadow = false;
+              mesh.receiveShadow = false;
+              terrainRoot.add(mesh);
+            }
+          }
+
           if (roadEdges.length) {
             const curbs = new THREE.InstancedMesh(
               new THREE.BoxGeometry(0.9, 0.052, 0.075),
@@ -2698,6 +2781,107 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           mesh.receiveShadow = false;
           terrainRoot.add(mesh);
         }
+      }
+
+      // 林地邊緣的低矮灌木叢：以不同葉形與尺寸打散樹木之間的空白，避免植被只剩單株模型。
+      const shrubCells = Array.from(tileCells.values()).filter((cell) => {
+        if (cell.h < 1 || cell.h > 2) return false;
+        const region = terrainRegion(cell);
+        if (region !== "meadow" && region !== "moss") return false;
+        const key = Math.floor(cell.x) + "," + Math.floor(cell.z);
+        if (coastBandKeys.has(key)) return false;
+        const seed = Math.abs(Math.sin(cell.x * 59.3 + cell.z * 23.7) * 21791.3) % 1;
+        if (seed < 0.944) return false;
+        return !protectedBuildings.some((building) =>
+          Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 1.05,
+        );
+      }).slice(0, 360);
+      if (shrubCells.length) {
+        const shrubs = new THREE.InstancedMesh(
+          new THREE.IcosahedronGeometry(0.15, 0),
+          shared.foliageWind,
+          shrubCells.length * 3,
+        );
+        const shrubDummy = new THREE.Object3D();
+        const shrubTint = new THREE.Color();
+        for (let i = 0; i < shrubCells.length; i++) {
+          const cell = shrubCells[i];
+          const seed = Math.abs(Math.sin(cell.x * 127.1 + cell.z * 311.7) * 43758.5453) % 1;
+          for (let leaf = 0; leaf < 3; leaf++) {
+            const angle = seed * Math.PI * 2 + leaf * (Math.PI * 2 / 3);
+            const radius = leaf === 0 ? 0.02 : 0.15 + seed * 0.08;
+            shrubDummy.position.set(
+              cell.x + Math.cos(angle) * radius,
+              groundTop(cell.h) + 0.105 + (leaf === 0 ? 0.015 : 0),
+              cell.z + Math.sin(angle) * radius,
+            );
+            shrubDummy.rotation.set(seed * 0.18, angle, (seed - 0.5) * 0.16);
+            shrubDummy.scale.set(
+              (leaf === 0 ? 1.0 : 0.78) + seed * 0.22,
+              (leaf === 0 ? 0.82 : 0.72) + leaf * 0.09,
+              (leaf === 0 ? 1.0 : 0.78) + seed * 0.18,
+            );
+            shrubDummy.updateMatrix();
+            shrubs.setMatrixAt(i * 3 + leaf, shrubDummy.matrix);
+            const mossy = terrainRegion(cell) === "moss";
+            shrubTint.set(mossy
+              ? (leaf === 1 ? "#8caa78" : "#496e5c")
+              : (leaf === 1 ? "#a5b978" : "#648a68"));
+            shrubs.setColorAt(i * 3 + leaf, shrubTint);
+          }
+        }
+        shrubs.instanceMatrix.needsUpdate = true;
+        if (shrubs.instanceColor) shrubs.instanceColor.needsUpdate = true;
+        shrubs.castShadow = false;
+        shrubs.receiveShadow = false;
+        terrainRoot.add(shrubs);
+      }
+
+      // 苔地零星長出成簇蘑菇，提供近景尺度變化；數量固定上限，不加入逐物件動畫。
+      const mushroomCells = Array.from(tileCells.values()).filter((cell) => {
+        if (cell.h !== 1 || terrainRegion(cell) !== "moss" || !detailIsClear(cell, 0.9)) return false;
+        const seed = Math.abs(Math.sin(cell.x * 37.1 + cell.z * 91.7) * 21873.5) % 1;
+        return seed > 0.982;
+      }).slice(0, 64);
+      if (mushroomCells.length) {
+        const mushroomStems = new THREE.InstancedMesh(
+          new THREE.CylinderGeometry(0.018, 0.028, 0.11, 5),
+          shared.ivory,
+          mushroomCells.length,
+        );
+        const mushroomCaps = new THREE.InstancedMesh(
+          new THREE.DodecahedronGeometry(0.075, 0),
+          shared.meadowBloom,
+          mushroomCells.length,
+        );
+        const mushroomDummy = new THREE.Object3D();
+        const mushroomTint = new THREE.Color();
+        for (let i = 0; i < mushroomCells.length; i++) {
+          const cell = mushroomCells[i];
+          const seed = Math.abs(Math.sin(cell.x * 127.1 + cell.z * 311.7) * 43758.5453) % 1;
+          const angle = seed * Math.PI * 2;
+          const x = cell.x + Math.cos(angle) * 0.18;
+          const z = cell.z + Math.sin(angle) * 0.18;
+          mushroomDummy.position.set(x, groundTop(cell.h) + 0.055, z);
+          mushroomDummy.rotation.set(0, angle, (seed - 0.5) * 0.16);
+          mushroomDummy.scale.setScalar(0.78 + seed * 0.32);
+          mushroomDummy.updateMatrix();
+          mushroomStems.setMatrixAt(i, mushroomDummy.matrix);
+          mushroomDummy.position.y = groundTop(cell.h) + 0.135;
+          mushroomDummy.scale.set(0.9 + seed * 0.32, 0.65 + seed * 0.2, 0.9 + seed * 0.32);
+          mushroomDummy.updateMatrix();
+          mushroomCaps.setMatrixAt(i, mushroomDummy.matrix);
+          mushroomTint.set(seed > 0.66 ? "#e8d3a6" : seed > 0.33 ? "#c9b98f" : "#b3d4b8");
+          mushroomCaps.setColorAt(i, mushroomTint);
+        }
+        mushroomStems.instanceMatrix.needsUpdate = true;
+        mushroomCaps.instanceMatrix.needsUpdate = true;
+        if (mushroomCaps.instanceColor) mushroomCaps.instanceColor.needsUpdate = true;
+        mushroomStems.castShadow = false;
+        mushroomCaps.castShadow = false;
+        mushroomStems.receiveShadow = false;
+        mushroomCaps.receiveShadow = false;
+        terrainRoot.add(mushroomStems, mushroomCaps);
       }
 
       // 草甸與苔地加入低矮野花簇，使用兩個批次實例網格，不建立逐朵動畫。
