@@ -1542,12 +1542,13 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       // 海平線外的低矮島礁剪影：固定在地塊包圍盒之外，提供遠景尺度而不佔用地圖格。
       const horizonSites = Array.from({ length: 8 }, (_, i) => {
         const angle = (i / 8) * Math.PI * 2 + 0.18;
-        const rx = mapWidth * 0.5 + 9.5;
-        const rz = mapDepth * 0.5 + 9.5;
+        const directionX = Math.cos(angle);
+        const directionZ = Math.sin(angle);
         const seed = Math.abs(Math.sin(i * 19.7 + mapCenterX * 0.31 + mapCenterZ * 0.17) * 28391.7) % 1;
         return {
-          x: mapCenterX + Math.cos(angle) * rx,
-          z: mapCenterZ + Math.sin(angle) * rz,
+          // 八方位分別越過對應邊界 9.5 格；對角點同時離開 X／Z 邊界，確保大型地圖也不落在陸地角落。
+          x: mapCenterX + (Math.abs(directionX) < 0.35 ? 0 : Math.sign(directionX) * (mapWidth * 0.5 + 9.5)),
+          z: mapCenterZ + (Math.abs(directionZ) < 0.35 ? 0 : Math.sign(directionZ) * (mapDepth * 0.5 + 9.5)),
           angle,
           seed,
         };
