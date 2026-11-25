@@ -1,6 +1,6 @@
 /**
  * Modular tile expansion (Tower Dominion-style) for FoxTD.
- * Board: 10x10 slots of 20x20 cells covering 200x200.
+ * Board: 20x20 slots of 20x20 cells covering 400x400.
  */
 import { COLS, ROWS, cellKey, type Cell } from "./grid";
 
