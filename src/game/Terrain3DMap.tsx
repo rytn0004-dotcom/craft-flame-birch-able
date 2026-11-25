@@ -41,6 +41,8 @@ export type Terrain3DSnapshot = {
 
 export type Terrain3DApi = {
   screenToWorld: (clientX: number, clientY: number) => { x: number; y: number } | null;
+  /** 點擊時才使用實際地表 InstancedMesh 的 instanceId 取得準確網格，避免高地射線平面誤差。 */
+  screenToWorldPrecise: (clientX: number, clientY: number) => { x: number; y: number } | null;
   pickTower: (clientX: number, clientY: number) => number | null;
   focus: (x: number, y: number) => void;
   reset: () => void;
@@ -266,8 +268,9 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
 
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
-    // 每個格子只記錄可見頂面高度；滑鼠命中不再穿過岩壁、礦晶、海面等裝飾物。
+    // 快速平面映射供一般滑鼠移動使用；真正點擊時只射線測試這些地表實例網格。
     const terrainCellHeights = new Map<string, number>();
+    const terrainPickMeshes: any[] = [];
     const terrainPickPlanes = [0, 1, 2, 3].map(
       (height) => new THREE.Plane(new THREE.Vector3(0, 1, 0), -groundTop(height)),
     );
@@ -1303,6 +1306,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     const rebuildTerrain = (data: Terrain3DSnapshot) => {
       clearGroup(terrainRoot);
       terrainCellHeights.clear();
+      terrainPickMeshes.length = 0;
       blackMistEntries.length = 0;
       blackMistMesh = null;
       waterRippleMesh = null;
@@ -1441,6 +1445,13 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         mesh.castShadow = h > 0;
         mesh.receiveShadow = true;
         mesh.frustumCulled = false;
+        // InstancedMesh 的 instanceId 與 list 索引一致，直接保存對應的世界格座標。
+        mesh.userData.pickCells = list.map((cell) => ({
+          gx: Math.floor(cell.x),
+          gy: Math.floor(cell.z),
+          height: cell.h,
+        }));
+        terrainPickMeshes.push(mesh);
         terrainRoot.add(mesh);
       }
 
@@ -4265,6 +4276,23 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       return { x: point.x * CELL, y: point.z * CELL };
     };
 
+    const screenToWorldPrecise = (clientX: number, clientY: number) => {
+      if (!setPointerRay(clientX, clientY)) return null;
+      // 只測地表的四組 InstancedMesh，不碰水面、岩壁裝飾、塔體或粒子效果。
+      const hits = raycaster.intersectObjects(terrainPickMeshes, false);
+      for (const hit of hits) {
+        const cells = (hit.object as any).userData?.pickCells as
+          | { gx: number; gy: number; height: number }[]
+          | undefined;
+        const instanceId = hit.instanceId;
+        if (!cells || instanceId == null) continue;
+        const cell = cells[instanceId];
+        if (!cell) continue;
+        return { x: (cell.gx + 0.5) * CELL, y: (cell.gy + 0.5) * CELL };
+      }
+      return null;
+    };
+
     const pickTower = (clientX: number, clientY: number): number | null => {
       if (!setPointerRay(clientX, clientY)) return null;
       const hits = raycaster.intersectObject(buildingRoot, true);
@@ -4324,7 +4352,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       camera.position.set(centerX + 5, groundTop(h) + 27, centerZ + 5);
       controls.update();
 
-      apiRef.current = { screenToWorld, pickTower, focus, reset };
+      apiRef.current = { screenToWorld, screenToWorldPrecise, pickTower, focus, reset };
       setError("");
     } catch {
       setError("此瀏覽器無法啟動 WebGL，請更新瀏覽器或啟用硬體加速。");
