@@ -508,6 +508,8 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       bridgeStone: new THREE.MeshStandardMaterial({ color: "#c0b69b", roughness: 0.96, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.022 }),
       bridgeTrim: new THREE.MeshPhysicalMaterial({ color: "#b99560", metalness: 0.54, roughness: 0.36, roughnessMap: surfaceRoughnessMap, clearcoat: 0.48, clearcoatRoughness: 0.24, envMapIntensity: 1.02 }),
       grass: new THREE.MeshStandardMaterial({ color: "#83a878", roughness: 0.96 }),
+      meadowBloom: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.72, emissive: "#473b20", emissiveIntensity: 0.06 }),
+      roadGuide: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.78, metalness: 0.12 }),
       terrainCrystal: new THREE.MeshStandardMaterial({
         color: "#55a6a2",
         metalness: 0.22,
@@ -807,6 +809,32 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         cornerSeal.position.set(x, 0.69, -2.6);
         cornerSeal.scale.set(1.1, 0.42, 1.1);
         root.add(cornerSeal);
+      }
+
+      // 聖地地坪加入雙層潮汐封印與八枚定位晶釘，讓核心區從斜視角也清楚可辨。
+      const sanctuaryOuterSeal = new THREE.Mesh(
+        new THREE.TorusGeometry(1.82, 0.025, 6, 64),
+        shared.foundationGold,
+      );
+      sanctuaryOuterSeal.rotation.x = Math.PI / 2;
+      sanctuaryOuterSeal.position.y = 0.812;
+      sanctuaryOuterSeal.castShadow = false;
+      root.add(sanctuaryOuterSeal);
+      const sanctuaryInnerSeal = new THREE.Mesh(
+        new THREE.TorusGeometry(1.62, 0.012, 5, 64),
+        shared.runeGlow,
+      );
+      sanctuaryInnerSeal.rotation.x = Math.PI / 2;
+      sanctuaryInnerSeal.position.y = 0.814;
+      sanctuaryInnerSeal.castShadow = false;
+      root.add(sanctuaryInnerSeal);
+      for (let mark = 0; mark < 8; mark++) {
+        const angle = (mark / 8) * Math.PI * 2;
+        const sealGem = new THREE.Mesh(new THREE.OctahedronGeometry(0.052, 0), shared.chargeCrystal);
+        sealGem.position.set(Math.cos(angle) * 1.82, 0.846, Math.sin(angle) * 1.82);
+        sealGem.scale.set(0.82, 1.25, 0.82);
+        sealGem.castShadow = false;
+        root.add(sealGem);
       }
 
       // 中央聖殿、藍色穹頂和高聳水晶尖塔
@@ -1672,6 +1700,49 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
             terrainRoot.add(medallionRings, medallionCenters);
           }
 
+          // 長直道路加入稀疏導向刻線，分辨主路方向；所有刻線均為單一批次網格。
+          const roadGuideCells = roadCells.filter((cell) => {
+            const gx = Math.floor(cell.x);
+            const gy = Math.floor(cell.z);
+            const north = tileCells.has(gx + "," + (gy - 1)) && !data.blocked.has(gx + "," + (gy - 1));
+            const east = tileCells.has((gx + 1) + "," + gy) && !data.blocked.has((gx + 1) + "," + gy);
+            const south = tileCells.has(gx + "," + (gy + 1)) && !data.blocked.has(gx + "," + (gy + 1));
+            const west = tileCells.has((gx - 1) + "," + gy) && !data.blocked.has((gx - 1) + "," + gy);
+            const straight = (east && west) || (north && south);
+            const seed = Math.abs(Math.sin(cell.x * 29.1 + cell.z * 53.7) * 24681.3) % 1;
+            return straight && seed > 0.68;
+          }).slice(0, 360);
+          if (roadGuideCells.length) {
+            const guides = new THREE.InstancedMesh(
+              new THREE.BoxGeometry(0.34, 0.012, 0.038),
+              shared.roadGuide,
+              roadGuideCells.length,
+            );
+            const guideDummy = new THREE.Object3D();
+            const guideTint = new THREE.Color();
+            for (let i = 0; i < roadGuideCells.length; i++) {
+              const cell = roadGuideCells[i];
+              const gx = Math.floor(cell.x);
+              const gy = Math.floor(cell.z);
+              const vertical =
+                tileCells.has(gx + "," + (gy - 1)) && !data.blocked.has(gx + "," + (gy - 1)) &&
+                tileCells.has(gx + "," + (gy + 1)) && !data.blocked.has(gx + "," + (gy + 1));
+              const seed = Math.abs(Math.sin(cell.x * 29.1 + cell.z * 53.7) * 24681.3) % 1;
+              guideDummy.position.set(cell.x, groundTop(0) + 0.034, cell.z);
+              guideDummy.rotation.y = vertical ? Math.PI / 2 : 0;
+              guideDummy.scale.set(0.82 + seed * 0.3, 1, 1);
+              guideDummy.updateMatrix();
+              guides.setMatrixAt(i, guideDummy.matrix);
+              guideTint.set(seed > 0.84 ? "#d5c59c" : "#aab7ad");
+              guides.setColorAt(i, guideTint);
+            }
+            guides.instanceMatrix.needsUpdate = true;
+            if (guides.instanceColor) guides.instanceColor.needsUpdate = true;
+            guides.castShadow = false;
+            guides.receiveShadow = false;
+            terrainRoot.add(guides);
+          }
+
           if (roadEdges.length) {
             const curbs = new THREE.InstancedMesh(
               new THREE.BoxGeometry(0.9, 0.052, 0.075),
@@ -1736,7 +1807,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         terrainRoot.add(blackMistField);
 
         // 低成本 3D 深淵雲團：沿整個世界與外圍海域疏散分布，置於地表下方，不遮住已解鎖地塊。
-        const cloudPositions = 9;
+        const cloudPositions = 10;
         const cloudMargin = 72;
         for (let row = 0; row < cloudPositions; row++) {
           for (let col = 0; col < cloudPositions; col++) {
@@ -1886,7 +1957,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       }
       // 全地圖侵染已由單一霧幕負責；岸線只保留少量局部漂霧，避免逐格建立大量動畫實例。
       if (data.mapMode === "expand" && coastEdges.length) {
-        const fogEdges = coastEdges.filter((edge) => edge.seed > 0.12).slice(0, 96);
+        const fogEdges = coastEdges.filter((edge) => edge.seed > 0.12).slice(0, 128);
         if (fogEdges.length) {
           blackMistMesh = new THREE.InstancedMesh(
             new THREE.PlaneGeometry(1, 1),
@@ -2132,9 +2203,9 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
           terrainRoot.add(outerFoam);
         }
 
-        // 少量潮汐微光環沿岸緩慢擴散；集中在單一 InstancedMesh，不逐個建立動畫物件。        // 少量潮汐微光環沿岸緩慢擴散；集中在單一 InstancedMesh，不逐個建立動畫物件。
-        const rippleCandidates = coastEdges.filter((edge) => edge.seed > 0.72);
-        const rippleCount = Math.min(12, rippleCandidates.length);
+        // 少量潮汐微光環沿岸緩慢擴散；集中在單一 InstancedMesh，不逐個建立動畫物件。
+        const rippleCandidates = coastEdges.filter((edge) => edge.seed > 0.64);
+        const rippleCount = Math.min(18, rippleCandidates.length);
         if (rippleCount > 0) {
           waterRippleMesh = new THREE.InstancedMesh(
             new THREE.TorusGeometry(0.2, 0.009, 5, 28),
@@ -2261,8 +2332,12 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       const rockCells = Array.from(tileCells.values()).filter((cell) => {
         if (cell.h <= 0) return false;
         const seed = Math.abs(Math.sin(cell.x * 91.7 + cell.z * 43.3) * 24634.6345) % 1;
-        return seed > 0.86;
-      });
+        if (seed <= 0.86) return false;
+        // 建築與塔座周圍保留空地，岩屑也設上限避免大地圖增加過多 draw workload。
+        return !protectedBuildings.some((building) =>
+          Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 0.7,
+        );
+      }).slice(0, 1500);
       if (rockCells.length) {
         const rocks = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(0.075, 0), shared.rockDetail, rockCells.length);
         const dummy = new THREE.Object3D();
@@ -2293,14 +2368,14 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       const grassCells = Array.from(tileCells.values()).filter((cell) => {
         if (cell.h <= 0) return false;
         const seed = Math.abs(Math.sin(cell.x * 63.7 + cell.z * 29.3) * 18341.73) % 1;
-        if (seed < 0.965) return false;
+        if (seed < 0.955) return false;
         return !data.towers.some((tower) => {
           const tx = tower.x / CELL;
           const tz = tower.y / CELL;
           const clearance = tower.sanctuary ? 4.1 : 1.05;
           return Math.hypot(cell.x - tx, cell.z - tz) < clearance;
         });
-      });
+      }).slice(0, 1400);
       if (grassCells.length) {
         const bladeCount = grassCells.length * 3;
         const grass = new THREE.InstancedMesh(
@@ -2337,8 +2412,60 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         grass.instanceMatrix.needsUpdate = true;
         if (grass.instanceColor) grass.instanceColor.needsUpdate = true;
         grass.castShadow = false;
-        grass.receiveShadow = true;
+        grass.receiveShadow = false;
         terrainRoot.add(grass);
+      }
+
+      // 草甸與苔地加入低矮野花簇，使用兩個批次實例網格，不建立逐朵動畫。
+      const flowerCells = Array.from(tileCells.values()).filter((cell) => {
+        if (cell.h <= 0) return false;
+        const region = terrainRegion(cell);
+        if (region !== "meadow" && region !== "moss") return false;
+        const seed = Math.abs(Math.sin(cell.x * 47.3 + cell.z * 89.1) * 28173.7) % 1;
+        if (seed < 0.987) return false;
+        return !protectedBuildings.some((building) =>
+          Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 0.72,
+        );
+      }).slice(0, 180);
+      if (flowerCells.length) {
+        const stems = new THREE.InstancedMesh(
+          new THREE.ConeGeometry(0.018, 0.14, 5),
+          shared.grass,
+          flowerCells.length,
+        );
+        const flowerHeads = new THREE.InstancedMesh(
+          new THREE.DodecahedronGeometry(0.052, 0),
+          shared.meadowBloom,
+          flowerCells.length,
+        );
+        const flowerDummy = new THREE.Object3D();
+        const flowerTint = new THREE.Color();
+        for (let i = 0; i < flowerCells.length; i++) {
+          const cell = flowerCells[i];
+          const seed = Math.abs(Math.sin(cell.x * 127.1 + cell.z * 311.7) * 43758.5453) % 1;
+          const angle = seed * Math.PI * 2;
+          const x = cell.x + Math.cos(angle) * 0.19;
+          const z = cell.z + Math.sin(angle) * 0.19;
+          flowerDummy.position.set(x, groundTop(cell.h) + 0.065, z);
+          flowerDummy.rotation.set(0, angle, 0);
+          flowerDummy.scale.set(0.8 + seed * 0.3, 0.82 + seed * 0.25, 0.8 + seed * 0.3);
+          flowerDummy.updateMatrix();
+          stems.setMatrixAt(i, flowerDummy.matrix);
+          flowerDummy.position.y = groundTop(cell.h) + 0.145;
+          flowerDummy.scale.setScalar(0.78 + seed * 0.22);
+          flowerDummy.updateMatrix();
+          flowerHeads.setMatrixAt(i, flowerDummy.matrix);
+          flowerTint.set(seed > 0.66 ? "#f0d9a0" : seed > 0.33 ? "#d9c5a7" : "#b9d5bd");
+          flowerHeads.setColorAt(i, flowerTint);
+        }
+        stems.instanceMatrix.needsUpdate = true;
+        flowerHeads.instanceMatrix.needsUpdate = true;
+        if (flowerHeads.instanceColor) flowerHeads.instanceColor.needsUpdate = true;
+        stems.castShadow = false;
+        flowerHeads.castShadow = false;
+        stems.receiveShadow = false;
+        flowerHeads.receiveShadow = false;
+        terrainRoot.add(stems, flowerHeads);
       }
 
       // 高台邊緣偶爾露出低矮的海蝕礦晶，密度刻意偏低，避免水元素搶過建築主體。
@@ -4175,12 +4302,12 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       const power = THREE.MathUtils.clamp(data.sanctuaryPower ?? 0.12, 0, 1);
       if (data.mapMode === "expand") {
         // 淨化力量只能削弱黑霧濃度，不會讓尚未開拓的海域整片恢復安全。
-        shared.blackMistField.opacity = 0.84 - power * 0.22;
+        shared.blackMistField.opacity = 0.88 - power * 0.24;
         blackMistFieldTexture.offset.set((time * 0.000006) % 1, (time * 0.000004) % 1);
       }
       if (blackMistMesh && blackMistEntries.length) {
         // 聖地升級／祭壇加持越高，岸線漂浮黑霧越稀薄，但深淵邊界仍持續存在。
-        shared.blackMist.opacity = 0.72 - power * 0.43;
+        shared.blackMist.opacity = 0.78 - power * 0.46;
         for (let i = 0; i < blackMistEntries.length; i++) {
           const entry = blackMistEntries[i];
           const drift = Math.sin(time * 0.00034 + entry.phase);
@@ -4199,7 +4326,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       }
 
       if (blackMistCloudMesh && blackMistCloudEntries.length) {
-        shared.blackMistCloud.opacity = 0.24 - power * 0.08;
+        shared.blackMistCloud.opacity = 0.27 - power * 0.09;
         for (let i = 0; i < blackMistCloudEntries.length; i++) {
           const cloud = blackMistCloudEntries[i];
           const drift = Math.sin(time * 0.00012 + cloud.phase);
@@ -4528,14 +4655,14 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     let lastFrameAt = 0;
     let lastRafAt = 0;
     let renderAccumulator = 0;
-    const renderInterval = 1000 / 40;
+    const renderInterval = 1000 / 60;
     let lastSnapshotAt = -Infinity;
     let lastAmbientUpdateAt = -Infinity;
     let cachedSnapshot: Terrain3DSnapshot | null = null;
     const render = (time: number) => {
       if (disposed) return;
       animationFrame = requestAnimationFrame(render);
-      // 時間累積節流到約 40 FPS，避免在 60Hz 螢幕上使用固定門檻而意外掉成 30 FPS。
+      // 對齊 60Hz 螢幕更新節奏，避免 40 FPS 與 60Hz 不整除造成不均勻掉幀與閃動。
       const rafDelta = lastRafAt ? Math.min(100, time - lastRafAt) : renderInterval;
       lastRafAt = time;
       renderAccumulator += rafDelta;
@@ -4560,14 +4687,20 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         if (terrainInputsChanged) {
           let heightHash = 2166136261;
           for (let i = 0; i < data.heights.length; i++) heightHash = Math.imul(heightHash ^ (data.heights[i] ?? 0), 16777619);
+          // 動態路障只改尋路碰撞，不改變道路／地形本身；排除路障格，避免每放一個路障就清空重建整張地圖。
+          const stakeKeys = new Set(data.towers.filter((tower) => tower.stake).map((tower) => tower.gx + "," + tower.gy));
+          const terrainBlocked = stakeKeys.size
+            ? new Set([...data.blocked].filter((key) => !stakeKeys.has(key)))
+            : data.blocked;
           let blockedHash = 2166136261;
-          for (const key of data.blocked) {
+          // 排序後雜湊，Set 插入順序改變但內容相同時不會誤判為地形變更。
+          for (const key of [...terrainBlocked].sort()) {
             for (let i = 0; i < key.length; i++) blockedHash = Math.imul(blockedHash ^ key.charCodeAt(i), 16777619);
           }
           const placedKey = data.placed.map((tile) => [tile.tc, tile.tr, tile.templateId, tile.rot].join(",")).join("|");
           const terrainKey = data.mapMode + "|" + placedKey + "|" + heightHash + "|" + blockedHash;
           if (terrainKey !== lastTerrainKey) {
-            rebuildTerrain(data);
+            rebuildTerrain(terrainBlocked === data.blocked ? data : { ...data, blocked: terrainBlocked });
             lastTerrainKey = terrainKey;
           }
           lastTerrainHeightsRef = data.heights;
@@ -4591,8 +4724,8 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
 
       updateActors(data, time);
       updateEffects(data);
-      // 水面、燈光與黑霧變化很慢，限制為約 12 FPS 更新；3D 畫面本身仍以 45 FPS 平順顯示。
-      if (time - lastAmbientUpdateAt >= 1000 / 12) {
+      // 水面、燈光與黑霧提高至 30 FPS 更新，減少低頻矩陣跳動造成的閃爍感。
+      if (time - lastAmbientUpdateAt >= 1000 / 30) {
         lastAmbientUpdateAt = time;
         updateWaterRipples(time);
         updateLandmarkLights(time);
@@ -4695,6 +4828,8 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       skyGeometry.dispose();
       skyMaterial.dispose();
       shared.waterRipple.dispose();
+      shared.meadowBloom.dispose();
+      shared.roadGuide.dispose();
       shared.biomeSeam.dispose();
       shared.roadMedallion.dispose();
       shared.tidalSand.dispose();
@@ -4725,8 +4860,8 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
             Alt＋左鍵旋轉 · 右鍵平移 · 滾輪縮放
           </div>
           <div className="pointer-events-none absolute bottom-3 left-3 z-10 rounded-lg border border-[#8ec8ee33] bg-[#061525cc] px-3 py-2 text-[11px] text-[#9ec4de]">
-            道路與高地皆可建造 · 僅未升起區域及已佔用格不可建
-            <span className="block mt-1 text-[#d8c89e]">高地 0～3 級保留不同高度外觀與射程加成</span>
+            道路與聖地保留為禁建區 · 高地 Lv.1～3 可放置一般塔
+            <span className="block mt-1 text-[#d8c89e]">高地保留高度差與射程優勢；未開拓區域持續受黑霧覆蓋</span>
             <span className="block mt-1 text-[#83d9d5]">深淵霧覆蓋未開拓世界 · 聖地充能可削弱霧勢</span>
           </div>
           <button
