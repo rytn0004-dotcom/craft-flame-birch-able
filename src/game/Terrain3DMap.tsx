@@ -342,6 +342,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     // 全地圖深淵霧幕：覆蓋 200×200 可探索範圍；地塊地表位於霧幕上方，因此已開啟區域自然保持明亮。
     const blackMistFieldSize = 256;
     const blackMistFieldPixels = new Uint8Array(blackMistFieldSize * blackMistFieldSize * 4);
+    const blackMistFieldMaskPixels = new Uint8Array(blackMistFieldSize * blackMistFieldSize * 4);
     for (let y = 0; y < blackMistFieldSize; y++) for (let x = 0; x < blackMistFieldSize; x++) {
       const u = x / blackMistFieldSize;
       const v = y / blackMistFieldSize;
@@ -351,15 +352,20 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
         + Math.cos(tau * (v * 11.1 - u * 6.2)) * 0.12;
       const fine = Math.sin(tau * (u * 23 + v * 19)) * 0.06
         + Math.cos(tau * (v * 29 - u * 17)) * 0.05;
+      const density = THREE.MathUtils.clamp(0.76 + broad * 0.16 + medium * 0.12 + fine, 0.48, 0.96);
       const centerDistance = Math.hypot((u - 0.5) * COLS, (v - 0.5) * ROWS);
-      // 地圖正中央留出聖地淨界核心，往外才逐漸進入黑霧。
+      // 中央遮罩獨立於流動噪聲貼圖，確保淨界核心不會隨霧紋漂移。
       const coreClearance = THREE.MathUtils.smoothstep(centerDistance, 9, 17);
-      const density = THREE.MathUtils.clamp(0.76 + broad * 0.16 + medium * 0.12 + fine, 0.48, 0.96) * coreClearance;
       const index = (y * blackMistFieldSize + x) * 4;
-      blackMistFieldPixels[index] = 255;
-      blackMistFieldPixels[index + 1] = 255;
-      blackMistFieldPixels[index + 2] = 255;
-      blackMistFieldPixels[index + 3] = Math.round(density * 255);
+      const shade = Math.round(166 + density * 89);
+      blackMistFieldPixels[index] = shade;
+      blackMistFieldPixels[index + 1] = shade;
+      blackMistFieldPixels[index + 2] = shade;
+      blackMistFieldPixels[index + 3] = 255;
+      blackMistFieldMaskPixels[index] = 255;
+      blackMistFieldMaskPixels[index + 1] = Math.round(coreClearance * 255);
+      blackMistFieldMaskPixels[index + 2] = 255;
+      blackMistFieldMaskPixels[index + 3] = 255;
     }
     const blackMistFieldTexture = new THREE.DataTexture(
       blackMistFieldPixels, blackMistFieldSize, blackMistFieldSize, THREE.RGBAFormat,
@@ -372,6 +378,15 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
     blackMistFieldTexture.generateMipmaps = true;
     blackMistFieldTexture.repeat.set(4.2, 4.2);
     blackMistFieldTexture.needsUpdate = true;
+
+    const blackMistFieldMaskTexture = new THREE.DataTexture(
+      blackMistFieldMaskPixels, blackMistFieldSize, blackMistFieldSize, THREE.RGBAFormat,
+    );
+    blackMistFieldMaskTexture.wrapS = THREE.ClampToEdgeWrapping;
+    blackMistFieldMaskTexture.wrapT = THREE.ClampToEdgeWrapping;
+    blackMistFieldMaskTexture.magFilter = THREE.LinearFilter;
+    blackMistFieldMaskTexture.minFilter = THREE.LinearFilter;
+    blackMistFieldMaskTexture.needsUpdate = true;
 
     const shared = {
       blackMist: new THREE.MeshBasicMaterial({
@@ -386,6 +401,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       blackMistField: new THREE.MeshBasicMaterial({
         color: "#10182b",
         map: blackMistFieldTexture,
+        alphaMap: blackMistFieldMaskTexture,
         transparent: true,
         opacity: 0.84,
         depthWrite: false,
@@ -4478,6 +4494,7 @@ export function Terrain3DMap({ snapshotRef, apiRef }: Props) {
       shared.blackMistField.dispose();
       blackMistTexture.dispose();
       blackMistFieldTexture.dispose();
+      blackMistFieldMaskTexture.dispose();
       placementFillMaterial.dispose();
       placementOutlineMaterial.dispose();
       clearGroup(effectRoot);
