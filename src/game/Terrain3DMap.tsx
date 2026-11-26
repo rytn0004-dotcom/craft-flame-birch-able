@@ -5214,7 +5214,7 @@ vFoliageGust = 0.0;
       }).slice(0, 120);
       if (alpineCells.length) {
         const cushionGeometry = new THREE.SphereGeometry(1, 12, 8);
-        const cushions = new THREE.InstancedMesh(shared.alpineCushion, cushionGeometry, alpineCells.length);
+        const cushions = new THREE.InstancedMesh(cushionGeometry, shared.alpineCushion, alpineCells.length);
         const bladeRows = [
           { y: 0.000, width: 0.018, x: 0.000, z: 0.000 },
           { y: 0.038, width: 0.019, x: 0.003, z: 0.004 },
