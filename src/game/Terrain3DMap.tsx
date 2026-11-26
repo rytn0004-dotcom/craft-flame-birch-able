@@ -6089,7 +6089,15 @@ vFoliageGust = 0.0;
     placementPreview.visible = false;
     effectRoot.add(placementPreview);
 
-    const updateEffects = (data: Terrain3DSnapshot) => {
+    // 高速掠過尾流保留短暫記憶，讓草葉、花粉、水面與碎塵有自然消散時間。
+    let lastSlipWakeAt = -Infinity;
+    let lastSlipWakeStrength = 0;
+    let lastWaterWakeAt = -Infinity;
+    let lastWaterWakeStrength = 0;
+    let lastRockDustAt = -Infinity;
+    let lastRockDustOpacity = 0;
+
+    const updateEffects = (data: Terrain3DSnapshot, time: number) => {
       // 只追蹤當下最快的一枚高速彈體，讓後方草葉短暫伏倒、花粉被氣流抬起。
       let slipShot: Terrain3DShot | null = null;
       let slipSpeed = 260;
@@ -6125,8 +6133,13 @@ vFoliageGust = 0.0;
         slipWindUniforms.position.value.set(slipShot.x / CELL, slipShot.y / CELL);
         slipWindUniforms.direction.value.set(slipDx / slipLength, slipDz / slipLength);
         slipWindUniforms.strength.value = THREE.MathUtils.clamp((slipSpeed - 250) / 420, 0, 1);
+        lastSlipWakeAt = time;
+        lastSlipWakeStrength = slipWindUniforms.strength.value;
       } else {
-        slipWindUniforms.strength.value = 0;
+        const wakeAge = time - lastSlipWakeAt;
+        slipWindUniforms.strength.value = wakeAge < 920
+          ? lastSlipWakeStrength * Math.exp(-wakeAge / 285)
+          : 0;
       }
       if (waterSlipShot) {
         const waterDx = (waterSlipShot.tx - waterSlipShot.x) / CELL;
@@ -6135,8 +6148,13 @@ vFoliageGust = 0.0;
         oceanSurfaceUniforms.slipPosition.value.set(waterSlipShot.x / CELL, waterSlipShot.y / CELL);
         oceanSurfaceUniforms.slipDirection.value.set(waterDx / waterLength, waterDz / waterLength);
         oceanSurfaceUniforms.slipStrength.value = THREE.MathUtils.clamp((waterSlipSpeed - 270) / 390, 0, 1);
+        lastWaterWakeAt = time;
+        lastWaterWakeStrength = oceanSurfaceUniforms.slipStrength.value;
       } else {
-        oceanSurfaceUniforms.slipStrength.value = 0;
+        const wakeAge = time - lastWaterWakeAt;
+        oceanSurfaceUniforms.slipStrength.value = wakeAge < 1250
+          ? lastWaterWakeStrength * Math.exp(-wakeAge / 410)
+          : 0;
       }
       if (rockSlipShot) {
         const rockDx = (rockSlipShot.tx - rockSlipShot.x) / CELL;
@@ -6150,8 +6168,13 @@ vFoliageGust = 0.0;
         );
         terrainDustMesh.rotation.y = Math.atan2(rockDx / rockLength, rockDz / rockLength);
         terrainDustMaterial.opacity = 0.12 + THREE.MathUtils.clamp((rockSlipSpeed - 300) / 420, 0, 1) * 0.32;
+        lastRockDustAt = time;
+        lastRockDustOpacity = terrainDustMaterial.opacity;
       } else {
-        terrainDustMesh.visible = false;
+        const dustAge = time - lastRockDustAt;
+        const dustFade = dustAge < 1450 ? Math.exp(-dustAge / 465) : 0;
+        terrainDustMesh.visible = dustFade > 0.018;
+        terrainDustMaterial.opacity = lastRockDustOpacity * dustFade;
       }
       for (let i = 0; i < data.shots.length; i++) {
         const shot = data.shots[i];
@@ -6550,7 +6573,7 @@ vFoliageGust = 0.0;
       }
 
       updateActors(data, time);
-      updateEffects(data);
+      updateEffects(data, time);
       // 水面、燈光與黑霧提高至 30 FPS 更新，減少低頻矩陣跳動造成的閃爍感。
       if (time - lastAmbientUpdateAt >= 1000 / 30) {
         lastAmbientUpdateAt = time;
