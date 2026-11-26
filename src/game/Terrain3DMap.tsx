@@ -1260,8 +1260,8 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             * cos(terrainWorldPosition.z * 2.3 - terrainWorldPosition.x * 1.4);
           // 高地頂面出現寬緩山脊與侵蝕細溝；位移只作用在上表面，不改格子高度與碰撞。
           transformed.y += terrainTopMask * (terrainCrest * 0.0065 + terrainFineLift * 0.0018
-            + terrainFold * \${height >= 2 ? "0.010" : height === 1 ? "0.0045" : "0.0015"}
-            + terrainRill * \${height >= 2 ? "0.0025" : "0.0008"});
+            + terrainFold * ${height >= 2 ? "0.010" : height === 1 ? "0.0045" : "0.0015"}
+            + terrainRill * ${height >= 2 ? "0.0025" : "0.0008"});
           vTerrainWorldPosition = terrainWorldPosition.xyz;`,
         );
         shader.fragmentShader = shader.fragmentShader.replace(
@@ -1319,13 +1319,13 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             diffuseColor.rgb * vec3(0.87, 1.055, 1.105), dewPigment * 0.09);
           diffuseColor.rgb += vec3(0.075, 0.105, 0.13) * quartzSeam * 0.28;
           // 高地生成專屬的風蝕等高紋與裸岩脊線；由世界座標取樣，跨地塊連續且每局穩定。
-          float ridgeMacro = sin(terrainWorld.x * 0.38 + sin(terrainWorld.y * 0.27) * 2.1 + \${height.toFixed(1)})
+          float ridgeMacro = sin(terrainWorld.x * 0.38 + sin(terrainWorld.y * 0.27) * 2.1 + ${height.toFixed(1)})
             * cos(terrainWorld.y * 0.34 - terrainWorld.x * 0.16);
           float ridgeContour = 1.0 - smoothstep(0.025, 0.12,
             abs(fract((ridgeMacro * 0.5 + 0.5) * 5.0) - 0.5));
           float windCarve = pow(max(0.0, sin(terrainWorld.x * 0.91
             + sin(terrainWorld.y * 0.53) * 1.6) * 0.5 + 0.5), 4.0);
-          float highlandStrength = \${height >= 2 ? "1.0" : height === 1 ? "0.34" : "0.06"};
+          float highlandStrength = ${height >= 2 ? "1.0" : height === 1 ? "0.34" : "0.06"};
           diffuseColor.rgb *= mix(vec3(0.78, 0.84, 0.92), vec3(1.05, 1.02, 0.94),
             ridgeContour * highlandStrength * 0.24);
           diffuseColor.rgb += vec3(0.045, 0.073, 0.11)
