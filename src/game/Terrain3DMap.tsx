@@ -1581,22 +1581,33 @@ vFoliageGust = 0.0;
         float foliageMask = smoothstep(-0.28, 0.52, position.y);
         vec2 windDirection = normalize(vec2(0.86, 0.42));
         float windTravel = dot(instanceMatrix[3].xz, windDirection);
+        vec2 windCrossAxis = vec2(-0.24, 0.97);
+        float crossCoordinate = dot(instanceMatrix[3].xz, windCrossAxis);
         float broadGust = sin(uFoliageTime * 0.42 + dot(instanceMatrix[3].xz, vec2(0.031, 0.019)));
         float travelingGust = sin(windTravel * 0.115 - uFoliageTime * 1.08);
-        // 第二道斜向陣風交錯穿過草甸，讓風浪有前後層次而非整片同步擺動。
-        float crossTravel = sin(dot(instanceMatrix[3].xz, vec2(-0.24, 0.97)) * 0.083 - uFoliageTime * 0.74);
+        // 斜向主風場與側向渦流疊合成有方向的風帶，前緣依座標推進，不讓全場同時擺動。
+        float crossTravel = sin(crossCoordinate * 0.083 - uFoliageTime * 0.74);
         float crossFront = smoothstep(-0.62, 0.9, crossTravel);
-        float gustStrength = min(1.18, 0.39 + 0.31 * smoothstep(-0.65, 0.88, broadGust)
-          + 0.22 * smoothstep(-0.56, 0.78, travelingGust) + 0.16 * crossFront);
-        vFoliageGust = max(gustStrength * smoothstep(-0.5, 0.72, travelingGust), crossFront * 0.24);
+        float shearBand = sin(windTravel * 0.168 - uFoliageTime * 1.34
+          + sin(crossCoordinate * 0.12 - uFoliageTime * 0.46) * 0.72);
+        float shearFront = smoothstep(-0.58, 0.88, shearBand);
+        float gustStrength = min(1.22, 0.34 + 0.27 * smoothstep(-0.65, 0.88, broadGust)
+          + 0.2 * smoothstep(-0.56, 0.78, travelingGust)
+          + 0.13 * crossFront + 0.18 * shearFront);
+        vFoliageGust = max(gustStrength * smoothstep(-0.5, 0.72, travelingGust),
+          max(crossFront * 0.2, shearFront * 0.28));
         float foliageWave = sin(uFoliageTime * 1.35 + foliagePhase + position.y * 2.8);
         float foliageFlutter = sin(uFoliageTime * 2.4 + foliagePhase * 1.73 + position.y * 5.2) * 0.22;
         float leafRipple = sin(uFoliageTime * 3.1 + foliagePhase * 2.3 + position.y * 6.2) * 0.16;
-        float foliageSway = (foliageWave + foliageFlutter + leafRipple) * gustStrength;
+        float shearFlutter = sin(shearBand * 3.2 + foliagePhase * 1.6 + position.y * 7.4) * 0.2;
+        float foliageSway = (foliageWave + foliageFlutter + leafRipple + shearFlutter) * gustStrength;
         float gustLean = smoothstep(-0.18, 0.78, travelingGust) * foliageMask;
-        transformed.x += (foliageSway * 0.106 + gustLean * 0.03 + crossFront * 0.014) * foliageMask;
+        float shearLean = (shearFront - 0.32) * foliageMask;
+        transformed.x += (foliageSway * 0.098 + gustLean * 0.032
+          + crossFront * 0.014 + shearLean * 0.012) * foliageMask;
         transformed.z += (cos(uFoliageTime * 0.91 + foliagePhase * 1.27 + position.y * 1.8)
-          + foliageFlutter * 0.45 + gustLean * 0.34 + crossFront * 0.1) * 0.054 * foliageMask;
+          + foliageFlutter * 0.45 + gustLean * 0.34 + crossFront * 0.1
+          + shearFlutter * 0.18) * 0.054 * foliageMask;
         vec2 slipRelative = instanceMatrix[3].xz - uSlipPosition;
         float slipAlong = dot(slipRelative, uSlipDirection);
         vec2 slipPerpendicular = vec2(-uSlipDirection.y, uSlipDirection.x);
@@ -1615,7 +1626,10 @@ vFoliageGust = 0.0;
         vec2 slipBend = -uSlipDirection * ${(0.16 * slipResponse).toFixed(3)}
           + slipPerpendicular * slipSideSign * ${(0.12 * slipResponse).toFixed(3)};
         float slipVortex = sin(slipAlong * 1.42 + foliagePhase * 0.72 + uFoliageTime * 6.4);
-        vec2 slipCurl = slipPerpendicular * slipVortex * slipGust * ${(0.07 * slipResponse).toFixed(3)};
+        float slipShear = sin(slipAlong * 2.35 + slipSide * 0.92 + foliagePhase * 1.4
+          + uFoliageTime * 8.1);
+        vec2 slipCurl = slipPerpendicular * (slipVortex * 0.72 + slipShear * 0.28)
+          * slipGust * ${(0.075 * slipResponse).toFixed(3)};
         float canopyRecoil = sin(uFoliageTime * 5.2 + foliagePhase * 2.4)
           * slipGust * ${(0.035 * slipResponse).toFixed(3)};
         transformed.xz += slipFrontPush + slipBend * slipGust + slipCurl;
