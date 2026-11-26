@@ -5791,6 +5791,9 @@ vFoliageGust = 0.0;
         const bandMesh = new THREE.InstancedMesh(cliffBlockGeometry, shared.cliffBand, cliffFaces.length);
         const upperBandMesh = new THREE.InstancedMesh(cliffBlockGeometry, shared.cliffBandLight, cliffFaces.length);
         const capMesh = new THREE.InstancedMesh(cliffBlockGeometry, shared.cliffCap, cliffFaces.length);
+        for (const mesh of [cliffMesh, bandMesh, upperBandMesh, capMesh]) {
+          mesh.userData.sharedGeometry = true;
+        }
         const matrix = new THREE.Matrix4();
         for (let i = 0; i < cliffFaces.length; i++) {
           const face = cliffFaces[i];
