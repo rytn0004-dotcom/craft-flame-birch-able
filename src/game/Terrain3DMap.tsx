@@ -1155,16 +1155,20 @@ vFoliageGust = 0.0;
         float windTravel = dot(instanceMatrix[3].xz, windDirection);
         float broadGust = sin(uFoliageTime * 0.42 + dot(instanceMatrix[3].xz, vec2(0.031, 0.019)));
         float travelingGust = sin(windTravel * 0.115 - uFoliageTime * 1.08);
-        float gustStrength = 0.42 + 0.34 * smoothstep(-0.65, 0.88, broadGust)
-          + 0.24 * smoothstep(-0.56, 0.78, travelingGust);
-        vFoliageGust = gustStrength * smoothstep(-0.5, 0.72, travelingGust);
+        // 第二道斜向陣風交錯穿過草甸，讓風浪有前後層次而非整片同步擺動。
+        float crossTravel = sin(dot(instanceMatrix[3].xz, vec2(-0.24, 0.97)) * 0.083 - uFoliageTime * 0.74);
+        float crossFront = smoothstep(-0.62, 0.9, crossTravel);
+        float gustStrength = min(1.18, 0.39 + 0.31 * smoothstep(-0.65, 0.88, broadGust)
+          + 0.22 * smoothstep(-0.56, 0.78, travelingGust) + 0.16 * crossFront);
+        vFoliageGust = max(gustStrength * smoothstep(-0.5, 0.72, travelingGust), crossFront * 0.24);
         float foliageWave = sin(uFoliageTime * 1.35 + foliagePhase + position.y * 2.8);
         float foliageFlutter = sin(uFoliageTime * 2.4 + foliagePhase * 1.73 + position.y * 5.2) * 0.22;
-        float foliageSway = (foliageWave + foliageFlutter) * gustStrength;
+        float leafRipple = sin(uFoliageTime * 3.1 + foliagePhase * 2.3 + position.y * 6.2) * 0.16;
+        float foliageSway = (foliageWave + foliageFlutter + leafRipple) * gustStrength;
         float gustLean = smoothstep(-0.18, 0.78, travelingGust) * foliageMask;
-        transformed.x += (foliageSway * 0.092 + gustLean * 0.026) * foliageMask;
+        transformed.x += (foliageSway * 0.106 + gustLean * 0.03 + crossFront * 0.014) * foliageMask;
         transformed.z += (cos(uFoliageTime * 0.91 + foliagePhase * 1.27 + position.y * 1.8)
-          + foliageFlutter * 0.45 + gustLean * 0.34) * 0.048 * foliageMask;
+          + foliageFlutter * 0.45 + gustLean * 0.34 + crossFront * 0.1) * 0.054 * foliageMask;
         vec2 slipRelative = instanceMatrix[3].xz - uSlipPosition;
         float slipAlong = dot(slipRelative, uSlipDirection);
         vec2 slipPerpendicular = vec2(-uSlipDirection.y, uSlipDirection.x);
@@ -1193,12 +1197,12 @@ vFoliageGust = 0.0;
       };
       material.customProgramCacheKey = () => cacheKey;
     };
-    installFoliageWind(shared.foliageWind, "tide-foliage-wind-v2");
-    installFoliageWind(shared.grass, "tide-grass-stem-wind-v2");
-    installFoliageWind(shared.grassBlade, "tide-grass-blade-wind-v3");
-    installFoliageWind(shared.meadowBloom, "tide-meadow-bloom-wind-v2");
-    installFoliageWind(shared.coastGrass, "tide-coast-reed-wind-v2");
-    installFoliageWind(shared.reefCoral, "tide-reef-coral-current-v2");
+    installFoliageWind(shared.foliageWind, "tide-foliage-wind-v3");
+    installFoliageWind(shared.grass, "tide-grass-stem-wind-v3");
+    installFoliageWind(shared.grassBlade, "tide-grass-blade-wind-v4");
+    installFoliageWind(shared.meadowBloom, "tide-meadow-bloom-wind-v3");
+    installFoliageWind(shared.coastGrass, "tide-coast-reed-wind-v3");
+    installFoliageWind(shared.reefCoral, "tide-reef-coral-current-v3");
 
     // 花粉與草籽以少量實例漂浮；GPU 風場控制輕微三維漂移，不逐粒更新矩陣。
     const installPollenDrift = (material: THREE.MeshBasicMaterial) => {
@@ -3477,8 +3481,8 @@ vFoliageGust = 0.0;
         );
         const dummy = new THREE.Object3D();
         const tint = new THREE.Color();
-        const meadowBladePalette = ["#4f8359", "#78a45f", "#a6bb70", "#d1bd77"];
-        const mossBladePalette = ["#426f65", "#5d8b72", "#8ba36e", "#aebe83"];
+        const meadowBladePalette = ["#477b56", "#68975b", "#91ad69", "#b8bd78", "#e1c88a", "#78a69a"];
+        const mossBladePalette = ["#3d6c77", "#4e806e", "#78a98a", "#9dba87", "#bacd99", "#86aeb0"];
         for (let i = 0; i < grassCells.length; i++) {
           const cell = grassCells[i];
           const seed = Math.abs(Math.sin(cell.x * 127.1 + cell.z * 311.7) * 43758.5453) % 1;
