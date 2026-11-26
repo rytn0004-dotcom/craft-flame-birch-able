@@ -4326,19 +4326,102 @@ vFoliageGust = 0.0;
           shared.treeBark,
           groveCells.length * 3,
         );
+        // Curved branch framework links the trunk to the separate canopy masses.
+        // Twelve tapered limbs are built into one reusable tube geometry, then instanced once per tree.
+        const branchGeometry = (() => {
+          const positions: number[] = [];
+          const indices: number[] = [];
+          const radialSegments = 7;
+          const appendBranch = (
+            angle: number,
+            startRadius: number,
+            startY: number,
+            reach: number,
+            rise: number,
+            baseRadius: number,
+            tipRadius: number,
+            sway: number,
+          ) => {
+            const base = positions.length / 3;
+            const rows = 6;
+            const sideX = -Math.sin(angle);
+            const sideZ = Math.cos(angle);
+            const axisX = Math.cos(angle) * reach;
+            const axisZ = Math.sin(angle) * reach;
+            const axisLength = Math.hypot(axisX, rise, axisZ) || 1;
+            const tangentX = axisX / axisLength;
+            const tangentY = rise / axisLength;
+            const tangentZ = axisZ / axisLength;
+            const normalX = tangentY * sideZ - tangentZ * 0;
+            const normalY = tangentZ * sideX - tangentX * sideZ;
+            const normalZ = tangentX * 0 - tangentY * sideX;
+            for (let row = 0; row < rows; row++) {
+              const t = row / (rows - 1);
+              const eased = t * t * (3 - 2 * t);
+              const centerRadius = startRadius + reach * eased;
+              const centerY = startY + rise * t + Math.sin(Math.PI * t) * sway;
+              const centerX = Math.cos(angle) * centerRadius;
+              const centerZ = Math.sin(angle) * centerRadius;
+              const radius = THREE.MathUtils.lerp(baseRadius, tipRadius, t) * (1 + 0.08 * Math.sin(t * Math.PI));
+              for (let segment = 0; segment < radialSegments; segment++) {
+                const theta = (segment / radialSegments) * Math.PI * 2;
+                const sideAmount = Math.cos(theta) * radius;
+                const normalAmount = Math.sin(theta) * radius;
+                positions.push(
+                  centerX + sideX * sideAmount + normalX * normalAmount,
+                  centerY + normalY * normalAmount,
+                  centerZ + sideZ * sideAmount + normalZ * normalAmount,
+                );
+              }
+            }
+            for (let row = 0; row < rows - 1; row++) {
+              for (let segment = 0; segment < radialSegments; segment++) {
+                const a = base + row * radialSegments + segment;
+                const next = base + row * radialSegments + (segment + 1) % radialSegments;
+                const b = a + radialSegments;
+                const nextB = next + radialSegments;
+                indices.push(a, next, b, next, nextB, b);
+              }
+            }
+          };
+          for (let limb = 0; limb < 4; limb++) {
+            const angle = limb * Math.PI * 0.5 + 0.24;
+            appendBranch(angle, 0.035, 0.34, 0.38, 0.66, 0.052, 0.014, 0.045);
+            for (const fork of [-1, 1]) {
+              appendBranch(
+                angle + fork * 0.34,
+                0.27,
+                0.34 + 0.66 * 0.68,
+                0.17,
+                0.23,
+                0.021,
+                0.006,
+                fork * 0.018,
+              );
+            }
+          }
+          const geometry = new THREE.BufferGeometry();
+          geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+          geometry.setIndex(indices);
+          geometry.computeVertexNormals();
+          geometry.computeBoundingSphere();
+          return geometry;
+        })();
+        const branches = new THREE.InstancedMesh(branchGeometry, shared.treeBark, groveCells.length);
         // Smooth, lightly irregular leaf masses: the contour has enough segments to stay round up close,
         // with tiny radial variation so the canopy is organic rather than a perfect sphere.
         const makeCanopyGeometry = (radius: number, phase: number) => {
-          const geometry = new THREE.SphereGeometry(radius, 20, 14);
+          const geometry = new THREE.SphereGeometry(radius, 24, 18);
           const positions = geometry.getAttribute("position");
           for (let vertex = 0; vertex < positions.count; vertex++) {
             const x = positions.getX(vertex) / radius;
             const y = positions.getY(vertex) / radius;
             const z = positions.getZ(vertex) / radius;
             const contour = 1
-              + Math.sin(x * 7.3 + phase) * Math.cos(z * 6.7 - phase * 0.8) * 0.018
-              + Math.sin(y * 10.1 - z * 4.2 + phase * 1.7) * 0.009
-              + Math.cos(x * 12.4 + y * 8.3 + phase) * 0.006;
+              + Math.sin(x * 7.3 + phase) * Math.cos(z * 6.7 - phase * 0.8) * 0.024
+              + Math.sin(y * 10.1 - z * 4.2 + phase * 1.7) * 0.012
+              + Math.cos(x * 12.4 + y * 8.3 + phase) * 0.008
+              + Math.sin(x * 19.0 + z * 16.0 - y * 8.0 + phase) * 0.0035;
             positions.setXYZ(vertex, x * radius * contour, y * radius * contour, z * radius * contour);
           }
           positions.needsUpdate = true;
@@ -4373,6 +4456,12 @@ vFoliageGust = 0.0;
           groveDummy.scale.set(0.86 + seed * 0.2, scale, 0.86 + seed * 0.2);
           groveDummy.updateMatrix();
           trunks.setMatrixAt(i, groveDummy.matrix);
+
+          groveDummy.position.set(cell.x, groundTop(cell.h), cell.z);
+          groveDummy.rotation.set(0, angle, 0);
+          groveDummy.scale.set(0.86 + seed * 0.2, scale, 0.86 + seed * 0.2);
+          groveDummy.updateMatrix();
+          branches.setMatrixAt(i, groveDummy.matrix);
 
           // 三條短根向地表鋪開，讓樹幹扎根在土壤裡，而不是圓柱直接插入草地。
           for (let root = 0; root < 3; root++) {
@@ -4505,7 +4594,7 @@ vFoliageGust = 0.0;
         leafSprigs.receiveShadow = false;
         terrainRoot.add(leafSprigs);
 
-        for (const mesh of [trunks, rootFlare, lowerCanopies, sideCanopies, upperCanopies]) {
+        for (const mesh of [trunks, rootFlare, branches, lowerCanopies, sideCanopies, upperCanopies]) {
           mesh.instanceMatrix.needsUpdate = true;
           if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
           mesh.castShadow = false;
