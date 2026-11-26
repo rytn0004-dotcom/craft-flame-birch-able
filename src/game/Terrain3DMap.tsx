@@ -1310,10 +1310,19 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             * cos(terrainWorldPosition.z * 0.68 - terrainWorldPosition.x * 0.31);
           float terrainRill = sin(terrainWorldPosition.x * 2.7 + terrainWorldPosition.z * 1.9)
             * cos(terrainWorldPosition.z * 2.3 - terrainWorldPosition.x * 1.4);
-          // 高地頂面出現寬緩山脊與侵蝕細溝；位移只作用在上表面，不改格子高度與碰撞。
-          transformed.y += terrainTopMask * (terrainCrest * 0.0065 + terrainFineLift * 0.0018
-            + terrainFold * ${height >= 2 ? "0.010" : height === 1 ? "0.0045" : "0.0015"}
-            + terrainRill * ${height >= 2 ? "0.0025" : "0.0008"});
+          float terrainSpineWave = sin(terrainWorldPosition.x * 0.57
+            + sin(terrainWorldPosition.z * 0.34) * 1.9)
+            * cos(terrainWorldPosition.z * 0.46 - terrainWorldPosition.x * 0.22);
+          float terrainSpine = 1.0 - abs(terrainSpineWave);
+          float terrainShoulder = smoothstep(0.54, 0.92, terrainSpine);
+          float terrainErosionPocket = pow(max(0.0, sin(terrainWorldPosition.x * 1.8
+            + terrainWorldPosition.z * 1.3 + terrainFineLift * 1.7)), 5.0);
+          // 高地山脊脊線與侵蝕凹地直接形成微幅幾何輪廓；只作用於頂面，不改邏輯高度。
+          transformed.y += terrainTopMask * (terrainCrest * 0.0075 + terrainFineLift * 0.0025
+            + terrainFold * ${height >= 2 ? "0.012" : height === 1 ? "0.005" : "0.0015"}
+            + terrainRill * ${height >= 2 ? "0.0035" : "0.001"}
+            + terrainShoulder * ${height >= 2 ? "0.014" : height === 1 ? "0.004" : "0.0005"}
+            - terrainErosionPocket * ${height >= 2 ? "0.0038" : "0.0008"});
           vTerrainWorldPosition = terrainWorldPosition.xyz;`,
         );
         shader.fragmentShader = shader.fragmentShader.replace(
@@ -1378,11 +1387,25 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           float windCarve = pow(max(0.0, sin(terrainWorld.x * 0.91
             + sin(terrainWorld.y * 0.53) * 1.6) * 0.5 + 0.5), 4.0);
           float highlandStrength = ${height >= 2 ? "1.0" : height === 1 ? "0.34" : "0.06"};
+          float ridgeSpineField = sin(terrainWorld.x * 0.57
+            + sin(terrainWorld.y * 0.34) * 1.9)
+            * cos(terrainWorld.y * 0.46 - terrainWorld.x * 0.22);
+          float exposedCrest = smoothstep(0.18, 0.76, 1.0 - abs(ridgeSpineField));
+          float erodedScree = pow(max(0.0, sin(terrainWorld.x * 2.4
+            - terrainWorld.y * 1.7 + middleGrain * 1.8)), 7.0);
+          float alpineFrost = pow(max(0.0, sin(terrainWorld.x * 0.43
+            + terrainWorld.y * 0.36 + middleGrain * 1.4)), 12.0);
           diffuseColor.rgb *= mix(vec3(0.78, 0.84, 0.92), vec3(1.05, 1.02, 0.94),
             ridgeContour * highlandStrength * 0.24);
           diffuseColor.rgb += vec3(0.045, 0.073, 0.11)
             * ridgeContour * highlandStrength * 0.12;
           diffuseColor.rgb *= 1.0 - windCarve * highlandStrength * 0.055;
+          diffuseColor.rgb = mix(diffuseColor.rgb,
+            diffuseColor.rgb * vec3(1.13, 1.08, 0.96), exposedCrest * highlandStrength * 0.11);
+          diffuseColor.rgb = mix(diffuseColor.rgb,
+            diffuseColor.rgb * vec3(0.74, 0.81, 0.82), erodedScree * highlandStrength * 0.13);
+          diffuseColor.rgb = mix(diffuseColor.rgb,
+            diffuseColor.rgb * vec3(1.16, 1.22, 1.28), alpineFrost * ${height >= 3 ? "0.17" : "0.018"});
           // 高層地形的冷色晶脈更明顯，低地則保留柔暖草土色。
           float ridgeGlint = pow(max(0.0,
             sin(terrainWorld.x * 0.29 + terrainWorld.y * 0.21 + middleGrain)
@@ -1402,7 +1425,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             + microEtch * 0.012 + gritPore * 0.028, 0.0, 1.0);`,
         );
       };
-      material.customProgramCacheKey = () => "tide-terrain-world-mottle-highland-fold-v6-" + height;
+      material.customProgramCacheKey = () => "tide-terrain-ridgeline-scree-alpine-v7-" + height;
     };
     const installBlackMistVeil = (material: THREE.MeshBasicMaterial) => {
       material.onBeforeCompile = (shader) => {
