@@ -4544,26 +4544,35 @@ vFoliageGust = 0.0;
           const perpX = -dirY;
           const perpY = dirX;
           const base = sprigPositions.length / 3;
-          for (let row = 0; row < 5; row++) {
-            const t = row / 4;
-            const taper = Math.pow(Math.sin(Math.PI * t), 0.82);
-            const centerX = startX + dirX * length * t;
-            const centerY = startY + dirY * length * t + Math.sin(Math.PI * t) * 0.009;
-            const centerZ = startZ + dirZ * length * t + Math.sin(Math.PI * t) * 0.008;
-            for (let rail = 0; rail < 3; rail++) {
-              const lateral = (rail - 1) * width * taper;
-              const raisedVein = rail === 1 ? 0.006 * Math.sin(Math.PI * t) : 0;
+          const rows = 7;
+          const rails = [-1, -0.5, 0, 0.5, 1];
+          for (let row = 0; row < rows; row++) {
+            const t = row / (rows - 1);
+            const taper = Math.pow(Math.sin(Math.PI * t), 0.76);
+            const centerX = startX + dirX * length * t + Math.sin(Math.PI * t) * 0.006 * side;
+            const centerY = startY + dirY * length * t + Math.sin(Math.PI * t) * 0.012;
+            const centerZ = startZ + dirZ * length * t + Math.sin(Math.PI * t) * 0.012;
+            for (let rail = 0; rail < rails.length; rail++) {
+              const across = rails[rail];
+              const edge = Math.abs(across);
+              const serration = Math.sin(t * 22.0 + Math.sign(across) * 1.4) * edge * 0.045;
+              const lateral = across * width * taper * (1 + serration);
+              const leafCup = (1 - edge) * Math.sin(Math.PI * t) * width * 0.52;
+              const vein = rail === 2 ? 0.0075 * Math.sin(Math.PI * t) : 0;
+              const edgeCurl = Math.pow(edge, 2.1) * Math.sin(Math.PI * t) * 0.0035;
               sprigPositions.push(
                 centerX + perpX * lateral,
-                centerY + perpY * lateral + raisedVein,
-                centerZ + lateral * 0.12,
+                centerY + perpY * lateral + leafCup + vein + edgeCurl,
+                centerZ + lateral * 0.16 + (rail === 2 ? 0.004 : 0),
               );
             }
           }
-          for (let row = 0; row < 4; row++) {
-            const a = base + row * 3;
-            const b = a + 3;
-            sprigIndices.push(a, b, a + 1, a + 1, b, b + 1, a + 1, b + 1, a + 2, a + 2, b + 1, b + 2);
+          for (let row = 0; row < rows - 1; row++) {
+            for (let rail = 0; rail < rails.length - 1; rail++) {
+              const a = base + row * rails.length + rail;
+              const b = a + rails.length;
+              sprigIndices.push(a, b, a + 1, a + 1, b, b + 1);
+            }
           }
         };
         // Alternating left/right leaflets and a pointed terminal leaf create a natural fern-like sprig.
