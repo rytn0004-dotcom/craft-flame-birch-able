@@ -4093,43 +4093,56 @@ vFoliageGust = 0.0;
       }).slice(0, 1900);
       if (grassCells.length) {
         // 彎曲漸尖的葉片取代圓錐草刺；四片葉組成一簇，並共用樹冠風場材質。
-        // Each blade is a curved, tapered 3-rail ribbon with six height segments and a raised central vein.
-        // This smooth silhouette avoids the flat triangular "card" look while staying one instanced draw call.
+        // Five-rail, eight-section grass blades have a cupped cross-section, raised midrib,
+        // slightly rolled edges and a tapered, wind-combed tip. One shared geometry still feeds one instanced batch.
         const bladeGeometry = new THREE.BufferGeometry();
         const bladeRows = [
-          { y: 0.0, width: 0.038, x: 0.000, z: 0.000 },
-          { y: 0.072, width: 0.036, x: 0.010, z: 0.008 },
-          { y: 0.148, width: 0.031, x: 0.022, z: 0.022 },
-          { y: 0.226, width: 0.024, x: 0.030, z: 0.039 },
-          { y: 0.305, width: 0.015, x: 0.026, z: 0.054 },
-          { y: 0.374, width: 0.006, x: 0.010, z: 0.066 },
+          { y: 0.000, width: 0.034, x: 0.000, z: 0.000 },
+          { y: 0.048, width: 0.038, x: 0.004, z: 0.004 },
+          { y: 0.102, width: 0.037, x: 0.012, z: 0.012 },
+          { y: 0.158, width: 0.032, x: 0.022, z: 0.023 },
+          { y: 0.218, width: 0.026, x: 0.030, z: 0.037 },
+          { y: 0.278, width: 0.019, x: 0.031, z: 0.051 },
+          { y: 0.334, width: 0.011, x: 0.022, z: 0.063 },
+          { y: 0.382, width: 0.003, x: 0.007, z: 0.073 },
         ];
+        const bladeRails = [-1, -0.5, 0, 0.5, 1];
         const bladePositions: number[] = [];
         const bladeColors: number[] = [];
         const bladeIndices: number[] = [];
         for (let row = 0; row < bladeRows.length; row++) {
           const section = bladeRows[row];
           const t = row / (bladeRows.length - 1);
-          for (let rail = 0; rail < 3; rail++) {
-            const lateral = rail === 0 ? -section.width : rail === 2 ? section.width : 0;
-            const veinLift = rail === 1 ? 0.008 * (1 - t * 0.5) : 0;
-            bladePositions.push(section.x + lateral, section.y + veinLift, section.z + (rail === 1 ? 0.006 : 0));
-            const rootToTip = 0.19 + t * 0.69;
-            const sideShade = rail === 1 ? 1.08 : 0.9;
+          for (let rail = 0; rail < bladeRails.length; rail++) {
+            const across = bladeRails[rail];
+            const lateral = across * section.width;
+            const cup = (1 - Math.abs(across)) * (0.011 * (1 - t * 0.32));
+            const edgeRoll = Math.pow(Math.abs(across), 2.2) * Math.sin(Math.PI * t) * 0.005;
+            const veinLift = rail === 2 ? 0.0085 * (1 - t * 0.48) : 0;
+            const edgeWave = Math.sin(t * 10.5 + rail * 1.2) * Math.pow(Math.abs(across), 2) * 0.002;
+            bladePositions.push(
+              section.x + lateral,
+              section.y + cup + edgeRoll + veinLift + edgeWave,
+              section.z + (rail === 2 ? 0.009 : 0) + Math.sin(t * 7.0 + across * 1.8) * 0.002,
+            );
+            const rootToTip = 0.2 + t * 0.65;
+            const centerLight = 1.08 - Math.abs(across) * 0.12;
+            const sideHue = across < -0.1 ? 0.96 : across > 0.1 ? 1.035 : 1.0;
             bladeColors.push(
-              rootToTip * sideShade,
-              (0.31 + t * 0.52) * sideShade,
-              (0.22 + t * 0.31) * sideShade,
+              rootToTip * centerLight * sideHue,
+              (0.29 + t * 0.54) * centerLight * sideHue,
+              (0.2 + t * 0.32) * centerLight * (across > 0.1 ? 1.04 : 1.0),
             );
           }
         }
         for (let row = 0; row < bladeRows.length - 1; row++) {
-          const base = row * 3;
-          const next = base + 3;
-          bladeIndices.push(
-            base, next, base + 1, base + 1, next, next + 1,
-            base + 1, next + 1, base + 2, base + 2, next + 1, next + 2,
-          );
+          for (let rail = 0; rail < bladeRails.length - 1; rail++) {
+            const base = row * bladeRails.length + rail;
+            const next = base + bladeRails.length;
+            bladeIndices.push(
+              base, next, base + 1, base + 1, next, next + 1,
+            );
+          }
         }
         bladeGeometry.setAttribute("position", new THREE.Float32BufferAttribute(bladePositions, 3));
         bladeGeometry.setAttribute("color", new THREE.Float32BufferAttribute(bladeColors, 3));
