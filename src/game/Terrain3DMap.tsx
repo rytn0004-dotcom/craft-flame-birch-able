@@ -5785,6 +5785,18 @@ uniform float uFoliageTime;`,
           wake.castShadow = false;
           wake.receiveShadow = false;
           group.add(wake);
+          // 低空掠地的第二道氣流貼近地表滑過；速度不足時自動隱藏，不會變成常駐地面光帶。
+          const skimMaterial = new THREE.MeshBasicMaterial({
+            color: "#d8f5e9", transparent: true, opacity: 0.16,
+            blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+            depthWrite: false, toneMapped: false,
+          });
+          const skimWake = new THREE.Mesh(projectileWakeGeometry, skimMaterial);
+          skimWake.position.y = -0.665;
+          skimWake.renderOrder = 3;
+          skimWake.castShadow = false;
+          skimWake.receiveShadow = false;
+          group.add(skimWake);
           effectRoot.add(group);
           shotNodes[i] = group;
         }
@@ -5795,8 +5807,12 @@ uniform float uFoliageTime;`,
         const speedFactor = THREE.MathUtils.clamp(((shot.speed ?? 220) - 220) / 420, 0, 1);
         const wake = node.children[2];
         wake.material.color.set(shot.color);
-        wake.material.opacity = 0.16 + speedFactor * 0.42;
+        wake.material.opacity = 0.14 + speedFactor * 0.5;
         wake.scale.set(0.82 + speedFactor * 0.44, 1, 0.72 + speedFactor * 1.3);
+        const skimWake = node.children[3];
+        skimWake.visible = speedFactor > 0.08;
+        skimWake.material.opacity = speedFactor > 0.08 ? 0.06 + speedFactor * 0.3 : 0;
+        skimWake.scale.set(1.15 + speedFactor * 0.7, 1, 0.9 + speedFactor * 1.6);
         node.children[1].scale.z = 1 + speedFactor * 1.9;
         node.children[1].position.z = -0.28 - speedFactor * 0.16;
         node.children[0].scale.setScalar(1 + speedFactor * 0.13);
@@ -6254,6 +6270,7 @@ uniform float uFoliageTime;`,
       for (const shotNode of shotNodes) {
         shotNode.children[0]?.material?.dispose();
         shotNode.children[2]?.material?.dispose();
+        shotNode.children[3]?.material?.dispose();
       }
       clearGroup(effectRoot);
       projectileWakeGeometry.dispose();
