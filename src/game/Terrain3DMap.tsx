@@ -834,10 +834,24 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           float lichenField = smoothstep(0.12, 0.78, broadMottle * 0.5 + 0.5 + middleGrain * 0.045);
           float mineralSpeck = pow(max(0.0, sin(terrainWorld.x * 0.73 + terrainWorld.y * 0.51 + ${height.toFixed(1)})
             * cos(terrainWorld.y * 0.67 - terrainWorld.x * 0.39)), 10.0);
-          diffuseColor.rgb *= 0.978 + broadMottle * 0.017 + middleGrain * 0.011 + fineGrain * 0.004;
-          diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.91, 1.025, 0.91),
-            lichenField * ${height >= 1 ? "0.052" : "0.018"});
-          diffuseColor.rgb += vec3(0.022, 0.026, 0.02) * mineralSpeck * ${height >= 2 ? "0.22" : "0.1"};`,
+          float terrainColorNoise = broadMottle * 0.5 + 0.5 + middleGrain * 0.08;
+          float sunlitMeadow = smoothstep(0.2, 0.86,
+            sin(terrainWorld.x * 0.095 + terrainWorld.y * 0.12)
+            * cos(terrainWorld.y * 0.073 - terrainWorld.x * 0.051) * 0.5 + 0.5);
+          float richMoss = smoothstep(0.28, 0.82, terrainColorNoise) * (1.0 - sunlitMeadow * 0.34);
+          float windScour = smoothstep(0.54, 0.94,
+            sin(terrainWorld.x * 0.31 - terrainWorld.y * 0.27 + middleGrain) * 0.5 + 0.5);
+          float mineralLode = mineralSpeck * ${height >= 2 ? "0.46" : "0.16"};
+          diffuseColor.rgb *= 0.968 + broadMottle * 0.026 + middleGrain * 0.016 + fineGrain * 0.006;
+          diffuseColor.rgb *= mix(vec3(1.055, 1.015, 0.89), vec3(0.91, 1.075, 0.93),
+            richMoss * ${height >= 1 ? "0.34" : "0.12"});
+          diffuseColor.rgb *= mix(vec3(1.045, 1.025, 0.91), vec3(0.91, 1.015, 1.075),
+            windScour * ${height >= 2 ? "0.42" : "0.18"});
+          diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.12, 1.045, 0.88),
+            sunlitMeadow * ${height === 0 ? "0.08" : "0.2"});
+          diffuseColor.rgb += vec3(0.035, 0.042, 0.032) * mineralLode;
+          diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.88, 1.06, 1.12),
+            lichenField * ${height >= 1 ? "0.068" : "0.02"});`,
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <roughnessmap_fragment>",
@@ -1032,14 +1046,19 @@ uniform float uFoliageTime;`,
 #ifdef USE_INSTANCING
         float foliagePhase = dot(instanceMatrix[3].xz, vec2(0.17, 0.13));
         float foliageMask = smoothstep(-0.28, 0.52, position.y);
+        vec2 windDirection = normalize(vec2(0.86, 0.42));
+        float windTravel = dot(instanceMatrix[3].xz, windDirection);
         float broadGust = sin(uFoliageTime * 0.42 + dot(instanceMatrix[3].xz, vec2(0.031, 0.019)));
-        float gustStrength = 0.52 + 0.48 * smoothstep(-0.65, 0.88, broadGust);
+        float travelingGust = sin(windTravel * 0.115 - uFoliageTime * 1.08);
+        float gustStrength = 0.42 + 0.34 * smoothstep(-0.65, 0.88, broadGust)
+          + 0.24 * smoothstep(-0.56, 0.78, travelingGust);
         float foliageWave = sin(uFoliageTime * 1.35 + foliagePhase + position.y * 2.8);
         float foliageFlutter = sin(uFoliageTime * 2.4 + foliagePhase * 1.73 + position.y * 5.2) * 0.22;
         float foliageSway = (foliageWave + foliageFlutter) * gustStrength;
-        transformed.x += foliageSway * 0.092 * foliageMask;
+        float gustLean = smoothstep(-0.18, 0.78, travelingGust) * foliageMask;
+        transformed.x += (foliageSway * 0.092 + gustLean * 0.026) * foliageMask;
         transformed.z += (cos(uFoliageTime * 0.91 + foliagePhase * 1.27 + position.y * 1.8)
-          + foliageFlutter * 0.45) * 0.048 * foliageMask;
+          + foliageFlutter * 0.45 + gustLean * 0.34) * 0.048 * foliageMask;
 #endif`,
         );
       };
