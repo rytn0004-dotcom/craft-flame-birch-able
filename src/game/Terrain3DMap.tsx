@@ -6626,7 +6626,12 @@ vFoliageGust = 0.0;
           }
           // 岩沿的苔帶只在少數背陰面出現，打破石頭與草地硬切的接縫。
           const mossSeed = Math.abs(Math.sin(cell.x * 73.1 + cell.z * 29.7 + d.dc * 17.3 + d.dr * 31.9) * 29871.7) % 1;
-          if (cell.h >= 1 && mossSeed > 0.79 && cliffMosses.length < 480 && !nearRidgeBuilding) {
+          if (
+            cell.h >= 1 && mossSeed > 0.79 && cliffMosses.length < 480 &&
+            !protectedBuildings.some((building) =>
+              Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 1.05,
+            )
+          ) {
             const alongEdge = (mossSeed - 0.5) * 0.5;
             cliffMosses.push({
               x: cell.x + (d.dc === 0 ? alongEdge : d.dx * 0.43),
