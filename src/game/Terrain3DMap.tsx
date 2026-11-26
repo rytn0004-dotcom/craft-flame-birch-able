@@ -3278,6 +3278,8 @@ uniform float uFoliageTime;`,
         );
         const dummy = new THREE.Object3D();
         const tint = new THREE.Color();
+        const meadowBladePalette = ["#4f8359", "#78a45f", "#a6bb70", "#d1bd77"];
+        const mossBladePalette = ["#426f65", "#5d8b72", "#8ba36e", "#aebe83"];
         for (let i = 0; i < grassCells.length; i++) {
           const cell = grassCells[i];
           const seed = Math.abs(Math.sin(cell.x * 127.1 + cell.z * 311.7) * 43758.5453) % 1;
@@ -3304,9 +3306,9 @@ uniform float uFoliageTime;`,
             );
             dummy.updateMatrix();
             grass.setMatrixAt(index, dummy.matrix);
-            tint.set(mossPatch
-              ? (blade === 1 ? "#a0b879" : seed > 0.5 ? "#78966b" : "#527e68")
-              : (blade === 1 ? "#b0bd7a" : seed > 0.5 ? "#829c68" : "#658b69"));
+            const bladePalette = mossPatch ? mossBladePalette : meadowBladePalette;
+            const paletteIndex = Math.floor(seed * bladePalette.length + blade * 1.7) % bladePalette.length;
+            tint.set(bladePalette[paletteIndex]);
             grass.setColorAt(index, tint);
           }
         }
