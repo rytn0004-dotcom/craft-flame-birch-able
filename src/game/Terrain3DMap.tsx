@@ -7742,18 +7742,20 @@ vFoliageGust = 0.0;
           }
         }
         // 左右側邊、坡頂與坡腳收成封閉薄片，側緣不再露出單面薄片。
-        const addSideQuad = (topA: number, topB: number) => {
+        const addSideQuad = (topA: number, topB: number, reverse = false) => {
           const bottomA = topA + bottomOffset;
           const bottomB = topB + bottomOffset;
-          indices.push(topA, bottomA, topB, topB, bottomA, bottomB);
+          if (reverse) indices.push(topA, topB, bottomA, topB, bottomB, bottomA);
+          else indices.push(topA, bottomA, topB, topB, bottomA, bottomB);
         };
         for (let row = 0; row < rows - 1; row++) {
+          // 左右側壁朝外，讓封閉岩層厚度在正反面都能正確接光。
           addSideQuad(row * columns, (row + 1) * columns);
-          addSideQuad(row * columns + columns - 1, (row + 1) * columns + columns - 1);
+          addSideQuad(row * columns + columns - 1, (row + 1) * columns + columns - 1, true);
         }
         for (let rail = 0; rail < columns - 1; rail++) {
-          addSideQuad(rail, rail + 1);
-          addSideQuad((rows - 1) * columns + rail + 1, (rows - 1) * columns + rail);
+          addSideQuad(rail, rail + 1, true);
+          addSideQuad((rows - 1) * columns + rail, (rows - 1) * columns + rail + 1);
         }
         geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
         geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
