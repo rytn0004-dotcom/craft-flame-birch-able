@@ -1108,7 +1108,7 @@ vFoliageGust = 0.0;
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <common>",
-          "#include <common>\\nvarying float vFoliageGust;",
+          "#include <common>\nvarying float vFoliageGust;",
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <color_fragment>",
@@ -1132,7 +1132,7 @@ vFoliageGust = 0.0;
         shader.uniforms.uPollenTime = pollenUniforms.time;
         shader.vertexShader = shader.vertexShader.replace(
           "#include <common>",
-          "#include <common>\\nuniform float uPollenTime;\\nvarying float vPollenPhase;",
+          "#include <common>\nuniform float uPollenTime;\nvarying float vPollenPhase;",
         );
         shader.vertexShader = shader.vertexShader.replace(
           "#include <begin_vertex>",
@@ -1148,7 +1148,7 @@ vFoliageGust = 0.0;
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <common>",
-          "#include <common>\\nuniform float uPollenTime;\\nvarying float vPollenPhase;",
+          "#include <common>\nuniform float uPollenTime;\nvarying float vPollenPhase;",
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <color_fragment>",
