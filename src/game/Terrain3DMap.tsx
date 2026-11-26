@@ -1087,7 +1087,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           float abyssEyeRim = exp(-pow((abyssRadius - (0.19 + 0.018 * sin(abyssAngle * 5.0 - uMistTime * 0.18))) * 23.0, 2.0));
           float abyssIris = pow(max(0.0, 0.5 + 0.5 * sin(abyssAngle * 7.0 + uMistTime * 0.12
             + sin(abyssRadius * 28.0 - uMistTime * 0.2) * 1.2)), 5.0)
-            * smoothstep(0.34, 0.08, abyssRadius);
+            * (1.0 - smoothstep(0.08, 0.34, abyssRadius));
           float abyssDepth = 1.0 - smoothstep(0.02, 0.72, abyssRadius);
           float abyssVortex = sin(abyssAngle * 9.0 + abyssRadius * 31.0 - uMistTime * 0.24);
           diffuseColor.rgb = mix(diffuseColor.rgb,
