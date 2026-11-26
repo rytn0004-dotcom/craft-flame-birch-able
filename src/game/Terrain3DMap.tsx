@@ -1528,23 +1528,23 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           "#include <common>\nvarying vec3 vBarkCoord;",
         );
         shader.fragmentShader = shader.fragmentShader.replace(
-          "#include <color_fragment>",
+          "#include <roughnessmap_fragment>",
           [
-            "#include <color_fragment>",
+            "#include <roughnessmap_fragment>",
             "float barkWarp = sin(vBarkCoord.x * 7.3 + vBarkCoord.z * 9.1 + cos(vBarkCoord.y * 8.0) * 1.8);",
             "float barkFiberWave = sin(vBarkCoord.y * 92.0 + barkWarp * 2.2 + sin(vBarkCoord.x * 13.0) * 1.1);",
             "float barkFiber = pow(0.5 + 0.5 * barkFiberWave, 7.0);",
             "float barkCrease = pow(max(0.0, sin(vBarkCoord.y * 31.0 + vBarkCoord.x * 17.0 + vBarkCoord.z * 19.0)), 12.0);",
             "float barkKnot = pow(max(0.0, 1.0 - abs(sin(vBarkCoord.x * 8.0 + vBarkCoord.z * 6.0 + sin(vBarkCoord.y * 14.0)))), 9.0);",
-            "diffuseColor.rgb *= 0.88 + barkFiber * 0.11 + barkCrease * 0.035;",
-            "diffuseColor.rgb += vec3(0.075, 0.043, 0.018) * (barkKnot * 0.16 + (1.0 - barkFiber) * 0.035);",
+            "roughnessFactor = clamp(roughnessFactor + (1.0 - barkFiber) * 0.035 - barkCrease * 0.012, 0.0, 1.0);",
           ].join("\n"),
         );
         shader.fragmentShader = shader.fragmentShader.replace(
-          "#include <roughnessmap_fragment>",
+          "#include <color_fragment>",
           [
-            "#include <roughnessmap_fragment>",
-            "roughnessFactor = clamp(roughnessFactor + (1.0 - barkFiber) * 0.035 - barkCrease * 0.012, 0.0, 1.0);",
+            "#include <color_fragment>",
+            "diffuseColor.rgb *= 0.88 + barkFiber * 0.11 + barkCrease * 0.035;",
+            "diffuseColor.rgb += vec3(0.075, 0.043, 0.018) * (barkKnot * 0.16 + (1.0 - barkFiber) * 0.035);",
           ].join("\n"),
         );
       };
