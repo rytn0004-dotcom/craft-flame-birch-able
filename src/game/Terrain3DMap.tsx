@@ -1648,18 +1648,21 @@ vFoliageGust = 0.0;
           "#include <color_fragment>",
           `#include <color_fragment>
           float windLightCatch = smoothstep(0.12, 0.96, vFoliageGust);
-          diffuseColor.rgb *= 1.0 + vec3(0.068, 0.094, 0.038) * windLightCatch;`,
+          float windTipFlash = pow(windLightCatch, 2.4) * (0.78 + 0.22 * sin(uFoliageTime * 4.2 + vFoliageGust * 5.0));
+          diffuseColor.rgb *= 1.0 + vec3(0.054, 0.082, 0.034) * windLightCatch;
+          diffuseColor.rgb += vec3(0.024, 0.068, 0.056) * windLightCatch
+            + vec3(0.034, 0.025, 0.008) * windTipFlash;`,
         );
       };
       material.customProgramCacheKey = () => cacheKey;
     };
-    installFoliageWind(shared.foliageWind, "tide-foliage-wind-v6");
-    installFoliageWind(shared.treeCanopyWind, "tide-tree-canopy-gust-v2", 2.4);
-    installFoliageWind(shared.grass, "tide-grass-stem-wind-v5", 1.45, 0.34);
-    installFoliageWind(shared.grassBlade, "tide-grass-blade-wind-v8", 2.35, 0.88);
-    installFoliageWind(shared.meadowBloom, "tide-meadow-bloom-wind-v5", 1.5, 0.16);
-    installFoliageWind(shared.coastGrass, "tide-coast-reed-wind-v5", 1.75, 0.3);
-    installFoliageWind(shared.reefCoral, "tide-reef-coral-current-v5");
+    installFoliageWind(shared.foliageWind, "tide-foliage-wind-v7");
+    installFoliageWind(shared.treeCanopyWind, "tide-tree-canopy-gust-v3", 2.4);
+    installFoliageWind(shared.grass, "tide-grass-stem-wind-v6", 1.45, 0.34);
+    installFoliageWind(shared.grassBlade, "tide-grass-blade-wind-v9", 2.35, 0.88);
+    installFoliageWind(shared.meadowBloom, "tide-meadow-bloom-wind-v6", 1.5, 0.16);
+    installFoliageWind(shared.coastGrass, "tide-coast-reed-wind-v6", 1.75, 0.3);
+    installFoliageWind(shared.reefCoral, "tide-reef-coral-current-v6");
 
     // 花粉與草籽以少量實例漂浮；GPU 風場控制輕微三維漂移，不逐粒更新矩陣。
     const installPollenDrift = (material: THREE.MeshBasicMaterial) => {
