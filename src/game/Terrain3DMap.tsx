@@ -3916,6 +3916,85 @@ vFoliageGust = 0.0;
           groveTint.set(seed > 0.62 ? "#9eb879" : "#7ea873");
           upperCanopies.setColorAt(i, groveTint);
         }
+
+        // Fine leaf sprays sit on the canopy silhouette, giving each tree readable foliage
+        // instead of three bare polygon blobs. One shared sprig geometry + one InstancedMesh.
+        const sprigPositions: number[] = [];
+        const sprigIndices: number[] = [];
+        const addLeaflet = (startX: number, startY: number, startZ: number, side: number, length: number, width: number) => {
+          const dx = side * 0.78;
+          const dy = 0.58;
+          const dz = side * 0.16;
+          const invLength = 1 / Math.hypot(dx, dy, dz);
+          const dirX = dx * invLength;
+          const dirY = dy * invLength;
+          const dirZ = dz * invLength;
+          const perpX = -dirY;
+          const perpY = dirX;
+          const base = sprigPositions.length / 3;
+          for (let row = 0; row < 5; row++) {
+            const t = row / 4;
+            const taper = Math.pow(Math.sin(Math.PI * t), 0.82);
+            const centerX = startX + dirX * length * t;
+            const centerY = startY + dirY * length * t + Math.sin(Math.PI * t) * 0.009;
+            const centerZ = startZ + dirZ * length * t + Math.sin(Math.PI * t) * 0.008;
+            for (let rail = 0; rail < 3; rail++) {
+              const lateral = (rail - 1) * width * taper;
+              const raisedVein = rail === 1 ? 0.006 * Math.sin(Math.PI * t) : 0;
+              sprigPositions.push(
+                centerX + perpX * lateral,
+                centerY + perpY * lateral + raisedVein,
+                centerZ + lateral * 0.12,
+              );
+            }
+          }
+          for (let row = 0; row < 4; row++) {
+            const a = base + row * 3;
+            const b = a + 3;
+            sprigIndices.push(a, b, a + 1, a + 1, b, b + 1, a + 1, b + 1, a + 2, a + 2, b + 1, b + 2);
+          }
+        };
+        // Alternating left/right leaflets and a pointed terminal leaf create a natural fern-like sprig.
+        for (let leaflet = 0; leaflet < 6; leaflet++) {
+          const side = leaflet % 2 === 0 ? -1 : 1;
+          const row = Math.floor(leaflet / 2);
+          addLeaflet(0, 0.035 + row * 0.045, 0, side, 0.13 - row * 0.008, 0.026 - row * 0.002);
+        }
+        addLeaflet(0, 0.105, 0, 0.16, 0.18, 0.029);
+        const sprigGeometry = new THREE.BufferGeometry();
+        sprigGeometry.setAttribute("position", new THREE.Float32BufferAttribute(sprigPositions, 3));
+        sprigGeometry.setIndex(sprigIndices);
+        sprigGeometry.computeVertexNormals();
+        sprigGeometry.computeBoundingSphere();
+        const leafSprigCount = groveCells.length * 3;
+        const leafSprigs = new THREE.InstancedMesh(sprigGeometry, shared.treeCanopyWind, leafSprigCount);
+        const leafSprigDummy = new THREE.Object3D();
+        const leafSprigTint = new THREE.Color();
+        const leafSprigPalette = ["#3d7654", "#568b5d", "#75a66a", "#9bb979", "#54877a", "#b0bd7d"];
+        for (let i = 0; i < leafSprigCount; i++) {
+          const cell = groveCells[Math.floor(i / 3)];
+          const seed = Math.abs(Math.sin(cell.x * 91.7 + cell.z * 37.3 + i * 13.1) * 31871.9) % 1;
+          const angle = seed * Math.PI * 2 + (i % 3) * Math.PI * 2 / 3;
+          const scale = 0.72 + seed * 0.42;
+          const radius = 0.32 + seed * 0.16;
+          leafSprigDummy.position.set(
+            cell.x + Math.cos(angle) * radius,
+            groundTop(cell.h) + (0.82 + seed * 0.26) * (0.82 + seed * 0.34),
+            cell.z + Math.sin(angle) * radius,
+          );
+          leafSprigDummy.rotation.set((seed - 0.5) * 0.42, angle, (seed - 0.5) * 0.6);
+          leafSprigDummy.scale.setScalar(scale);
+          leafSprigDummy.updateMatrix();
+          leafSprigs.setMatrixAt(i, leafSprigDummy.matrix);
+          leafSprigTint.set(leafSprigPalette[Math.floor(seed * leafSprigPalette.length)]);
+          leafSprigs.setColorAt(i, leafSprigTint);
+        }
+        leafSprigs.instanceMatrix.needsUpdate = true;
+        if (leafSprigs.instanceColor) leafSprigs.instanceColor.needsUpdate = true;
+        leafSprigs.castShadow = false;
+        leafSprigs.receiveShadow = false;
+        terrainRoot.add(leafSprigs);
+
         for (const mesh of [trunks, rootFlare, lowerCanopies, sideCanopies, upperCanopies]) {
           mesh.instanceMatrix.needsUpdate = true;
           if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
