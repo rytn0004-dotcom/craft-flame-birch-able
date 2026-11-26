@@ -917,7 +917,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       cliffBand: new THREE.MeshStandardMaterial({ color: "#637c6b", roughness: 0.94, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.022 }),
       cliffBandLight: new THREE.MeshStandardMaterial({ color: "#9a9f7d", roughness: 0.91, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.019 }),
       cliffCap: new THREE.MeshStandardMaterial({ color: "#d0c49b", roughness: 0.84, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.022 }),
-      rockDetail: new THREE.MeshStandardMaterial({ color: "#8b927d", roughness: 0.98, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.03 }),
+      rockDetail: new THREE.MeshStandardMaterial({ color: "#ffffff", vertexColors: true, roughness: 0.98, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.03 }),
       terrainMoss: new THREE.MeshStandardMaterial({ color: "#66856a", roughness: 0.99, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.01 }),
       terrainStrata: new THREE.MeshStandardMaterial({ color: "#c0b99d", roughness: 0.96, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.018 }),
       terrainInlay: new THREE.MeshStandardMaterial({ color: "#e1d0a6", roughness: 0.82, metalness: 0.08 }),
@@ -3837,37 +3837,96 @@ vFoliageGust = 0.0;
           terrainRoot.add(seaStacks);
         }
 
-      // 高地表面散布少量低矮岩屑，破除棋盤格般的單調感，不遮擋道路或建築。
+      // 高地風化石群：以不規則細分岩體取代單一低面數圓石，每簇兩枚大小不同的岩礫。
+      // 頂點色由陰濕底色漸層至日照礦面，岩體底部壓平並保留自然破碎輪廓；全場仍只用一個 InstancedMesh。
       const rockCells = Array.from(tileCells.values()).filter((cell) => {
         if (cell.h <= 0) return false;
+        const region = terrainRegion(cell);
+        if (region === "road" || region === "coast") return false;
         const seed = Math.abs(Math.sin(cell.x * 91.7 + cell.z * 43.3) * 24634.6345) % 1;
-        if (seed <= 0.86) return false;
-        // 建築與塔座周圍保留空地，岩屑也設上限避免大地圖增加過多 draw workload。
+        if (seed <= 0.78) return false;
         return !protectedBuildings.some((building) =>
-          Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 0.7,
+          Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 0.72,
         );
-      }).slice(0, 1500);
+      }).slice(0, 620);
       if (rockCells.length) {
-        const rocks = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(0.075, 1), shared.rockDetail, rockCells.length);
+        const weatheredRockGeometry = new THREE.IcosahedronGeometry(1, 2);
+        const rockPosition = weatheredRockGeometry.getAttribute("position");
+        const rockVertexColors = new Float32Array(rockPosition.count * 3);
+        const dampStone = new THREE.Color("#637c76");
+        const sunStone = new THREE.Color("#c8bea3");
+        const mineralStone = new THREE.Color("#a9a88f");
+        const rockTint = new THREE.Color();
+        for (let vertex = 0; vertex < rockPosition.count; vertex++) {
+          const x = rockPosition.getX(vertex);
+          const y = rockPosition.getY(vertex);
+          const z = rockPosition.getZ(vertex);
+          const grain = Math.sin(x * 17.3 + z * 11.7 + y * 7.1)
+            * Math.cos(z * 13.1 - x * 8.7) * 0.5;
+          const radial = 0.94 + grain * 0.055 + Math.sin(vertex * 2.17) * 0.018;
+          const shapedY = y < -0.38 ? -0.38 + (y + 0.38) * 0.28 : y * (0.92 + grain * 0.035);
+          rockPosition.setXYZ(
+            vertex,
+            x * radial * (1.0 + grain * 0.045),
+            shapedY,
+            z * radial * (0.94 + Math.sin(vertex * 1.31) * 0.035),
+          );
+          const sunAmount = THREE.MathUtils.clamp(THREE.MathUtils.smoothstep(y, -0.34, 0.72) * 0.72 + grain * 0.12 + 0.12, 0, 1);
+          rockTint.copy(dampStone).lerp(sunStone, sunAmount);
+          const fleck = Math.pow(Math.max(0, Math.sin(x * 31 + z * 27 + vertex * 0.7)), 12) * 0.24;
+          rockTint.lerp(mineralStone, fleck);
+          rockVertexColors[vertex * 3] = rockTint.r;
+          rockVertexColors[vertex * 3 + 1] = rockTint.g;
+          rockVertexColors[vertex * 3 + 2] = rockTint.b;
+        }
+        rockPosition.needsUpdate = true;
+        weatheredRockGeometry.setAttribute("color", new THREE.BufferAttribute(rockVertexColors, 3));
+        weatheredRockGeometry.computeVertexNormals();
+        weatheredRockGeometry.computeBoundingSphere();
+
+        const rocksPerCell = 2;
+        const rocks = new THREE.InstancedMesh(
+          weatheredRockGeometry,
+          shared.rockDetail,
+          rockCells.length * rocksPerCell,
+        );
         const dummy = new THREE.Object3D();
         const tint = new THREE.Color();
+        const rockPalette = ["#b9b7a2", "#a1b0a6", "#8a9c91", "#cfbd9b", "#738b83"];
         for (let i = 0; i < rockCells.length; i++) {
           const cell = rockCells[i];
           const seed = Math.abs(Math.sin(cell.x * 127.1 + cell.z * 311.7) * 43758.5453) % 1;
-          dummy.position.set(
-            cell.x + (seed - 0.5) * 0.62,
-            groundTop(cell.h) + 0.025,
-            cell.z + (Math.abs(Math.sin(seed * 83.1)) - 0.5) * 0.62,
-          );
-          dummy.rotation.set(seed * 0.7, seed * Math.PI * 2, seed * 0.45);
-          dummy.scale.setScalar(0.55 + seed * 0.55);
-          dummy.updateMatrix();
-          rocks.setMatrixAt(i, dummy.matrix);
-          tint.set(seed > 0.55 ? "#aab6ae" : "#687d83");
-          rocks.setColorAt(i, tint);
+          const angle = seed * Math.PI * 2;
+          const clusterRadius = 0.08 + seed * 0.09;
+          for (let pebble = 0; pebble < rocksPerCell; pebble++) {
+            const index = i * rocksPerCell + pebble;
+            const side = pebble === 0 ? -0.42 : 0.58;
+            const size = pebble === 0 ? 0.062 + seed * 0.035 : 0.034 + seed * 0.025;
+            const offset = clusterRadius * side;
+            dummy.position.set(
+              cell.x + Math.cos(angle + pebble * 1.7) * offset + (seed - 0.5) * 0.12,
+              groundTop(cell.h) + size * 0.36,
+              cell.z + Math.sin(angle + pebble * 1.7) * offset + (0.5 - seed) * 0.1,
+            );
+            dummy.rotation.set(
+              (seed - 0.5) * 0.72 + pebble * 0.18,
+              angle + pebble * 1.7,
+              (0.5 - seed) * 0.58,
+            );
+            dummy.scale.set(
+              size * (1.08 + seed * 0.22),
+              size * (0.56 + seed * 0.12),
+              size * (0.82 + ((seed * 3.71) % 1) * 0.32),
+            );
+            dummy.updateMatrix();
+            rocks.setMatrixAt(index, dummy.matrix);
+            tint.set(rockPalette[(Math.floor(seed * 17) + pebble * 2) % rockPalette.length]);
+            rocks.setColorAt(index, tint);
+          }
         }
         rocks.instanceMatrix.needsUpdate = true;
         if (rocks.instanceColor) rocks.instanceColor.needsUpdate = true;
+        rocks.computeBoundingSphere();
         rocks.castShadow = true;
         rocks.receiveShadow = true;
         terrainRoot.add(rocks);
