@@ -3948,7 +3948,7 @@ vFoliageGust = 0.0;
           const cell = grassCells[i];
           const seed = Math.abs(Math.sin(cell.x * 127.1 + cell.z * 311.7) * 43758.5453) % 1;
           for (let blade = 0; blade < 4; blade++) {
-            const index = i * 3 + blade;
+            const index = i * 4 + blade;
             const angle = seed * Math.PI * 2 + blade * (Math.PI * 2 / 4);
             const radius = 0.08 + seed * 0.08;
             dummy.position.set(
@@ -4320,36 +4320,58 @@ vFoliageGust = 0.0;
       if (fernCells.length) {
         const fernPositions: number[] = [];
         const fernIndices: number[] = [];
-        const addFernTriangle = (a: number[], b: number[], c: number[]) => {
-          const start = fernPositions.length / 3;
-          fernPositions.push(...a, ...b, ...c);
-          fernIndices.push(start, start + 1, start + 2);
+        // Curved three-rail ribbons give each fern leaflet a rounded midrib and tapered edge,
+        // replacing the old flat triangles while keeping the whole frond in one geometry.
+        const addFernRibbon = (
+          startX: number, startY: number, startZ: number,
+          endX: number, endY: number, endZ: number,
+          width: number,
+        ) => {
+          const dx = endX - startX;
+          const dy = endY - startY;
+          const invLength = 1 / (Math.hypot(dx, dy) || 1);
+          const perpX = -dy * invLength;
+          const perpY = dx * invLength;
+          const base = fernPositions.length / 3;
+          const rows = 6;
+          for (let row = 0; row < rows; row++) {
+            const t = row / (rows - 1);
+            const taper = Math.pow(Math.sin(Math.PI * t), 0.72);
+            const centerX = THREE.MathUtils.lerp(startX, endX, t)
+              + Math.sin(Math.PI * t) * 0.012 * Math.sign(dx || 1);
+            const centerY = THREE.MathUtils.lerp(startY, endY, t)
+              + Math.sin(Math.PI * t) * 0.01;
+            const centerZ = THREE.MathUtils.lerp(startZ, endZ, t)
+              + Math.sin(Math.PI * t) * 0.014;
+            for (let rail = 0; rail < 3; rail++) {
+              const lateral = (rail - 1) * width * taper;
+              const vein = rail === 1 ? 0.006 * Math.sin(Math.PI * t) : 0;
+              fernPositions.push(
+                centerX + perpX * lateral,
+                centerY + perpY * lateral + vein,
+                centerZ + lateral * 0.1,
+              );
+            }
+          }
+          for (let row = 0; row < rows - 1; row++) {
+            const a = base + row * 3;
+            const b = a + 3;
+            fernIndices.push(
+              a, b, a + 1, a + 1, b, b + 1,
+              a + 1, b + 1, a + 2, a + 2, b + 1, b + 2,
+            );
+          }
         };
-        // 中央葉脈與六對漸小羽片組成一片弧形蕨葉；雙面材質使其在斜視角仍可讀。
-        const stemRows: { y: number; z: number }[] = [];
-        for (let pair = 0; pair <= 6; pair++) {
-          const t = pair / 6;
-          stemRows.push({ y: 0.025 + t * 0.39, z: t * t * 0.13 });
-        }
-        for (let pair = 0; pair < 6; pair++) {
-          const a = stemRows[pair];
-          const b = stemRows[pair + 1];
-          const halfWidth = 0.006;
-          addFernTriangle([-halfWidth, a.y, a.z], [halfWidth, a.y, a.z], [-halfWidth, b.y, b.z]);
-          addFernTriangle([halfWidth, a.y, a.z], [halfWidth, b.y, b.z], [-halfWidth, b.y, b.z]);
-        }
+        // Central rachis, then six paired leaflets that shorten toward the tip.
+        addFernRibbon(0, 0.02, 0, 0, 0.46, 0.145, 0.007);
         for (let pair = 0; pair < 6; pair++) {
           const t = (pair + 1) / 7;
           const y = 0.045 + t * 0.34;
           const z = t * t * 0.12;
           const spread = 0.15 * (1.0 - t * 0.42);
+          const leafletWidth = 0.025 * (1.0 - t * 0.24);
           for (const side of [-1, 1]) {
-            const base = [0, y, z];
-            const shoulder = [side * spread * 0.72, y + 0.032, z + 0.035];
-            const tip = [side * spread, y + 0.066, z + 0.092];
-            const inner = [side * spread * 0.34, y + 0.045, z + 0.074];
-            addFernTriangle(base, shoulder, inner);
-            addFernTriangle(shoulder, tip, inner);
+            addFernRibbon(0, y, z, side * spread, y + 0.082, z + 0.095, leafletWidth);
           }
         }
         const fernGeometry = new THREE.BufferGeometry();
