@@ -1557,6 +1557,30 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       return geometry;
     })();
 
+    // 崩落岩片與坡腳碎石使用一次生成的風化多面體，不再以規則球形碎片重複堆放。
+    // 幾何共用於所有 InstancedMesh；頂點擾動只在建立時執行，不進入每幀更新。
+    const makeWeatheredRockGeometry = (geometry: THREE.BufferGeometry, strength: number) => {
+      const position = geometry.getAttribute("position");
+      const vertex = new THREE.Vector3();
+      for (let i = 0; i < position.count; i++) {
+        vertex.fromBufferAttribute(position, i);
+        const radius = vertex.length() || 1;
+        const direction = vertex.clone().normalize();
+        const broadChip = Math.sin(direction.x * 11.7 + direction.y * 7.9 + direction.z * 13.1);
+        const fineChip = Math.cos(direction.x * 23.1 - direction.y * 17.3 + direction.z * 19.7);
+        const radial = 1 + broadChip * strength + fineChip * strength * 0.38;
+        vertex.multiplyScalar(radial);
+        position.setXYZ(i, vertex.x, vertex.y, vertex.z);
+      }
+      position.needsUpdate = true;
+      geometry.computeVertexNormals();
+      geometry.computeBoundingSphere();
+      geometry.userData.sharedGeometry = true;
+      return geometry;
+    };
+    const cliffShardGeometry = makeWeatheredRockGeometry(new THREE.IcosahedronGeometry(0.22, 1), 0.095);
+    const talusStoneGeometry = makeWeatheredRockGeometry(new THREE.DodecahedronGeometry(0.075, 1), 0.13);
+
     const installCliffStrata = (material: THREE.MeshStandardMaterial) => {
       material.onBeforeCompile = (shader) => {
         shader.uniforms.uCliffStrataTime = cliffStrataUniforms.time;
@@ -6929,7 +6953,7 @@ vFoliageGust = 0.0;
 
       if (cliffFragments.length) {
         const fragments = new THREE.InstancedMesh(
-          new THREE.IcosahedronGeometry(0.22, 1),
+          cliffShardGeometry,
           shared.cliffFacet,
           cliffFragments.length,
         );
@@ -6957,7 +6981,7 @@ vFoliageGust = 0.0;
         // natural scree pile rather than a single repeated pebble on every cliff foot.
         const rubbleEntries = talusDebris.slice(0, 1500);
         const rubble = new THREE.InstancedMesh(
-          new THREE.IcosahedronGeometry(0.075, 1),
+          talusStoneGeometry,
           shared.rockDetail,
           rubbleEntries.length * 3,
         );
