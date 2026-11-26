@@ -1764,18 +1764,27 @@ vFoliageGust = 0.0;
           + 0.13 * crossFront + 0.18 * shearFront);
         vFoliageGust = max(gustStrength * smoothstep(-0.5, 0.72, travelingGust),
           max(crossFront * 0.2, shearFront * 0.28));
+        float bladeGrainPhase = sin(position.x * 18.0 + position.z * 23.0 + foliagePhase * 2.1);
+        float bladeTipFlicker = sin(uFoliageTime * 4.1 + foliagePhase * 2.6
+          + bladeGrainPhase * 1.7 + position.y * 9.0);
+        float bladeEdgeFlutter = sin(uFoliageTime * 6.4 + foliagePhase * 3.7
+          + position.x * 29.0 - position.z * 17.0) * 0.12;
         float foliageWave = sin(uFoliageTime * 1.35 + foliagePhase + position.y * 2.8);
-        float foliageFlutter = sin(uFoliageTime * 2.4 + foliagePhase * 1.73 + position.y * 5.2) * 0.22;
-        float leafRipple = sin(uFoliageTime * 3.1 + foliagePhase * 2.3 + position.y * 6.2) * 0.16;
-        float shearFlutter = sin(shearBand * 3.2 + foliagePhase * 1.6 + position.y * 7.4) * 0.2;
+        float foliageFlutter = sin(uFoliageTime * 2.4 + foliagePhase * 1.73 + position.y * 5.2
+          + bladeGrainPhase * 0.55) * 0.22;
+        float leafRipple = sin(uFoliageTime * 3.1 + foliagePhase * 2.3 + position.y * 6.2
+          + bladeGrainPhase) * 0.16;
+        float shearFlutter = sin(shearBand * 3.2 + foliagePhase * 1.6 + position.y * 7.4
+          + bladeEdgeFlutter * 2.0) * 0.2;
         float foliageSway = (foliageWave + foliageFlutter + leafRipple + shearFlutter) * gustStrength;
         float gustLean = smoothstep(-0.18, 0.78, travelingGust) * foliageMask;
         float shearLean = (shearFront - 0.32) * foliageMask;
         transformed.x += (foliageSway * 0.098 + gustLean * 0.032
-          + crossFront * 0.014 + shearLean * 0.012) * foliageMask;
+          + crossFront * 0.014 + shearLean * 0.012
+          + bladeTipFlicker * 0.009 * smoothstep(0.12, 0.9, position.y)) * foliageMask;
         transformed.z += (cos(uFoliageTime * 0.91 + foliagePhase * 1.27 + position.y * 1.8)
           + foliageFlutter * 0.45 + gustLean * 0.34 + crossFront * 0.1
-          + shearFlutter * 0.18) * 0.054 * foliageMask;
+          + shearFlutter * 0.18 + bladeEdgeFlutter) * 0.054 * foliageMask;
         vec2 slipRelative = instanceMatrix[3].xz - uSlipPosition;
         float slipAlong = dot(slipRelative, uSlipDirection);
         vec2 slipPerpendicular = vec2(-uSlipDirection.y, uSlipDirection.x);
