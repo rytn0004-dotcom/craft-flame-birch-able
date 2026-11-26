@@ -1977,14 +1977,19 @@ uniform float uFoliageTime;
 uniform vec2 uSlipPosition;
 uniform vec2 uSlipDirection;
 uniform float uSlipStrength;
-varying float vFoliageGust;`,
+varying float vFoliageGust;
+varying float vFoliageAltitude;`,
         );
         shader.vertexShader = shader.vertexShader.replace(
           "#include <begin_vertex>",
           `#include <begin_vertex>
 vFoliageGust = 0.0;
+vFoliageAltitude = 0.0;
 #ifdef USE_INSTANCING
         float foliagePhase = dot(instanceMatrix[3].xz, vec2(0.17, 0.13));
+        // Higher terraces receive cleaner, stronger ridge gusts while low meadow plants stay sheltered.
+        vFoliageAltitude = smoothstep(0.42, 1.52, instanceMatrix[3].y);
+        float ridgeExposure = mix(1.0, 1.22, vFoliageAltitude);
         float foliageMask = smoothstep(-0.28, 0.52, position.y);
         vec2 windDirection = normalize(vec2(0.86, 0.42));
         float windTravel = dot(instanceMatrix[3].xz, windDirection);
@@ -1998,9 +2003,9 @@ vFoliageGust = 0.0;
         float shearBand = sin(windTravel * 0.168 - uFoliageTime * 1.34
           + sin(crossCoordinate * 0.12 - uFoliageTime * 0.46) * 0.72);
         float shearFront = smoothstep(-0.58, 0.88, shearBand);
-        float gustStrength = min(1.22, 0.34 + 0.27 * smoothstep(-0.65, 0.88, broadGust)
+        float gustStrength = min(1.28, (0.34 + 0.27 * smoothstep(-0.65, 0.88, broadGust)
           + 0.2 * smoothstep(-0.56, 0.78, travelingGust)
-          + 0.13 * crossFront + 0.18 * shearFront);
+          + 0.13 * crossFront + 0.18 * shearFront) * ridgeExposure);
         vFoliageGust = max(gustStrength * smoothstep(-0.5, 0.72, travelingGust),
           max(crossFront * 0.2, shearFront * 0.28));
         float bladeGrainPhase = sin(position.x * 18.0 + position.z * 23.0 + foliagePhase * 2.1);
@@ -2058,7 +2063,7 @@ vFoliageGust = 0.0;
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <common>",
-          "#include <common>\nvarying float vFoliageGust;",
+          "#include <common>\nvarying float vFoliageGust;\nvarying float vFoliageAltitude;",
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <color_fragment>",
@@ -2067,7 +2072,9 @@ vFoliageGust = 0.0;
           float windTipFlash = pow(windLightCatch, 2.4) * (0.78 + 0.22 * sin(uFoliageTime * 4.2 + vFoliageGust * 5.0));
           diffuseColor.rgb *= 1.0 + vec3(0.054, 0.082, 0.034) * windLightCatch;
           diffuseColor.rgb += vec3(0.024, 0.068, 0.056) * windLightCatch
-            + vec3(0.034, 0.025, 0.008) * windTipFlash;`,
+            + vec3(0.034, 0.025, 0.008) * windTipFlash;
+          diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.88, 0.98, 1.08)
+            + vec3(0.018, 0.038, 0.052), vFoliageAltitude * 0.34);`,
         );
       };
       material.customProgramCacheKey = () => cacheKey;
