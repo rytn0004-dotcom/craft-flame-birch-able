@@ -4632,20 +4632,21 @@ vFoliageGust = 0.0;
         sprigGeometry.setIndex(sprigIndices);
         sprigGeometry.computeVertexNormals();
         sprigGeometry.computeBoundingSphere();
-        const leafSprigCount = groveCells.length * 3;
+        const leafSprigsPerTree = 5;
+        const leafSprigCount = groveCells.length * leafSprigsPerTree;
         const leafSprigs = new THREE.InstancedMesh(sprigGeometry, shared.treeCanopyWind, leafSprigCount);
         const leafSprigDummy = new THREE.Object3D();
         const leafSprigTint = new THREE.Color();
         const leafSprigPalette = ["#3d7654", "#568b5d", "#75a66a", "#9bb979", "#54877a", "#b0bd7d"];
         for (let i = 0; i < leafSprigCount; i++) {
-          const cell = groveCells[Math.floor(i / 3)];
+          const cell = groveCells[Math.floor(i / leafSprigsPerTree)];
           const seed = Math.abs(Math.sin(cell.x * 91.7 + cell.z * 37.3 + i * 13.1) * 31871.9) % 1;
-          const angle = seed * Math.PI * 2 + (i % 3) * Math.PI * 2 / 3;
-          const scale = 0.72 + seed * 0.42;
-          const radius = 0.32 + seed * 0.16;
+          const angle = seed * Math.PI * 2 + (i % leafSprigsPerTree) * Math.PI * 2 / leafSprigsPerTree;
+          const scale = 0.64 + seed * 0.52 + (i % leafSprigsPerTree) * 0.035;
+          const radius = 0.27 + seed * 0.29 + (i % leafSprigsPerTree) * 0.018;
           leafSprigDummy.position.set(
             cell.x + Math.cos(angle) * radius,
-            groundTop(cell.h) + (0.82 + seed * 0.26) * (0.82 + seed * 0.34),
+            groundTop(cell.h) + (0.72 + seed * 0.52 + (i % leafSprigsPerTree) * 0.035) * (0.82 + seed * 0.34),
             cell.z + Math.sin(angle) * radius,
           );
           leafSprigDummy.rotation.set((seed - 0.5) * 0.42, angle, (seed - 0.5) * 0.6);
