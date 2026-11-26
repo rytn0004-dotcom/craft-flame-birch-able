@@ -928,7 +928,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           roughnessFactor = clamp(roughnessFactor + terrainRoughnessGrain * 0.018, 0.0, 1.0);`,
         );
       };
-      material.customProgramCacheKey = () => "tide-terrain-world-mottle-v1-" + height;
+      material.customProgramCacheKey = () => "tide-terrain-world-mottle-v2-" + height;
     };
     const installBlackMistVeil = (material: THREE.MeshBasicMaterial) => {
       material.onBeforeCompile = (shader) => {
@@ -1163,12 +1163,12 @@ vFoliageGust = 0.0;
       };
       material.customProgramCacheKey = () => cacheKey;
     };
-    installFoliageWind(shared.foliageWind, "tide-foliage-wind-v1");
-    installFoliageWind(shared.grass, "tide-grass-stem-wind-v1");
-    installFoliageWind(shared.grassBlade, "tide-grass-blade-wind-v2");
-    installFoliageWind(shared.meadowBloom, "tide-meadow-bloom-wind-v1");
-    installFoliageWind(shared.coastGrass, "tide-coast-reed-wind-v1");
-    installFoliageWind(shared.reefCoral, "tide-reef-coral-current-v1");
+    installFoliageWind(shared.foliageWind, "tide-foliage-wind-v2");
+    installFoliageWind(shared.grass, "tide-grass-stem-wind-v2");
+    installFoliageWind(shared.grassBlade, "tide-grass-blade-wind-v3");
+    installFoliageWind(shared.meadowBloom, "tide-meadow-bloom-wind-v2");
+    installFoliageWind(shared.coastGrass, "tide-coast-reed-wind-v2");
+    installFoliageWind(shared.reefCoral, "tide-reef-coral-current-v2");
 
     // 花粉與草籽以少量實例漂浮；GPU 風場控制輕微三維漂移，不逐粒更新矩陣。
     const installPollenDrift = (material: THREE.MeshBasicMaterial) => {
@@ -1217,7 +1217,7 @@ vFoliageGust = 0.0;
           diffuseColor.a *= pollenTwinkle;`,
         );
       };
-      material.customProgramCacheKey = () => "tide-pollen-drift-twinkle-v1";
+      material.customProgramCacheKey = () => "tide-pollen-drift-twinkle-v2";
     };
     installPollenDrift(shared.pollen);
 
