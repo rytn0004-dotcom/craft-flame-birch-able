@@ -6574,6 +6574,7 @@ vFoliageGust = 0.0;
       const caveEntrances: { x: number; y: number; z: number; rot: number; scale: number }[] = [];
       const cliffRibs: { x: number; y: number; z: number; rot: number; height: number; tint: string }[] = [];
       const cliffLedges: { x: number; y: number; z: number; rot: number }[] = [];
+      const cliffMosses: { x: number; y: number; z: number; rot: number; width: number; depth: number; tint: string }[] = [];
       const heightRims: { x: number; y: number; z: number; rot: number; width: number; depth: number; tint: string }[] = [];
       const cliffFragments: {
         x: number; y: number; z: number;
@@ -6621,6 +6622,20 @@ vFoliageGust = 0.0;
               width: 0.94 - layer * 0.035,
               depth: 0.13 + layer * 0.018,
               tint: levelTint,
+            });
+          }
+          // 岩沿的苔帶只在少數背陰面出現，打破石頭與草地硬切的接縫。
+          const mossSeed = Math.abs(Math.sin(cell.x * 73.1 + cell.z * 29.7 + d.dc * 17.3 + d.dr * 31.9) * 29871.7) % 1;
+          if (cell.h >= 1 && mossSeed > 0.79 && cliffMosses.length < 480 && !nearRidgeBuilding) {
+            const alongEdge = (mossSeed - 0.5) * 0.5;
+            cliffMosses.push({
+              x: cell.x + (d.dc === 0 ? alongEdge : d.dx * 0.43),
+              y: high + 0.012,
+              z: cell.z + (d.dr === 0 ? alongEdge : d.dz * 0.43),
+              rot: rimRot,
+              width: 0.13 + mossSeed * 0.2,
+              depth: 0.075 + mossSeed * 0.045,
+              tint: mossSeed > 0.93 ? "#a4b66f" : "#637f5b",
             });
           }
 
@@ -6957,6 +6972,7 @@ vFoliageGust = 0.0;
           shared.cliffFacet,
           cliffFragments.length,
         );
+        fragments.userData.sharedGeometry = true;
         const dummy = new THREE.Object3D();
         const tint = new THREE.Color();
         for (let i = 0; i < cliffFragments.length; i++) {
@@ -6985,6 +7001,7 @@ vFoliageGust = 0.0;
           shared.rockDetail,
           rubbleEntries.length * 3,
         );
+        rubble.userData.sharedGeometry = true;
         const dummy = new THREE.Object3D();
         const tint = new THREE.Color();
         for (let i = 0; i < rubbleEntries.length; i++) {
@@ -7020,10 +7037,11 @@ vFoliageGust = 0.0;
 
       if (heightRims.length) {
         const rims = new THREE.InstancedMesh(
-          new THREE.BoxGeometry(1, 1, 1),
+          cliffBlockGeometry,
           shared.heightRim,
           heightRims.length,
         );
+        rims.userData.sharedGeometry = true;
         const dummy = new THREE.Object3D();
         const tint = new THREE.Color();
         for (let i = 0; i < heightRims.length; i++) {
@@ -7045,20 +7063,49 @@ vFoliageGust = 0.0;
 
       if (cliffLedges.length) {
         const ledges = new THREE.InstancedMesh(
-          new THREE.BoxGeometry(0.92, 0.026, 0.13),
+          cliffBlockGeometry,
           shared.cliffLip,
           cliffLedges.length,
         );
-        const matrix = new THREE.Matrix4();
+        ledges.userData.sharedGeometry = true;
+        const ledgeDummy = new THREE.Object3D();
         for (let i = 0; i < cliffLedges.length; i++) {
           const ledge = cliffLedges[i];
-          matrix.makeRotationY(ledge.rot);
-          matrix.setPosition(ledge.x, ledge.y, ledge.z);
-          ledges.setMatrixAt(i, matrix);
+          ledgeDummy.position.set(ledge.x, ledge.y, ledge.z);
+          ledgeDummy.rotation.set(0, ledge.rot, 0);
+          ledgeDummy.scale.set(0.92, 0.026, 0.13);
+          ledgeDummy.updateMatrix();
+          ledges.setMatrixAt(i, ledgeDummy.matrix);
         }
         ledges.instanceMatrix.needsUpdate = true;
         ledges.receiveShadow = true;
         terrainRoot.add(ledges);
+      }
+
+      if (cliffMosses.length) {
+        const moss = new THREE.InstancedMesh(
+          cliffBlockGeometry,
+          shared.terrainMoss,
+          cliffMosses.length,
+        );
+        moss.userData.sharedGeometry = true;
+        const mossDummy = new THREE.Object3D();
+        const mossTint = new THREE.Color();
+        for (let i = 0; i < cliffMosses.length; i++) {
+          const patch = cliffMosses[i];
+          mossDummy.position.set(patch.x, patch.y, patch.z);
+          mossDummy.rotation.set(0, patch.rot, 0);
+          mossDummy.scale.set(patch.width, 0.012, patch.depth);
+          mossDummy.updateMatrix();
+          moss.setMatrixAt(i, mossDummy.matrix);
+          mossTint.set(patch.tint);
+          moss.setColorAt(i, mossTint);
+        }
+        moss.instanceMatrix.needsUpdate = true;
+        if (moss.instanceColor) moss.instanceColor.needsUpdate = true;
+        moss.castShadow = false;
+        moss.receiveShadow = true;
+        terrainRoot.add(moss);
       }
 
       // 多級坡面連接相鄰平台；跨越 2～3 級高差時也會生成連續斜坡，
