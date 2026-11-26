@@ -1125,7 +1125,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       );
       shader.fragmentShader = shader.fragmentShader.replace(
         "#include <common>",
-        "#include <common>\\nvarying vec2 vAbyssCloudUv;\\nvarying float vAbyssCloudPhase;\\nuniform float uAbyssCloudTime;",
+        "#include <common>\nvarying vec2 vAbyssCloudUv;\nvarying float vAbyssCloudPhase;\nuniform float uAbyssCloudTime;",
       );
       shader.fragmentShader = shader.fragmentShader.replace(
         "#include <color_fragment>",
