@@ -1519,12 +1519,23 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             "float strataLine = 1.0 - smoothstep(0.018, 0.075, abs(fract(vCliffStrataUv.y * 9.0 + strataWarp * 0.018) - 0.5));",
             "float strataBreak = smoothstep(0.18, 0.82, sin(vCliffStrataUv.x * 21.0 + sin(vCliffStrataUv.y * 17.0) * 2.1) * 0.5 + 0.5);",
             "float mineralVein = pow(max(0.0, sin(vCliffStrataUv.x * 26.0 - uCliffStrataTime * 0.22 + vCliffStrataUv.y * 5.0)), 18.0);",
+            // 岩面斷裂細縫以多頻率折線組合，避免規律貼圖感；縫內壓暗、斷面邊緣提亮。
+            "float fractureWarp = sin(vCliffStrataUv.y * 37.0 + sin(vCliffStrataUv.x * 19.0) * 2.4) + cos(vCliffStrataUv.x * 43.0 - vCliffStrataUv.y * 11.0) * 0.42;",
+            "float fractureLine = 1.0 - smoothstep(0.012, 0.052, abs(fractureWarp));",
+            "float fractureBranch = 1.0 - smoothstep(0.018, 0.064, abs(sin(vCliffStrataUv.x * 29.0 + vCliffStrataUv.y * 17.0 + fractureWarp * 0.7)));",
+            "float fractureMask = fractureLine * fractureBranch * (0.35 + strataBreak * 0.65);",
+            "float edgePatina = pow(max(0.0, sin(vCliffStrataUv.x * 17.0 + vCliffStrataUv.y * 5.0 + strataWarp)), 7.0) * strataBreak;",
+            "float mineralDust = pow(max(0.0, sin(vCliffStrataUv.x * 71.0 + vCliffStrataUv.y * 53.0)), 18.0);",
             "diffuseColor.rgb *= 0.94 + strataLine * strataBreak * 0.09;",
+            "diffuseColor.rgb *= 1.0 - fractureMask * 0.28;",
+            "diffuseColor.rgb += vec3(0.11, 0.14, 0.16) * fractureMask * 0.12;",
             "diffuseColor.rgb += vec3(0.018, 0.065, 0.052) * mineralVein * strataBreak * 0.55;",
+            "diffuseColor.rgb += vec3(0.095, 0.073, 0.041) * edgePatina * 0.12;",
+            "diffuseColor.rgb += vec3(0.16, 0.19, 0.2) * mineralDust * 0.045;",
           ].join("\n"),
         );
       };
-      material.customProgramCacheKey = () => "tide-cliff-strata-mineral-v1";
+      material.customProgramCacheKey = () => "tide-cliff-strata-fracture-patina-v2";
     };
     installCliffStrata(shared.cliff);
 
