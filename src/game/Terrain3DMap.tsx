@@ -374,12 +374,12 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
         );
         shader.vertexShader = shader.vertexShader.replace(
           "#include <begin_vertex>",
-          \`#include <begin_vertex>
+          `#include <begin_vertex>
           vProjectileWakeUv = uv;
           float wakeTurbulence = sin(vProjectileWakeUv.y * 18.0 - uProjectileWakeTime * 4.8);
           float wakeCurl = cos(vProjectileWakeUv.y * 13.0 - uProjectileWakeTime * 3.6);
           transformed.x += wakeTurbulence * 0.018 * vProjectileWakeUv.y;
-          transformed.y += wakeCurl * 0.012 * vProjectileWakeUv.y;\`,
+          transformed.y += wakeCurl * 0.012 * vProjectileWakeUv.y;`,
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <common>",
