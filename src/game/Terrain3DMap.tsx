@@ -1449,15 +1449,29 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <color_fragment>",
           `#include <color_fragment>
-          float veilBaseFade = smoothstep(0.015, 0.2, vMistVeilUv.y);
+          float veilWarp = sin(vMistVeilUv.x * 12.0 + sin(vMistVeilUv.y * 7.0
+            - uMistVeilTime * 0.19) * 1.7 - uMistVeilTime * 0.12);
+          float veilTear = sin(vMistVeilUv.x * 27.0 + sin(vMistVeilUv.x * 8.0) * 2.4
+            + uMistVeilTime * 0.08);
+          float veilLowerOffset = veilWarp * 0.035 + veilTear * 0.026;
+          float veilBaseFade = smoothstep(0.015 + veilLowerOffset, 0.2 + veilLowerOffset, vMistVeilUv.y);
           float veilTopFade = 1.0 - smoothstep(0.7, 1.0, vMistVeilUv.y);
-          float veilStrand = 0.91 + 0.09 * sin(vMistVeilUv.x * 18.0 - uMistVeilTime * 0.24
+          float veilStrand = 0.82 + 0.18 * sin(vMistVeilUv.x * 18.0 - uMistVeilTime * 0.24
             + sin(vMistVeilUv.y * 8.0) * 1.7);
-          diffuseColor.a *= veilBaseFade * veilTopFade * veilStrand;
-          diffuseColor.rgb *= mix(vec3(0.72, 0.82, 1.02), vec3(0.92, 0.98, 1.12), vMistVeilUv.y);`,
+          float veilTendril = pow(max(0.0, sin(vMistVeilUv.x * 23.0
+            + sin(vMistVeilUv.x * 6.0) * 2.2 - uMistVeilTime * 0.17)), 7.0)
+            * (1.0 - smoothstep(0.52, 0.96, vMistVeilUv.y));
+          float veilDepthFold = 0.5 + 0.5 * sin(vMistVeilUv.x * 9.0
+            - vMistVeilUv.y * 5.0 - uMistVeilTime * 0.14 + veilWarp);
+          diffuseColor.a *= veilBaseFade * veilTopFade * veilStrand
+            * (0.76 + veilTendril * 0.34);
+          diffuseColor.rgb *= mix(vec3(0.52, 0.62, 0.84), vec3(0.92, 0.98, 1.12),
+            vMistVeilUv.y * 0.72 + veilDepthFold * 0.16);
+          diffuseColor.rgb += vec3(0.018, 0.042, 0.095) * veilTendril * 0.36
+            + vec3(0.012, 0.025, 0.062) * (1.0 - veilDepthFold) * 0.24;`,
         );
       };
-      material.customProgramCacheKey = () => "tide-black-mist-3d-veil-v1";
+      material.customProgramCacheKey = () => "tide-black-mist-torn-depth-veil-v2";
     };
     installSanctuarySigil(shared.sanctuarySigil);
     installRoadFlow(shared.roadGuide);
