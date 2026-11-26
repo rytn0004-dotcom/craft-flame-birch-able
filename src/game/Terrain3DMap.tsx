@@ -532,6 +532,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
     };
 
     const foliageWindUniform = { value: 0 };
+    const pollenUniforms = { time: { value: 0 } };
     const sanctuarySigilUniforms = { time: { value: 0 }, power: { value: 0.18 } };
     const roadGuideUniforms = {
       time: { value: 0 },
@@ -682,6 +683,10 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       waterRipple: new THREE.MeshBasicMaterial({ color: "#c7eee0", transparent: true, opacity: 0.16, depthWrite: false, side: THREE.DoubleSide }),
       waterGlint: new THREE.MeshBasicMaterial({ color: "#d8f3e4", transparent: true, opacity: 0.2, depthWrite: false, side: THREE.DoubleSide, toneMapped: false }),
       firefly: new THREE.MeshBasicMaterial({ color: "#b5f3d7", transparent: true, opacity: 0.48, depthWrite: false, toneMapped: false }),
+      pollen: new THREE.MeshBasicMaterial({
+        color: "#fff3ce", transparent: true, opacity: 0.46,
+        blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
+      }),
       rockCrack: new THREE.MeshStandardMaterial({ color: "#263c3b", roughness: 1, bumpMap: surfaceReliefMap, bumpScale: 0.012 }),
       rockCrackEdge: new THREE.MeshStandardMaterial({ color: "#8f9075", roughness: 0.96, bumpMap: surfaceReliefMap, bumpScale: 0.008 }),
       contactShadow: new THREE.MeshBasicMaterial({
@@ -1075,11 +1080,13 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
         shader.vertexShader = shader.vertexShader.replace(
           "#include <common>",
           `#include <common>
-uniform float uFoliageTime;`,
+uniform float uFoliageTime;
+varying float vFoliageGust;`,
         );
         shader.vertexShader = shader.vertexShader.replace(
           "#include <begin_vertex>",
           `#include <begin_vertex>
+vFoliageGust = 0.0;
 #ifdef USE_INSTANCING
         float foliagePhase = dot(instanceMatrix[3].xz, vec2(0.17, 0.13));
         float foliageMask = smoothstep(-0.28, 0.52, position.y);
@@ -1089,6 +1096,7 @@ uniform float uFoliageTime;`,
         float travelingGust = sin(windTravel * 0.115 - uFoliageTime * 1.08);
         float gustStrength = 0.42 + 0.34 * smoothstep(-0.65, 0.88, broadGust)
           + 0.24 * smoothstep(-0.56, 0.78, travelingGust);
+        vFoliageGust = gustStrength * smoothstep(-0.5, 0.72, travelingGust);
         float foliageWave = sin(uFoliageTime * 1.35 + foliagePhase + position.y * 2.8);
         float foliageFlutter = sin(uFoliageTime * 2.4 + foliagePhase * 1.73 + position.y * 5.2) * 0.22;
         float foliageSway = (foliageWave + foliageFlutter) * gustStrength;
@@ -1097,6 +1105,16 @@ uniform float uFoliageTime;`,
         transformed.z += (cos(uFoliageTime * 0.91 + foliagePhase * 1.27 + position.y * 1.8)
           + foliageFlutter * 0.45 + gustLean * 0.34) * 0.048 * foliageMask;
 #endif`,
+        );
+        shader.fragmentShader = shader.fragmentShader.replace(
+          "#include <common>",
+          "#include <common>\\nvarying float vFoliageGust;",
+        );
+        shader.fragmentShader = shader.fragmentShader.replace(
+          "#include <color_fragment>",
+          `#include <color_fragment>
+          float windLightCatch = smoothstep(0.12, 0.96, vFoliageGust);
+          diffuseColor.rgb *= 1.0 + vec3(0.026, 0.048, 0.018) * windLightCatch;`,
         );
       };
       material.customProgramCacheKey = () => cacheKey;
@@ -1107,6 +1125,42 @@ uniform float uFoliageTime;`,
     installFoliageWind(shared.meadowBloom, "tide-meadow-bloom-wind-v1");
     installFoliageWind(shared.coastGrass, "tide-coast-reed-wind-v1");
     installFoliageWind(shared.reefCoral, "tide-reef-coral-current-v1");
+
+    // 花粉與草籽以少量實例漂浮；GPU 風場控制輕微三維漂移，不逐粒更新矩陣。
+    const installPollenDrift = (material: THREE.MeshBasicMaterial) => {
+      material.onBeforeCompile = (shader) => {
+        shader.uniforms.uPollenTime = pollenUniforms.time;
+        shader.vertexShader = shader.vertexShader.replace(
+          "#include <common>",
+          "#include <common>\\nuniform float uPollenTime;\\nvarying float vPollenPhase;",
+        );
+        shader.vertexShader = shader.vertexShader.replace(
+          "#include <begin_vertex>",
+          `#include <begin_vertex>
+          float pollenPhase = 0.0;
+          #ifdef USE_INSTANCING
+            pollenPhase = dot(instanceMatrix[3].xz, vec2(0.13, 0.19));
+          #endif
+          vPollenPhase = pollenPhase;
+          transformed.x += sin(uPollenTime * 0.62 + pollenPhase) * 0.082;
+          transformed.y += cos(uPollenTime * 0.86 + pollenPhase * 1.37) * 0.065;
+          transformed.z += sin(uPollenTime * 0.51 + pollenPhase * 0.83) * 0.074;`,
+        );
+        shader.fragmentShader = shader.fragmentShader.replace(
+          "#include <common>",
+          "#include <common>\\nuniform float uPollenTime;\\nvarying float vPollenPhase;",
+        );
+        shader.fragmentShader = shader.fragmentShader.replace(
+          "#include <color_fragment>",
+          `#include <color_fragment>
+          float pollenTwinkle = 0.76 + 0.24 * (0.5 + 0.5 * sin(uPollenTime * 2.1 + vPollenPhase));
+          diffuseColor.rgb *= 0.82 + pollenTwinkle * 0.36;
+          diffuseColor.a *= pollenTwinkle;`,
+        );
+      };
+      material.customProgramCacheKey = () => "tide-pollen-drift-twinkle-v1";
+    };
+    installPollenDrift(shared.pollen);
 
     // 所有地形區塊共用 4 種高度幾何，避免切塊後重複建立數百份相同頂點資料。
     const terrainGeometries = [0, 1, 2, 3].map(
@@ -3733,6 +3787,54 @@ uniform float uFoliageTime;`,
         terrainRoot.add(fireflyMesh);
       }
 
+      // 風會把花粉與草籽從草甸帶起來；只放在草甸、苔地，並限制數量及避開建築。
+      const pollenCells = Array.from(tileCells.values()).filter((cell) => {
+        if (cell.h <= 0) return false;
+        const region = terrainRegion(cell);
+        if (region !== "meadow" && region !== "moss") return false;
+        const seed = Math.abs(Math.sin(cell.x * 57.1 + cell.z * 23.7) * 34781.3) % 1;
+        if (seed < 0.965) return false;
+        return !protectedBuildings.some((building) =>
+          Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 0.58,
+        );
+      });
+      const pollenCount = Math.min(144, pollenCells.length);
+      if (pollenCount > 0) {
+        const pollenMesh = new THREE.InstancedMesh(
+          new THREE.IcosahedronGeometry(0.021, 0),
+          shared.pollen,
+          pollenCount,
+        );
+        const pollenDummy = new THREE.Object3D();
+        const pollenTint = new THREE.Color();
+        const pollenPalette = ["#fff0b1", "#f1c4d6", "#b8eee2", "#cbdcff", "#f6d6a0"];
+        for (let i = 0; i < pollenCount; i++) {
+          const cell = pollenCells[Math.min(pollenCells.length - 1,
+            Math.floor((i + 0.5) * pollenCells.length / pollenCount))];
+          const seed = Math.abs(Math.sin(cell.x * 127.1 + cell.z * 311.7) * 43758.5453) % 1;
+          const phase = seed * Math.PI * 2 + i * 0.71;
+          pollenDummy.position.set(
+            cell.x + Math.cos(phase) * 0.26,
+            groundTop(cell.h) + 0.42 + seed * 0.68,
+            cell.z + Math.sin(phase) * 0.26,
+          );
+          const scale = 0.62 + seed * 0.68;
+          pollenDummy.scale.set(scale, 0.72 + seed * 0.5, scale);
+          pollenDummy.rotation.set(seed * 1.8, phase, seed * 1.4);
+          pollenDummy.updateMatrix();
+          pollenMesh.setMatrixAt(i, pollenDummy.matrix);
+          pollenTint.set(pollenPalette[Math.floor(seed * pollenPalette.length)]);
+          pollenMesh.setColorAt(i, pollenTint);
+        }
+        pollenMesh.instanceMatrix.needsUpdate = true;
+        if (pollenMesh.instanceColor) pollenMesh.instanceColor.needsUpdate = true;
+        pollenMesh.frustumCulled = false;
+        pollenMesh.renderOrder = 4;
+        pollenMesh.castShadow = false;
+        pollenMesh.receiveShadow = false;
+        terrainRoot.add(pollenMesh);
+      }
+
       // 草甸與苔地改為三朵一簇的野花組合；花莖與花冠都共用 GPU 風場。
       const flowerCells = Array.from(tileCells.values()).filter((cell) => {
         if (cell.h <= 0) return false;
@@ -5540,6 +5642,7 @@ uniform float uFoliageTime;`,
       oceanSurfaceUniforms.time.value = time * 0.001;
       shoreFoamUniforms.time.value = time * 0.001;
       cliffStrataUniforms.time.value = time * 0.001;
+      pollenUniforms.time.value = time * 0.001;
       // 海岸泡沫除了整體呼吸，還有依岸線位置錯相的流動脈衝。
       shared.shoreFoam.opacity = 0.62 + Math.sin(time * 0.00072) * 0.055;
       if (!waterRippleMesh || !waterRippleEntries.length) return;
@@ -6342,6 +6445,7 @@ uniform float uFoliageTime;`,
       shared.waterRipple.dispose();
       shared.waterGlint.dispose();
       shared.firefly.dispose();
+      shared.pollen.dispose();
       shared.treeBark.dispose();
       shared.grass.dispose();
       shared.grassBlade.dispose();
