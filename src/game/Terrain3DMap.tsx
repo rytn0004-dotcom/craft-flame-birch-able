@@ -4354,6 +4354,71 @@ vFoliageGust = 0.0;
         terrainRoot.add(rocks);
       }
 
+      // 山脊岩柱：只在 Lv.2–3 的局部高點生成不規則風蝕尖岩，形成遠距可讀的地形剪影。
+      // 每個地標由兩枚共用風化岩幾何構成，最多 120 組，並避開建築周圍。
+      const summitSpineCells = Array.from(tileCells.values()).filter((cell) => {
+        if (cell.h < 2 || terrainRegion(cell) === "coast" || terrainRegion(cell) === "road") return false;
+        const gx = Math.floor(cell.x);
+        const gy = Math.floor(cell.z);
+        const neighborHeights = [
+          tileCells.get(gx + "," + (gy - 1))?.h ?? 0,
+          tileCells.get((gx + 1) + "," + gy)?.h ?? 0,
+          tileCells.get(gx + "," + (gy + 1))?.h ?? 0,
+          tileCells.get((gx - 1) + "," + gy)?.h ?? 0,
+        ];
+        const lowerShoulders = neighborHeights.filter((height) => height < cell.h).length;
+        const seed = Math.abs(Math.sin(cell.x * 37.7 + cell.z * 91.3) * 32719.71) % 1;
+        if (lowerShoulders < 2 || seed < 0.84) return false;
+        return !protectedBuildings.some((building) =>
+          Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 1.15,
+        );
+      }).slice(0, 120);
+      if (summitSpineCells.length) {
+        const spines = new THREE.InstancedMesh(
+          cliffShardGeometry,
+          shared.cliffFacet,
+          summitSpineCells.length * 2,
+        );
+        spines.userData.sharedGeometry = true;
+        const spineDummy = new THREE.Object3D();
+        const spineTint = new THREE.Color();
+        const spinePalette = ["#8b9b91", "#b5b49f", "#718a83", "#c7b894", "#a1b1a8"];
+        for (let i = 0; i < summitSpineCells.length; i++) {
+          const cell = summitSpineCells[i];
+          const seed = Math.abs(Math.sin(cell.x * 127.1 + cell.z * 311.7) * 43758.5453) % 1;
+          const heading = seed * Math.PI * 2;
+          for (let shard = 0; shard < 2; shard++) {
+            const index = i * 2 + shard;
+            const size = shard === 0 ? 0.22 + seed * 0.08 : 0.12 + seed * 0.07;
+            const angle = heading + shard * 1.9;
+            spineDummy.position.set(
+              cell.x + Math.cos(angle) * (shard === 0 ? -0.055 : 0.105),
+              groundTop(cell.h) + size * 0.82,
+              cell.z + Math.sin(angle) * (shard === 0 ? -0.055 : 0.105),
+            );
+            spineDummy.rotation.set(
+              (seed - 0.5) * (shard === 0 ? 0.28 : 0.52),
+              angle,
+              (seed - 0.5) * (shard === 0 ? 0.34 : 0.62),
+            );
+            spineDummy.scale.set(
+              size * (shard === 0 ? 0.78 : 0.62) / 0.22,
+              size * (shard === 0 ? 1.95 : 1.28) / 0.22,
+              size * (shard === 0 ? 0.72 : 0.58) / 0.22,
+            );
+            spineDummy.updateMatrix();
+            spines.setMatrixAt(index, spineDummy.matrix);
+            spineTint.set(spinePalette[(Math.floor(seed * 19) + shard * 2) % spinePalette.length]);
+            spines.setColorAt(index, spineTint);
+          }
+        }
+        spines.instanceMatrix.needsUpdate = true;
+        if (spines.instanceColor) spines.instanceColor.needsUpdate = true;
+        spines.castShadow = true;
+        spines.receiveShadow = true;
+        terrainRoot.add(spines);
+      }
+
       // 岩面苔衣與地衣斑：有三瓣不規則邊緣、微隆起的中心與柔和的環狀厚度，
       // 像沿著石縫蔓延，而不是一張平面貼圖；以單批 InstancedMesh 控制成本。
       const lichenCells = Array.from(tileCells.values()).filter((cell) => {
@@ -5653,7 +5718,7 @@ vFoliageGust = 0.0;
 
       // 高台邊緣偶爾露出低矮的海蝕礦晶，密度刻意偏低，避免水元素搶過建築主體。
       const mineralCells = Array.from(tileCells.values()).filter((cell) => {
-        if (cell.h < 2) return false;
+        if (cell.h < 2 || terrainRegion(cell) === "coast") return false;
         const gx = Math.floor(cell.x);
         const gy = Math.floor(cell.z);
         const edge = [
@@ -5663,32 +5728,46 @@ vFoliageGust = 0.0;
           tileCells.get((gx - 1) + "," + gy),
         ].some((neighbor) => !neighbor || neighbor.h < cell.h);
         const seed = Math.abs(Math.sin(cell.x * 51.7 + cell.z * 97.3) * 36431.71) % 1;
-        return edge && seed > 0.91;
-      });
+        if (!edge || seed <= 0.91) return false;
+        return !protectedBuildings.some((building) =>
+          Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 0.95,
+        );
+      }).slice(0, 96);
       if (mineralCells.length) {
         const minerals = new THREE.InstancedMesh(
-          new THREE.OctahedronGeometry(0.065, 0),
+          new THREE.OctahedronGeometry(0.072, 1),
           shared.terrainCrystal,
-          mineralCells.length * 2,
+          mineralCells.length * 3,
         );
         const dummy = new THREE.Object3D();
+        const mineralTint = new THREE.Color();
+        const crystalPalette = ["#69c9c0", "#a0e3d4", "#81b9d7", "#c6d5c0"];
         for (let i = 0; i < mineralCells.length; i++) {
           const cell = mineralCells[i];
           const seed = Math.abs(Math.sin(cell.x * 127.1 + cell.z * 311.7) * 43758.5453) % 1;
-          for (let shard = 0; shard < 2; shard++) {
-            const index = i * 2 + shard;
+          for (let shard = 0; shard < 3; shard++) {
+            const index = i * 3 + shard;
+            const angle = seed * Math.PI * 2 + shard * (Math.PI * 2 / 3);
+            const height = shard === 0 ? 1.48 : shard === 1 ? 1.02 : 0.76;
             dummy.position.set(
-              cell.x + (shard === 0 ? -0.09 : 0.1) + (seed - 0.5) * 0.08,
-              groundTop(cell.h) + 0.07 + shard * 0.035,
-              cell.z + (shard === 0 ? 0.07 : -0.08),
+              cell.x + Math.cos(angle) * (shard === 0 ? 0.015 : 0.105) + (seed - 0.5) * 0.045,
+              groundTop(cell.h) + 0.064 + height * 0.025,
+              cell.z + Math.sin(angle) * (shard === 0 ? 0.015 : 0.105),
             );
-            dummy.rotation.set(seed * 0.5, seed * Math.PI * 2 + shard, seed * 0.4);
-            dummy.scale.set(0.82 + seed * 0.35, 1.0 + shard * 0.48, 0.82 + seed * 0.35);
+            dummy.rotation.set((seed - 0.5) * 0.22, angle, (0.5 - seed) * 0.18);
+            dummy.scale.set(
+              0.84 + seed * 0.3,
+              height * (0.96 + seed * 0.2),
+              0.78 + ((seed * 3.71) % 1) * 0.3,
+            );
             dummy.updateMatrix();
             minerals.setMatrixAt(index, dummy.matrix);
+            mineralTint.set(crystalPalette[(Math.floor(seed * 13) + shard) % crystalPalette.length]);
+            minerals.setColorAt(index, mineralTint);
           }
         }
         minerals.instanceMatrix.needsUpdate = true;
+        if (minerals.instanceColor) minerals.instanceColor.needsUpdate = true;
         minerals.castShadow = true;
         minerals.receiveShadow = true;
         terrainRoot.add(minerals);
