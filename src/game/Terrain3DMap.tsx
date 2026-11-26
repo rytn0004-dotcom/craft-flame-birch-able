@@ -1548,16 +1548,24 @@ vFoliageGust = 0.0;
           * (1.0 - smoothstep(1.05, 3.8, slipSide));
         float slipGust = slipWake * uSlipStrength * foliageMask;
         float slipSideSign = sign(dot(slipRelative, slipPerpendicular));
+        // A short pressure front reaches the plants just before the trailing wake:
+        // nearby blades first part sideways, then the wake combs them down and they spring back.
+        float slipFront = exp(-pow(slipAlong * 1.18, 2.0))
+          * (1.0 - smoothstep(2.15, 4.35, slipSide)) * uSlipStrength * foliageMask;
+        vec2 slipFrontPush = slipPerpendicular * slipSideSign * slipFront * ${(0.048 * slipResponse).toFixed(3)}
+          - uSlipDirection * slipFront * ${(0.022 * slipResponse).toFixed(3)};
         vec2 slipBend = -uSlipDirection * ${(0.16 * slipResponse).toFixed(3)}
           + slipPerpendicular * slipSideSign * ${(0.12 * slipResponse).toFixed(3)};
         float slipVortex = sin(slipAlong * 1.42 + foliagePhase * 0.72 + uFoliageTime * 6.4);
         vec2 slipCurl = slipPerpendicular * slipVortex * slipGust * ${(0.07 * slipResponse).toFixed(3)};
         float canopyRecoil = sin(uFoliageTime * 5.2 + foliagePhase * 2.4)
           * slipGust * ${(0.035 * slipResponse).toFixed(3)};
-        transformed.xz += slipBend * slipGust + slipCurl;
-        transformed.y -= max(position.y, 0.0) * slipGust * ${pressResponse.toFixed(3)};
+        transformed.xz += slipFrontPush + slipBend * slipGust + slipCurl;
+        transformed.y -= max(position.y, 0.0)
+          * (slipGust * ${pressResponse.toFixed(3)} + slipFront * 0.12);
         transformed.y += canopyRecoil;
-        vFoliageGust = max(vFoliageGust, min(1.0, slipGust * ${slipResponse.toFixed(2)}));
+        vFoliageGust = max(vFoliageGust, min(1.0,
+          slipGust * ${slipResponse.toFixed(2)} + slipFront * 0.74));
 #endif`,
         );
         shader.fragmentShader = shader.fragmentShader.replace(
@@ -1576,7 +1584,7 @@ vFoliageGust = 0.0;
     installFoliageWind(shared.foliageWind, "tide-foliage-wind-v6");
     installFoliageWind(shared.treeCanopyWind, "tide-tree-canopy-gust-v2", 2.4);
     installFoliageWind(shared.grass, "tide-grass-stem-wind-v5", 1.45, 0.34);
-    installFoliageWind(shared.grassBlade, "tide-grass-blade-wind-v7", 2.35, 0.88);
+    installFoliageWind(shared.grassBlade, "tide-grass-blade-wind-v8", 2.35, 0.88);
     installFoliageWind(shared.meadowBloom, "tide-meadow-bloom-wind-v5", 1.5, 0.16);
     installFoliageWind(shared.coastGrass, "tide-coast-reed-wind-v5", 1.75, 0.3);
     installFoliageWind(shared.reefCoral, "tide-reef-coral-current-v5");
