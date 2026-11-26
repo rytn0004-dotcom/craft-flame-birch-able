@@ -6456,9 +6456,9 @@ vFoliageGust = 0.0;
       } else {
         lastCliffDebrisCell = "";
       }
-      const debrisAge = time - activeCliffDebrisAt;
-      rockDebrisUniforms.age.value = Math.max(0, debrisAge * 0.001);
-      rockDebrisMesh.visible = debrisAge >= 0 && debrisAge < 900;
+      const debrisAge = activeCliffDebrisAt > -Infinity ? time - activeCliffDebrisAt : 900;
+      rockDebrisUniforms.age.value = THREE.MathUtils.clamp(debrisAge * 0.001, 0, 0.9);
+      rockDebrisMesh.visible = activeCliffDebrisAt > -Infinity && debrisAge >= 0 && debrisAge < 900;
       for (let i = 0; i < data.shots.length; i++) {
         const shot = data.shots[i];
         if (!shotNodes[i]) {
