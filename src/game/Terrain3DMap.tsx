@@ -1693,6 +1693,66 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
     };
     installCliffStrata(shared.cliff);
 
+    // 生態交界帶以世界座標生成土壤沉積、苔根與露水微光，讓不同地貌之間有自然的混合區，
+    // 而不是單純用一條固定色帶切開；動畫共用花粉時間，不增加逐物件更新。
+    const installBiomeTransition = (material: THREE.MeshStandardMaterial) => {
+      material.onBeforeCompile = (shader) => {
+        shader.uniforms.uBiomeSeamTime = pollenUniforms.time;
+        shader.vertexShader = shader.vertexShader.replace(
+          "#include <common>",
+          "#include <common>\nvarying vec3 vBiomeSeamWorld;\nvarying vec3 vBiomeSeamLocal;",
+        );
+        shader.vertexShader = shader.vertexShader.replace(
+          "#include <begin_vertex>",
+          `#include <begin_vertex>
+          vBiomeSeamLocal = position;
+          vec4 biomeSeamWorld = vec4(transformed, 1.0);
+          #ifdef USE_INSTANCING
+            biomeSeamWorld = instanceMatrix * biomeSeamWorld;
+          #endif
+          biomeSeamWorld = modelMatrix * biomeSeamWorld;
+          vBiomeSeamWorld = biomeSeamWorld.xyz;`,
+        );
+        shader.fragmentShader = shader.fragmentShader.replace(
+          "#include <common>",
+          "#include <common>\nvarying vec3 vBiomeSeamWorld;\nvarying vec3 vBiomeSeamLocal;\nuniform float uBiomeSeamTime;",
+        );
+        shader.fragmentShader = shader.fragmentShader.replace(
+          "#include <color_fragment>",
+          `#include <color_fragment>
+          vec2 seamWorld = vBiomeSeamWorld.xz;
+          float seamFlow = sin(seamWorld.x * 0.43 + sin(seamWorld.y * 0.31) * 1.8)
+            * cos(seamWorld.y * 0.37 - seamWorld.x * 0.19);
+          float seamSoil = 0.5 + 0.5 * sin(seamWorld.x * 1.17 + seamWorld.y * 0.83
+            + seamFlow * 2.1);
+          float seamMoss = smoothstep(0.18, 0.86, seamSoil + seamFlow * 0.12)
+            * (1.0 - smoothstep(0.42, 0.98, abs(vBiomeSeamLocal.z) * 19.0));
+          float seamSilt = pow(max(0.0, sin(seamWorld.x * 2.1 - seamWorld.y * 1.7
+            + sin(seamWorld.y * 0.8) * 1.2)), 9.0);
+          float seamRoot = pow(max(0.0, sin(vBiomeSeamLocal.x * 31.0
+            + seamWorld.x * 0.9 + seamWorld.y * 0.6)), 8.0)
+            * (1.0 - smoothstep(0.18, 0.34, abs(vBiomeSeamLocal.z)));
+          float seamDew = pow(max(0.0, sin(seamWorld.x * 0.7 + seamWorld.y * 0.46
+            - uBiomeSeamTime * 0.7 + seamFlow)), 18.0) * seamMoss;
+          diffuseColor.rgb *= mix(vec3(1.07, 0.94, 0.78), vec3(0.76, 1.08, 0.84), seamMoss * 0.22);
+          diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.12, 1.02, 0.87), seamSilt * 0.14);
+          diffuseColor.rgb *= 1.0 - seamRoot * 0.08;
+          diffuseColor.rgb += vec3(0.04, 0.095, 0.054) * seamRoot * 0.12;
+          diffuseColor.rgb += vec3(0.12, 0.2, 0.17) * seamDew * 0.28;`,
+        );
+        shader.fragmentShader = shader.fragmentShader.replace(
+          "#include <roughnessmap_fragment>",
+          `#include <roughnessmap_fragment>
+          float seamSurfaceGrain = sin(vBiomeSeamWorld.x * 7.1 + vBiomeSeamWorld.z * 5.3)
+            * cos(vBiomeSeamWorld.z * 8.3 - vBiomeSeamWorld.x * 3.7);
+          roughnessFactor = clamp(roughnessFactor + seamSurfaceGrain * 0.035
+            + seamSilt * 0.08 - seamDew * 0.16, 0.0, 1.0);`,
+        );
+      };
+      material.customProgramCacheKey = () => "tide-biome-transition-soil-roots-dew-v2";
+    };
+    installBiomeTransition(shared.biomeSeam);
+
     // Procedural bark relief: longitudinal fibers, narrow dark fissures and soft growth marks
     // are generated in the shader, so trunks and curved branches share detail without extra meshes.
     const installBarkRelief = (material: THREE.MeshStandardMaterial) => {
@@ -3162,22 +3222,23 @@ vFoliageGust = 0.0;
         // Its five-rail profile rises into a soft center ridge and thins irregularly at both ends.
         const seamPositions: number[] = [];
         const seamIndices: number[] = [];
-        const seamRows = 11;
-        const seamRails = [-1, -0.5, 0, 0.5, 1];
+        const seamRows = 15;
+        const seamRails = [-1, -0.72, -0.38, 0, 0.38, 0.72, 1];
         for (let row = 0; row < seamRows; row++) {
           const t = row / (seamRows - 1);
-          const endFade = Math.pow(Math.sin(Math.PI * t), 0.34);
-          const wave = Math.sin(t * 17.0 + 0.6) * 0.16 + Math.sin(t * 31.0 - 0.8) * 0.07;
+          const endFade = Math.pow(Math.sin(Math.PI * t), 0.4);
+          const wave = Math.sin(t * 17.0 + 0.6) * 0.2 + Math.sin(t * 31.0 - 0.8) * 0.085;
           for (let rail = 0; rail < seamRails.length; rail++) {
             const across = seamRails[rail];
-            const edge = Math.pow(Math.abs(across), 1.7);
-            const width = 0.045 * endFade * (0.92 + wave);
-            const crest = (1 - Math.abs(across)) * (0.008 + 0.003 * Math.sin(t * 24.0));
-            const chippedEdge = edge * Math.sin(t * 39.0 + rail * 1.7) * 0.002;
+            const edge = Math.pow(Math.abs(across), 1.65);
+            const width = 0.064 * endFade * (0.9 + wave);
+            const crest = (1 - Math.abs(across)) * (0.009 + 0.004 * Math.sin(t * 24.0));
+            const chippedEdge = edge * Math.sin(t * 39.0 + rail * 1.7) * 0.0035;
+            const rootUndulation = Math.sin(t * 23.0 + across * 4.4) * 0.004 * (1 - edge);
             seamPositions.push(
-              t - 0.5 + Math.sin(t * 13.0 + across * 3.0) * 0.006,
+              t - 0.5 + Math.sin(t * 13.0 + across * 3.0) * 0.009,
               0.003 + crest + chippedEdge,
-              across * width + Math.sin(t * 21.0 + rail * 0.9) * 0.002,
+              across * width + Math.sin(t * 21.0 + rail * 0.9) * 0.003 + rootUndulation,
             );
           }
         }
