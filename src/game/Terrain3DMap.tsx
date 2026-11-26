@@ -538,7 +538,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
     terrainDustMesh.visible = false;
     effectRoot.add(terrainDustMesh);
 
-    // 岩壁高速震動時掉落的碎石：固定 10 顆低面數實例，拋物線與翻滾交由 GPU。
+    // 岩壁高速震動時掉落的碎石：14 顆細分風化岩片，拋物線與翻滾交由 GPU。
     const rockDebrisUniforms = { age: { value: 1 } };
     const rockDebrisMaterial = new THREE.MeshStandardMaterial({
       color: "#ffffff",
@@ -582,15 +582,29 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       );
     };
     rockDebrisMaterial.customProgramCacheKey = () => "tide-cliff-slip-debris-v1";
-    const rockDebrisCount = 10;
+    const rockDebrisCount = 14;
+    const rockDebrisGeometry = new THREE.DodecahedronGeometry(0.062, 1);
+    const rockDebrisPositions = rockDebrisGeometry.getAttribute("position");
+    const rockDebrisVertex = new THREE.Vector3();
+    for (let i = 0; i < rockDebrisPositions.count; i++) {
+      rockDebrisVertex.fromBufferAttribute(rockDebrisPositions, i);
+      const direction = rockDebrisVertex.clone().normalize();
+      const chippedRadius = 1
+        + Math.sin(direction.x * 13.7 + direction.y * 9.1 + direction.z * 17.3) * 0.085
+        + Math.cos(direction.x * 23.1 - direction.y * 19.7 + direction.z * 11.9) * 0.035;
+      rockDebrisVertex.multiplyScalar(chippedRadius);
+      rockDebrisPositions.setXYZ(i, rockDebrisVertex.x, rockDebrisVertex.y, rockDebrisVertex.z);
+    }
+    rockDebrisPositions.needsUpdate = true;
+    rockDebrisGeometry.computeVertexNormals();
     const rockDebrisMesh = new THREE.InstancedMesh(
-      new THREE.DodecahedronGeometry(0.062, 0),
+      rockDebrisGeometry,
       rockDebrisMaterial,
       rockDebrisCount,
     );
     const rockDebrisDummy = new THREE.Object3D();
     const rockDebrisTint = new THREE.Color();
-    const rockDebrisPalette = ["#b4a78a", "#d0c2a2", "#8b9384", "#6f8079", "#c5b99b"];
+    const rockDebrisPalette = ["#b4a78a", "#d0c2a2", "#8b9384", "#6f8079", "#c5b99b", "#d6c9a8", "#8796a0", "#a18e72"];
     for (let i = 0; i < rockDebrisCount; i++) {
       const seed = Math.abs(Math.sin((i + 1) * 91.7) * 23741.3) % 1;
       const angle = i * 2.399963;
@@ -1564,7 +1578,6 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       const vertex = new THREE.Vector3();
       for (let i = 0; i < position.count; i++) {
         vertex.fromBufferAttribute(position, i);
-        const radius = vertex.length() || 1;
         const direction = vertex.clone().normalize();
         const broadChip = Math.sin(direction.x * 11.7 + direction.y * 7.9 + direction.z * 13.1);
         const fineChip = Math.cos(direction.x * 23.1 - direction.y * 17.3 + direction.z * 19.7);
