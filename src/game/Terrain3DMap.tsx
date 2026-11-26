@@ -1443,7 +1443,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
     // One shared beveled rock slab for all cliff strata. Subdivided faces carry subtle erosion
     // and rounded/chipped edges instead of the hard cube silhouette of stretched BoxGeometry.
     const cliffBlockGeometry = (() => {
-      const geometry = new THREE.BoxGeometry(1, 1, 1, 4, 4, 2);
+      const geometry = new THREE.BoxGeometry(1, 1, 1, 8, 8, 4);
       const positions = geometry.getAttribute("position");
       for (let vertex = 0; vertex < positions.count; vertex++) {
         let x = positions.getX(vertex);
@@ -1463,10 +1463,13 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           z = cz + (dz / distance) * 0.062;
         }
         const erosion = Math.sin(y * 17.3 + z * 11.7) * Math.cos(x * 13.1 - z * 8.9);
-        const grain = Math.sin(x * 27.1 + y * 21.7 + z * 16.3);
-        x += erosion * 0.0026;
-        y += grain * 0.0022;
-        z += erosion * 0.0028;
+        const strata = Math.sin(y * 23.5 + Math.sin(z * 8.2 + x * 5.1) * 1.8);
+        const grain = Math.sin(x * 27.1 + y * 21.7 + z * 16.3)
+          + Math.cos(x * 41.3 - z * 29.7 + y * 12.1) * 0.34;
+        const edgeWear = THREE.MathUtils.smoothstep(Math.max(Math.abs(x), Math.abs(z)), 0.34, 0.5);
+        x += erosion * 0.0038 + strata * edgeWear * 0.0018;
+        y += grain * 0.0031 + Math.sin(strata * 1.7) * 0.0012;
+        z += erosion * 0.0041 - strata * edgeWear * 0.0016;
         positions.setXYZ(vertex, x, y, z);
       }
       positions.needsUpdate = true;
