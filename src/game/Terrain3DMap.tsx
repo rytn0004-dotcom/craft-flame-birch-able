@@ -408,6 +408,59 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
     })();
     const projectileWakeUniforms = { time: { value: 0 } };
 
+    // A shallow pressure sheet skims just above terrain. Three ribbon lanes spread
+    // from the projectile nose and feather into the ground; it is shared by all shots.
+    const groundSkimGeometry = (() => {
+      const positions: number[] = [];
+      const uvs: number[] = [];
+      const colors: number[] = [];
+      const indices: number[] = [];
+      const sections = 14;
+      const rails = [-1, -0.66, -0.33, 0, 0.33, 0.66, 1];
+      const lanes = [
+        { offset: 0, width: 0.23, tint: [0.82, 0.97, 0.91] },
+        { offset: -1, width: 0.092, tint: [0.5, 0.82, 0.81] },
+        { offset: 1, width: 0.092, tint: [0.58, 0.87, 0.8] },
+      ];
+      for (let lane = 0; lane < lanes.length; lane++) {
+        const spec = lanes[lane];
+        const base = positions.length / 3;
+        for (let section = 0; section < sections; section++) {
+          const t = section / (sections - 1);
+          const open = THREE.MathUtils.smoothstep(t, 0.02, 0.2);
+          const close = 1 - THREE.MathUtils.smoothstep(t, 0.76, 1.0);
+          const width = spec.width * open * close + 0.001;
+          const drift = spec.offset === 0 ? 0 : spec.offset * (0.035 + 0.11 * t);
+          const curl = Math.sin(t * 11.4 + lane * 1.7) * 0.018 * t;
+          const z = 0.07 - t * 2.35;
+          for (let rail = 0; rail < rails.length; rail++) {
+            const across = rails[rail];
+            const crest = (1 - Math.abs(across)) * (lane === 0 ? 0.011 : 0.006);
+            positions.push(drift + curl + across * width, 0.002 + crest, z);
+            uvs.push((across + 1) * 0.5, t);
+            const edgeLight = 1 - Math.pow(Math.abs(across), 1.6) * 0.48;
+            colors.push(spec.tint[0] * edgeLight, spec.tint[1] * edgeLight, spec.tint[2] * edgeLight);
+          }
+        }
+        for (let section = 0; section < sections - 1; section++) {
+          for (let rail = 0; rail < rails.length - 1; rail++) {
+            const a = base + section * rails.length + rail;
+            const b = a + rails.length;
+            indices.push(a, a + 1, b, a + 1, b + 1, b);
+          }
+        }
+      }
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+      geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+      geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+      geometry.setIndex(indices);
+      geometry.computeVertexNormals();
+      geometry.computeBoundingSphere();
+      geometry.userData.sharedGeometry = true;
+      return geometry;
+    })();
+
     // 高地高速掠過會拖起一條短暫碎塵尾帶：單一 InstancedMesh，粒子漂浮由 GPU 控制。
     const terrainDustUniforms = { time: projectileWakeUniforms.time };
     const terrainDustMaterial = new THREE.MeshBasicMaterial({
@@ -605,6 +658,49 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       };
       material.customProgramCacheKey = () => "tide-projectile-wake-flow-v3";
     };
+    const installGroundSkimFlow = (material: THREE.MeshBasicMaterial) => {
+      material.onBeforeCompile = (shader) => {
+        shader.uniforms.uGroundSkimTime = projectileWakeUniforms.time;
+        shader.vertexShader = shader.vertexShader.replace(
+          "#include <common>",
+          "#include <common>\nuniform float uGroundSkimTime;\nvarying vec2 vGroundSkimUv;",
+        );
+        shader.vertexShader = shader.vertexShader.replace(
+          "#include <begin_vertex>",
+          [
+            "#include <begin_vertex>",
+            "vGroundSkimUv = uv;",
+            "float skimT = uv.y;",
+            "float skimAcross = uv.x * 2.0 - 1.0;",
+            "float skimRipple = sin(skimT * 28.0 - uGroundSkimTime * 7.0 + skimAcross * 5.4);",
+            "float skimCurl = cos(skimT * 16.0 - uGroundSkimTime * 4.5 + skimAcross * 3.2);",
+            "transformed.x += skimRipple * 0.016 * skimT;",
+            "transformed.y += (1.0 - abs(skimAcross)) * 0.003 + skimCurl * 0.0015;",
+            "transformed.z += sin(skimT * 12.0 - uGroundSkimTime * 3.6) * 0.012 * skimT;",
+          ].join("\n"),
+        );
+        shader.fragmentShader = shader.fragmentShader.replace(
+          "#include <common>",
+          "#include <common>\nuniform float uGroundSkimTime;\nvarying vec2 vGroundSkimUv;",
+        );
+        shader.fragmentShader = shader.fragmentShader.replace(
+          "#include <color_fragment>",
+          [
+            "#include <color_fragment>",
+            "float skimAcross = abs(vGroundSkimUv.x * 2.0 - 1.0);",
+            "float skimEdgeFade = 1.0 - smoothstep(0.62, 1.0, skimAcross);",
+            "float skimTailFade = 1.0 - smoothstep(0.72, 1.0, vGroundSkimUv.y);",
+            "float groundRipple = 0.5 + 0.5 * sin(vGroundSkimUv.y * 38.0 - uGroundSkimTime * 8.0 + vGroundSkimUv.x * 7.0);",
+            "float pressureCrest = exp(-pow((vGroundSkimUv.y - 0.16) * 16.0, 2.0));",
+            "diffuseColor.rgb *= 0.76 + groundRipple * 0.24;",
+            "diffuseColor.rgb += vec3(0.11, 0.2, 0.16) * (pressureCrest * 0.24 + groundRipple * 0.07);",
+            "diffuseColor.a *= skimEdgeFade * skimTailFade * (0.18 + groundRipple * 0.2 + pressureCrest * 0.18);",
+          ].join("\n"),
+        );
+      };
+      material.customProgramCacheKey = () => "tide-ground-skimming-pressure-v1";
+    };
+
     // 程序化黑霧貼圖：柔邊噪聲雲，不依賴外部圖檔，並以單一 InstancedMesh 控制效能。
     const blackMistSize = 64;
     const blackMistPixels = new Uint8Array(blackMistSize * blackMistSize * 4);
@@ -6742,7 +6838,8 @@ vFoliageGust = 0.0;
             depthWrite: false, toneMapped: false,
           });
           installProjectileWakeFlow(skimMaterial);
-          const skimWake = new THREE.Mesh(projectileWakeGeometry, skimMaterial);
+          installGroundSkimFlow(skimMaterial);
+          const skimWake = new THREE.Mesh(groundSkimGeometry, skimMaterial);
           skimWake.position.y = -0.665;
           skimWake.renderOrder = 3;
           skimWake.castShadow = false;
@@ -6764,7 +6861,7 @@ vFoliageGust = 0.0;
         skimWake.visible = speedFactor > 0.08;
         skimWake.material.color.set(shot.color);
         skimWake.material.opacity = speedFactor > 0.08 ? 0.08 + speedFactor * 0.34 : 0;
-        skimWake.scale.set(1.3 + speedFactor * 0.9, 1, 1.0 + speedFactor * 1.8);
+        skimWake.scale.set(1.15 + speedFactor * 0.8, 1, 1.0 + speedFactor * 1.15);
         node.children[1].scale.y = 1 + speedFactor * 1.9;
         node.children[1].position.z = -0.28 - speedFactor * 0.16;
         node.children[0].scale.setScalar(1 + speedFactor * 0.13);
@@ -7228,6 +7325,7 @@ vFoliageGust = 0.0;
       clearGroup(effectRoot);
       terrainDustMaterial.dispose();
       projectileWakeGeometry.dispose();
+      groundSkimGeometry.dispose();
       scene.remove(skyDome);
       skyGeometry.dispose();
       skyMaterial.dispose();
