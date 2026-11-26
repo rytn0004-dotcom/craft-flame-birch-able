@@ -1177,6 +1177,16 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             terrainWorldPosition = instanceMatrix * terrainWorldPosition;
           #endif
           terrainWorldPosition = modelMatrix * terrainWorldPosition;
+          // Only the upward-facing tile top receives a subtle, broad relief. Side faces
+          // and the actual logical tile height stay untouched; the subdivided shared mesh
+          // lets the silhouette catch light without creating CPU-side per-tile animation.
+          float terrainTopMask = smoothstep(0.86, 0.98, normal.y);
+          float terrainCrest = sin(terrainWorldPosition.x * 1.72
+            + sin(terrainWorldPosition.z * 1.13) * 1.2)
+            * cos(terrainWorldPosition.z * 1.48 - terrainWorldPosition.x * 0.64);
+          float terrainFineLift = sin(terrainWorldPosition.x * 5.2 + terrainWorldPosition.z * 4.6)
+            * cos(terrainWorldPosition.z * 5.8 - terrainWorldPosition.x * 3.1);
+          transformed.y += terrainTopMask * (terrainCrest * 0.0065 + terrainFineLift * 0.0018);
           vTerrainWorldPosition = terrainWorldPosition.xyz;`,
         );
         shader.fragmentShader = shader.fragmentShader.replace(
@@ -1252,7 +1262,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             + microEtch * 0.012 + gritPore * 0.028, 0.0, 1.0);`,
         );
       };
-      material.customProgramCacheKey = () => "tide-terrain-world-mottle-micro-v4-" + height;
+      material.customProgramCacheKey = () => "tide-terrain-world-mottle-micro-relief-v5-" + height;
     };
     const installBlackMistVeil = (material: THREE.MeshBasicMaterial) => {
       material.onBeforeCompile = (shader) => {
@@ -1678,7 +1688,7 @@ vFoliageGust = 0.0;
 
     // 所有地形區塊共用 4 種高度幾何，避免切塊後重複建立數百份相同頂點資料。
     const terrainGeometries = [0, 1, 2, 3].map(
-      (height) => new THREE.BoxGeometry(0.98, groundTop(height), 0.98),
+      (height) => new THREE.BoxGeometry(0.98, groundTop(height), 0.98, 6, 1, 6),
     );
 
     // 透明命中盒只供 Raycaster 使用，完全不參與顯示與深度寫入；保證 HQ 屋頂／城牆容易選取。
