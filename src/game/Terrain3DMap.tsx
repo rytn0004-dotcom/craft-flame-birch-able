@@ -995,7 +995,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           diffuseColor.rgb += vec3(0.018, 0.072, 0.074) * tideCaustic;
 #endif
           float swellSheen = pow(max(0.0, 0.5 + 0.5 * sin(vOceanLocal.x * 0.055 + vOceanLocal.y * 0.039 + uOceanTime * 0.34)), 7.0);
-          diffuseColor.rgb += vec3(0.012, 0.038, 0.04) * swellSheen;
+          diffuseColor.rgb += vec3(0.012, 0.038, 0.04) * swellSheen;`,
         );
       };
       material.customProgramCacheKey = () => cacheKey;
@@ -3917,21 +3917,21 @@ uniform float uFoliageTime;`,
       }
 
       // 苔地補少量扇形蕨葉，保持低矮並限制數量，不遮住塔身與角色。
-      const fernCells = Array.from(tileCells.values()).filter((cell) => {
+      const fernFanCells = Array.from(tileCells.values()).filter((cell) => {
         if (cell.h !== 1 || terrainRegion(cell) !== "moss" || !detailIsClear(cell, 1.35)) return false;
         const seed = Math.abs(Math.sin(cell.x * 83.1 + cell.z * 27.9) * 31917.7) % 1;
         return seed > 0.972;
       }).slice(0, 420);
-      if (fernCells.length) {
+      if (fernFanCells.length) {
         const ferns = new THREE.InstancedMesh(
           new THREE.ConeGeometry(0.042, 0.23, 5),
           shared.coastGrass,
-          fernCells.length * 3,
+          fernFanCells.length * 3,
         );
         const dummy = new THREE.Object3D();
         const tint = new THREE.Color();
-        for (let i = 0; i < fernCells.length; i++) {
-          const cell = fernCells[i];
+        for (let i = 0; i < fernFanCells.length; i++) {
+          const cell = fernFanCells[i];
           const seed = Math.abs(Math.sin(cell.x * 127.1 + cell.z * 311.7) * 43758.5453) % 1;
           for (let leaf = 0; leaf < 3; leaf++) {
             const angle = seed * Math.PI * 2 + leaf * (Math.PI * 2 / 3);
