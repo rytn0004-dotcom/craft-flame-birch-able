@@ -2877,8 +2877,43 @@ vFoliageGust = 0.0;
         }
       }
       if (biomeSeamCells.length) {
+        // A broken, shallow earth-and-moss ribbon replaces the repeated rectangular seam bars.
+        // Its five-rail profile rises into a soft center ridge and thins irregularly at both ends.
+        const seamPositions: number[] = [];
+        const seamIndices: number[] = [];
+        const seamRows = 11;
+        const seamRails = [-1, -0.5, 0, 0.5, 1];
+        for (let row = 0; row < seamRows; row++) {
+          const t = row / (seamRows - 1);
+          const endFade = Math.pow(Math.sin(Math.PI * t), 0.34);
+          const wave = Math.sin(t * 17.0 + 0.6) * 0.16 + Math.sin(t * 31.0 - 0.8) * 0.07;
+          for (let rail = 0; rail < seamRails.length; rail++) {
+            const across = seamRails[rail];
+            const edge = Math.pow(Math.abs(across), 1.7);
+            const width = 0.045 * endFade * (0.92 + wave);
+            const crest = (1 - Math.abs(across)) * (0.008 + 0.003 * Math.sin(t * 24.0));
+            const chippedEdge = edge * Math.sin(t * 39.0 + rail * 1.7) * 0.002;
+            seamPositions.push(
+              t - 0.5 + Math.sin(t * 13.0 + across * 3.0) * 0.006,
+              0.003 + crest + chippedEdge,
+              across * width + Math.sin(t * 21.0 + rail * 0.9) * 0.002,
+            );
+          }
+        }
+        for (let row = 0; row < seamRows - 1; row++) {
+          for (let rail = 0; rail < seamRails.length - 1; rail++) {
+            const a = row * seamRails.length + rail;
+            const b = a + seamRails.length;
+            seamIndices.push(a, a + 1, b, a + 1, b + 1, b);
+          }
+        }
+        const seamGeometry = new THREE.BufferGeometry();
+        seamGeometry.setAttribute("position", new THREE.Float32BufferAttribute(seamPositions, 3));
+        seamGeometry.setIndex(seamIndices);
+        seamGeometry.computeVertexNormals();
+        seamGeometry.computeBoundingSphere();
         const seams = new THREE.InstancedMesh(
-          new THREE.BoxGeometry(0.72, 0.012, 0.034),
+          seamGeometry,
           shared.biomeSeam,
           biomeSeamCells.length,
         );
