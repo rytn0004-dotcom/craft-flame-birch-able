@@ -13,7 +13,7 @@ export type Terrain3DTower = {
 };
 
 export type Terrain3DShot = {
-  x: number; y: number; tx: number; ty: number; color: string; sanctuary?: boolean;
+  x: number; y: number; tx: number; ty: number; color: string; speed?: number; sanctuary?: boolean;
 };
 
 export type Terrain3DRing = {
@@ -343,6 +343,17 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
     const enemyHealthBars: { back: any; fill: any }[] = [];
     const shotNodes: any[] = [];
     const ringNodes: any[] = [];
+    // 共用水平三角尾流幾何；每枚高速彈只建立一個輕量 additive ribbon。
+    const projectileWakeGeometry = new THREE.BufferGeometry();
+    projectileWakeGeometry.setAttribute("position", new THREE.Float32BufferAttribute([
+      -0.105, 0, 0.08,
+       0.105, 0, 0.08,
+       0, 0, -0.92,
+    ], 3));
+    projectileWakeGeometry.setIndex([0, 1, 2]);
+    projectileWakeGeometry.computeVertexNormals();
+    projectileWakeGeometry.computeBoundingSphere();
+    projectileWakeGeometry.userData.sharedGeometry = true;
     // 程序化黑霧貼圖：柔邊噪聲雲，不依賴外部圖檔，並以單一 InstancedMesh 控制效能。
     const blackMistSize = 64;
     const blackMistPixels = new Uint8Array(blackMistSize * blackMistSize * 4);
@@ -600,6 +611,10 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       bridgeStone: new THREE.MeshStandardMaterial({ color: "#c0b69b", roughness: 0.96, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.022 }),
       bridgeTrim: new THREE.MeshPhysicalMaterial({ color: "#b99560", metalness: 0.54, roughness: 0.36, roughnessMap: surfaceRoughnessMap, clearcoat: 0.48, clearcoatRoughness: 0.24, envMapIntensity: 1.02 }),
       grass: new THREE.MeshStandardMaterial({ color: "#83a878", roughness: 0.96 }),
+      grassBlade: new THREE.MeshStandardMaterial({
+        color: "#ffffff", vertexColors: true, roughness: 0.9, side: THREE.DoubleSide,
+        bumpMap: surfaceReliefMap, bumpScale: 0.004,
+      }),
       treeBark: new THREE.MeshStandardMaterial({ color: "#6e5943", roughness: 0.98, bumpMap: surfaceReliefMap, bumpScale: 0.018 }),
       foliageWind: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.94, bumpMap: surfaceReliefMap, bumpScale: 0.008, side: THREE.DoubleSide }),
       meadowBloom: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.72, emissive: "#473b20", emissiveIntensity: 0.06 }),
@@ -1016,10 +1031,15 @@ uniform float uFoliageTime;`,
           `#include <begin_vertex>
 #ifdef USE_INSTANCING
         float foliagePhase = dot(instanceMatrix[3].xz, vec2(0.17, 0.13));
-        float foliageMask = smoothstep(-0.36, 0.42, position.y);
-        float foliageBreeze = sin(uFoliageTime + foliagePhase + position.y * 2.4);
-        transformed.x += foliageBreeze * 0.052 * foliageMask;
-        transformed.z += cos(uFoliageTime * 0.77 + foliagePhase * 1.31) * 0.032 * foliageMask;
+        float foliageMask = smoothstep(-0.28, 0.52, position.y);
+        float broadGust = sin(uFoliageTime * 0.42 + dot(instanceMatrix[3].xz, vec2(0.031, 0.019)));
+        float gustStrength = 0.52 + 0.48 * smoothstep(-0.65, 0.88, broadGust);
+        float foliageWave = sin(uFoliageTime * 1.35 + foliagePhase + position.y * 2.8);
+        float foliageFlutter = sin(uFoliageTime * 2.4 + foliagePhase * 1.73 + position.y * 5.2) * 0.22;
+        float foliageSway = (foliageWave + foliageFlutter) * gustStrength;
+        transformed.x += foliageSway * 0.092 * foliageMask;
+        transformed.z += (cos(uFoliageTime * 0.91 + foliagePhase * 1.27 + position.y * 1.8)
+          + foliageFlutter * 0.45) * 0.048 * foliageMask;
 #endif`,
         );
       };
@@ -1027,6 +1047,7 @@ uniform float uFoliageTime;`,
     };
     installFoliageWind(shared.foliageWind, "tide-foliage-wind-v1");
     installFoliageWind(shared.grass, "tide-grass-stem-wind-v1");
+    installFoliageWind(shared.grassBlade, "tide-grass-blade-wind-v2");
     installFoliageWind(shared.meadowBloom, "tide-meadow-bloom-wind-v1");
     installFoliageWind(shared.coastGrass, "tide-coast-reed-wind-v1");
     installFoliageWind(shared.reefCoral, "tide-reef-coral-current-v1");
@@ -3239,13 +3260,20 @@ uniform float uFoliageTime;`,
           -0.018, 0.23, 0.038, 0.018, 0.23, 0.038,
           0, 0.32, 0.066,
         ], 3));
+        // 葉片由根部深綠漸層至尖端暖金，再乘上每株的生態色，讓草叢更有層次。
+        bladeGeometry.setAttribute("color", new THREE.Float32BufferAttribute([
+          0.19, 0.31, 0.22, 0.19, 0.31, 0.22,
+          0.36, 0.56, 0.29, 0.36, 0.56, 0.29,
+          0.62, 0.72, 0.39, 0.62, 0.72, 0.39,
+          0.88, 0.83, 0.53,
+        ], 3));
         bladeGeometry.setIndex([0, 2, 1, 1, 2, 3, 2, 4, 3, 3, 4, 5, 4, 6, 5]);
         bladeGeometry.computeVertexNormals();
         bladeGeometry.computeBoundingSphere();
         const bladeCount = grassCells.length * 3;
         const grass = new THREE.InstancedMesh(
           bladeGeometry,
-          shared.foliageWind,
+          shared.grassBlade,
           bladeCount,
         );
         const dummy = new THREE.Object3D();
@@ -5746,6 +5774,17 @@ uniform float uFoliageTime;`,
           const trail = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.055, 0.48), material);
           trail.position.z = -0.28;
           group.add(trail);
+          const wakeMaterial = new THREE.MeshBasicMaterial({
+            color: shot.color, transparent: true, opacity: 0.24,
+            blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+            depthWrite: false, toneMapped: false,
+          });
+          const wake = new THREE.Mesh(projectileWakeGeometry, wakeMaterial);
+          wake.position.y = -0.12;
+          wake.renderOrder = 4;
+          wake.castShadow = false;
+          wake.receiveShadow = false;
+          group.add(wake);
           effectRoot.add(group);
           shotNodes[i] = group;
         }
@@ -5753,6 +5792,14 @@ uniform float uFoliageTime;`,
         node.visible = true;
         node.children[0].material.color.set(shot.color);
         node.children[0].material.emissive.set(shot.color);
+        const speedFactor = THREE.MathUtils.clamp(((shot.speed ?? 220) - 220) / 420, 0, 1);
+        const wake = node.children[2];
+        wake.material.color.set(shot.color);
+        wake.material.opacity = 0.16 + speedFactor * 0.42;
+        wake.scale.set(0.82 + speedFactor * 0.44, 1, 0.72 + speedFactor * 1.3);
+        node.children[1].scale.z = 1 + speedFactor * 1.9;
+        node.children[1].position.z = -0.28 - speedFactor * 0.16;
+        node.children[0].scale.setScalar(1 + speedFactor * 0.13);
         const dx = (shot.tx - shot.x) / CELL;
         const dz = (shot.ty - shot.y) / CELL;
         const length = Math.hypot(dx, dz) || 1;
@@ -6204,7 +6251,12 @@ uniform float uFoliageTime;`,
         ringNode.mesh.material.dispose();
         ringNode.accentMaterial?.dispose();
       }
+      for (const shotNode of shotNodes) {
+        shotNode.children[0]?.material?.dispose();
+        shotNode.children[2]?.material?.dispose();
+      }
       clearGroup(effectRoot);
+      projectileWakeGeometry.dispose();
       scene.remove(skyDome);
       skyGeometry.dispose();
       skyMaterial.dispose();
@@ -6213,6 +6265,7 @@ uniform float uFoliageTime;`,
       shared.firefly.dispose();
       shared.treeBark.dispose();
       shared.grass.dispose();
+      shared.grassBlade.dispose();
       shared.foliageWind.dispose();
       shared.meadowBloom.dispose();
       shared.roadGuide.dispose();
