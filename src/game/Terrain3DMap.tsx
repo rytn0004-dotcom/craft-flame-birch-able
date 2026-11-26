@@ -1812,12 +1812,22 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           float seamRoot = pow(max(0.0, sin(vBiomeSeamLocal.x * 31.0
             + seamWorld.x * 0.9 + seamWorld.y * 0.6)), 8.0)
             * (1.0 - smoothstep(0.18, 0.34, abs(vBiomeSeamLocal.z)));
+          // 根系分叉沿土壤帶自然蔓延，碎礫只在潮濕與裸土交界零星顯現。
+          float seamRootFork = pow(max(0.0, sin(seamWorld.x * 4.1 + seamWorld.y * 3.2
+            + sin(seamWorld.y * 1.7 + seamWorld.x * 0.8) * 2.1
+            + vBiomeSeamLocal.x * 8.0)), 13.0)
+            * (1.0 - smoothstep(0.08, 0.43, abs(vBiomeSeamLocal.z)));
+          float seamGravel = pow(max(0.0, sin(seamWorld.x * 17.3
+            + sin(seamWorld.y * 9.1) * 3.2 + seamWorld.y * 19.7)), 16.0)
+            * (1.0 - seamMoss * 0.52);
           float seamDew = pow(max(0.0, sin(seamWorld.x * 0.7 + seamWorld.y * 0.46
             - uBiomeSeamTime * 0.7 + seamFlow)), 18.0) * seamMoss;
           diffuseColor.rgb *= mix(vec3(1.07, 0.94, 0.78), vec3(0.76, 1.08, 0.84), seamMoss * 0.22);
           diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.12, 1.02, 0.87), seamSilt * 0.14);
           diffuseColor.rgb *= 1.0 - seamRoot * 0.08;
-          diffuseColor.rgb += vec3(0.04, 0.095, 0.054) * seamRoot * 0.12;
+          diffuseColor.rgb *= 1.0 - seamRootFork * 0.14;
+          diffuseColor.rgb += vec3(0.04, 0.095, 0.054) * (seamRoot * 0.12 + seamRootFork * 0.18);
+          diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.16, 1.08, 0.91), seamGravel * 0.13);
           diffuseColor.rgb += vec3(0.12, 0.2, 0.17) * seamDew * 0.28;`,
         );
         shader.fragmentShader = shader.fragmentShader.replace(
@@ -1826,10 +1836,11 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           float seamSurfaceGrain = sin(vBiomeSeamWorld.x * 7.1 + vBiomeSeamWorld.z * 5.3)
             * cos(vBiomeSeamWorld.z * 8.3 - vBiomeSeamWorld.x * 3.7);
           roughnessFactor = clamp(roughnessFactor + seamSurfaceGrain * 0.035
-            + seamSilt * 0.08 - seamDew * 0.16, 0.0, 1.0);`,
+            + seamSilt * 0.08 + seamGravel * 0.09 + seamRootFork * 0.06
+            - seamDew * 0.16, 0.0, 1.0);`,
         );
       };
-      material.customProgramCacheKey = () => "tide-biome-transition-soil-roots-dew-v2";
+      material.customProgramCacheKey = () => "tide-biome-transition-soil-roots-dew-v3";
     };
     installBiomeTransition(shared.biomeSeam);
 
