@@ -919,6 +919,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       cliffCap: new THREE.MeshStandardMaterial({ color: "#d0c49b", roughness: 0.84, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.022 }),
       rockDetail: new THREE.MeshStandardMaterial({ color: "#ffffff", vertexColors: true, roughness: 0.98, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.03 }),
       terrainMoss: new THREE.MeshStandardMaterial({ color: "#66856a", roughness: 0.99, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.01 }),
+      groundLichen: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.99, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.014, side: THREE.DoubleSide }),
       terrainStrata: new THREE.MeshStandardMaterial({ color: "#c0b99d", roughness: 0.96, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.018 }),
       terrainInlay: new THREE.MeshStandardMaterial({ color: "#e1d0a6", roughness: 0.82, metalness: 0.08 }),
       biomeSeam: new THREE.MeshStandardMaterial({ color: "#c7b99a", roughness: 0.96, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.012 }),
@@ -3930,6 +3931,93 @@ vFoliageGust = 0.0;
         rocks.castShadow = true;
         rocks.receiveShadow = true;
         terrainRoot.add(rocks);
+      }
+
+      // 岩面苔衣與地衣斑：有三瓣不規則邊緣、微隆起的中心與柔和的環狀厚度，
+      // 像沿著石縫蔓延，而不是一張平面貼圖；以單批 InstancedMesh 控制成本。
+      const lichenCells = Array.from(tileCells.values()).filter((cell) => {
+        if (cell.h < 1) return false;
+        const region = terrainRegion(cell);
+        if (region !== "moss" && region !== "limestone" && region !== "ancient") return false;
+        const seed = Math.abs(Math.sin(cell.x * 103.7 + cell.z * 67.9) * 23871.37) % 1;
+        if (seed < 0.925) return false;
+        return !protectedBuildings.some((building) =>
+          Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 0.82,
+        );
+      }).slice(0, 360);
+      if (lichenCells.length) {
+        const lichenGeometry = new THREE.BufferGeometry();
+        const lichenPositions: number[] = [];
+        const lichenIndices: number[] = [];
+        const lichenSegments = 18;
+        const lichenRings = 4;
+        for (let ring = 0; ring < lichenRings; ring++) {
+          const t = (ring + 1) / lichenRings;
+          for (let segment = 0; segment < lichenSegments; segment++) {
+            const angle = (segment / lichenSegments) * Math.PI * 2;
+            const lobe = 1.0
+              + 0.16 * Math.sin(angle * 3.0 + 0.7)
+              + 0.075 * Math.cos(angle * 5.0 - 1.1);
+            const radius = t * lobe;
+            const ridge = Math.sin(t * Math.PI) * (0.009 + 0.005 * Math.cos(angle * 3.0));
+            const edgeLift = Math.pow(t, 3) * (0.003 + 0.002 * Math.sin(angle * 4.0));
+            lichenPositions.push(
+              Math.cos(angle) * radius,
+              0.004 + ridge + edgeLift,
+              Math.sin(angle) * radius * (0.72 + 0.09 * Math.sin(angle * 2.0)),
+            );
+          }
+        }
+        for (let ring = 0; ring < lichenRings - 1; ring++) {
+          for (let segment = 0; segment < lichenSegments; segment++) {
+            const a = ring * lichenSegments + segment;
+            const next = ring * lichenSegments + (segment + 1) % lichenSegments;
+            const b = a + lichenSegments;
+            const nextOuter = b + (segment + 1) % lichenSegments - segment;
+            lichenIndices.push(a, next, b, next, nextOuter, b);
+          }
+        }
+        const lichenCenter = lichenPositions.length / 3;
+        lichenPositions.push(0, 0.018, 0);
+        for (let segment = 0; segment < lichenSegments; segment++) {
+          const next = (segment + 1) % lichenSegments;
+          lichenIndices.push(lichenCenter, next, segment);
+        }
+        lichenGeometry.setAttribute("position", new THREE.Float32BufferAttribute(lichenPositions, 3));
+        lichenGeometry.setIndex(lichenIndices);
+        lichenGeometry.computeVertexNormals();
+        lichenGeometry.computeBoundingSphere();
+        const lichen = new THREE.InstancedMesh(lichenGeometry, shared.groundLichen, lichenCells.length);
+        const dummy = new THREE.Object3D();
+        const tint = new THREE.Color();
+        const mossPalette = ["#a5bf87", "#779b78", "#c0bf91", "#698d79", "#b0c49a"];
+        const limestonePalette = ["#b7b89d", "#8caa91", "#c9c09a", "#a0b3a2"];
+        const ruinPalette = ["#78998f", "#a6b5a0", "#c1b48c", "#6e918b"];
+        for (let i = 0; i < lichenCells.length; i++) {
+          const cell = lichenCells[i];
+          const seed = Math.abs(Math.sin(cell.x * 127.1 + cell.z * 311.7) * 43758.5453) % 1;
+          const region = terrainRegion(cell);
+          const palette = region === "moss" ? mossPalette : region === "ancient" ? ruinPalette : limestonePalette;
+          const angle = seed * Math.PI * 2;
+          const size = 0.2 + seed * 0.21;
+          dummy.position.set(
+            cell.x + Math.cos(angle) * 0.18,
+            groundTop(cell.h) + 0.014,
+            cell.z + Math.sin(angle) * 0.18,
+          );
+          dummy.rotation.set(0, angle, (seed - 0.5) * 0.035);
+          dummy.scale.set(size * (1.1 + seed * 0.25), 0.72 + seed * 0.24, size * (0.76 + seed * 0.42));
+          dummy.updateMatrix();
+          lichen.setMatrixAt(i, dummy.matrix);
+          tint.set(palette[Math.floor(seed * palette.length)]);
+          lichen.setColorAt(i, tint);
+        }
+        lichen.instanceMatrix.needsUpdate = true;
+        if (lichen.instanceColor) lichen.instanceColor.needsUpdate = true;
+        lichen.computeBoundingSphere();
+        lichen.castShadow = false;
+        lichen.receiveShadow = false;
+        terrainRoot.add(lichen);
       }
 
       // 草叢沿草甸與苔地的低頻生態帶聚集；海岸、石灰岩與古遺跡保留較裸露的地貌。
@@ -7705,6 +7793,8 @@ vFoliageGust = 0.0;
       rockDebrisMaterial.dispose();
       cliffBlockGeometry.dispose();
       shared.treeBark.dispose();
+      shared.terrainMoss.dispose();
+      shared.groundLichen.dispose();
       shared.grass.dispose();
       shared.grassBlade.dispose();
       shared.foliageWind.dispose();
