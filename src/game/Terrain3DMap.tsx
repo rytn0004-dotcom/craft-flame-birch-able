@@ -7016,7 +7016,8 @@ vFoliageGust = 0.0;
         terrainRoot.add(ledges);
       }
 
-      // 單級坡面連接相鄰平台；道路高度 0 不鋪坡，避免遮住怪物通道。
+      // 多級坡面連接相鄰平台；跨越 2～3 級高差時也會生成連續斜坡，
+      // 讓山脊不是突然斷成垂直方牆。道路高度 0 仍不鋪坡，避免遮住怪物通道。
       const rampDirections = [
         { dc: 0, dr: -1, rot: 0 },
         { dc: 1, dr: 0, rot: -Math.PI / 2 },
@@ -7030,7 +7031,7 @@ vFoliageGust = 0.0;
       ], 3));
       rampGeometry.setIndex([0, 2, 1, 1, 2, 3]);
       rampGeometry.computeVertexNormals();
-      const rampCells: { x: number; y: number; z: number; rot: number; level: number }[] = [];
+      const rampCells: { x: number; y: number; z: number; rot: number; level: number; rise: number }[] = [];
       for (const cell of tileCells.values()) {
         if (cell.h <= 0) continue;
         const gx = Math.floor(cell.x), gy = Math.floor(cell.z);
@@ -7038,20 +7039,34 @@ vFoliageGust = 0.0;
           Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 0.58,
         );
         if (nearBuilding) continue;
-        const higher = rampDirections.find((d) => {
-          const neighbor = tileCells.get((gx + d.dc) + "," + (gy + d.dr));
-          return !!neighbor && neighbor.h === cell.h + 1;
-        });
-        if (higher) rampCells.push({ x: cell.x, y: groundTop(cell.h) + 0.012, z: cell.z, rot: higher.rot, level: cell.h });
+        const higher = rampDirections
+          .map((direction) => ({
+            direction,
+            neighbor: tileCells.get((gx + direction.dc) + "," + (gy + direction.dr)),
+          }))
+          .filter((entry) => !!entry.neighbor && entry.neighbor!.h > cell.h)
+          .sort((a, b) => (b.neighbor?.h ?? 0) - (a.neighbor?.h ?? 0))[0];
+        if (higher?.neighbor) {
+          rampCells.push({
+            x: cell.x,
+            y: groundTop(cell.h) + 0.012,
+            z: cell.z,
+            rot: higher.direction.rot,
+            level: cell.h,
+            rise: (higher.neighbor.h - cell.h) * HEIGHT_STEP,
+          });
+        }
       }
       if (rampCells.length) {
         const ramps = new THREE.InstancedMesh(rampGeometry, shared.ramp, rampCells.length);
-        const matrix = new THREE.Matrix4();
+        const rampDummy = new THREE.Object3D();
         for (let i = 0; i < rampCells.length; i++) {
           const ramp = rampCells[i];
-          matrix.makeRotationY(ramp.rot);
-          matrix.setPosition(ramp.x, ramp.y, ramp.z);
-          ramps.setMatrixAt(i, matrix);
+          rampDummy.position.set(ramp.x, ramp.y, ramp.z);
+          rampDummy.rotation.set(0, ramp.rot, 0);
+          rampDummy.scale.set(1, ramp.rise / HEIGHT_STEP, 1);
+          rampDummy.updateMatrix();
+          ramps.setMatrixAt(i, rampDummy.matrix);
         }
         ramps.instanceMatrix.needsUpdate = true;
         ramps.receiveShadow = true;
@@ -7078,7 +7093,7 @@ vFoliageGust = 0.0;
             const ramp = detailedRamps[i];
             let postIndex = 0;
             for (const side of [-1, 1]) for (const localZ of [-0.25, 0.25]) {
-              const heightAlongRamp = HEIGHT_STEP * (0.5 - localZ / 0.92) + 0.025;
+              const heightAlongRamp = ramp.rise * (0.5 - localZ / 0.92) + 0.025;
               const worldX = ramp.x + Math.sin(ramp.rot) * localZ + Math.cos(ramp.rot) * side * 0.385;
               const worldZ = ramp.z + Math.cos(ramp.rot) * localZ - Math.sin(ramp.rot) * side * 0.385;
               const index = i * 4 + postIndex++;
@@ -7120,7 +7135,7 @@ vFoliageGust = 0.0;
             const ramp = stairRamps[i];
             for (let step = 0; step < 3; step++) {
               const localZ = (step - 1) * 0.28;
-              const heightAlongRamp = HEIGHT_STEP * (0.5 - localZ / 0.92) + 0.025;
+              const heightAlongRamp = ramp.rise * (0.5 - localZ / 0.92) + 0.025;
               const worldX = ramp.x + Math.sin(ramp.rot) * localZ;
               const worldZ = ramp.z + Math.cos(ramp.rot) * localZ;
               stairDummy.position.set(worldX, ramp.y + heightAlongRamp, worldZ);
