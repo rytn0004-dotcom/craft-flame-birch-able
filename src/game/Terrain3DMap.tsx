@@ -3455,6 +3455,51 @@ vFoliageAltitude = 0.0;
         seams.castShadow = false;
         seams.receiveShadow = false;
         terrainRoot.add(seams);
+
+        // Sparse transition pebbles break the seam ribbon into soil, stone and moss fragments.
+        // A single capped instanced batch keeps the added edge detail inexpensive.
+        const pebbleSites = biomeSeamCells.slice(0, 360);
+        if (pebbleSites.length) {
+          const seamPebbles = new THREE.InstancedMesh(
+            talusStoneGeometry,
+            shared.rockDetail,
+            pebbleSites.length * 2,
+          );
+          seamPebbles.userData.sharedGeometry = true;
+          const pebbleDummy = new THREE.Object3D();
+          const pebbleTint = new THREE.Color();
+          for (let i = 0; i < pebbleSites.length; i++) {
+            const site = pebbleSites[i];
+            const seed = Math.abs(Math.sin(site.x * 47.1 + site.z * 83.7) * 21731.9) % 1;
+            for (let piece = 0; piece < 2; piece++) {
+              const along = (piece === 0 ? -1 : 1) * (0.045 + seed * 0.045);
+              const across = (seed - 0.5) * 0.055;
+              pebbleDummy.position.set(
+                site.x + Math.cos(site.rot) * along - Math.sin(site.rot) * across,
+                site.y + 0.012 + piece * 0.004,
+                site.z + Math.sin(site.rot) * along + Math.cos(site.rot) * across,
+              );
+              pebbleDummy.rotation.set(
+                (seed - 0.5) * 0.28,
+                site.rot + seed * 2.4 + piece * 0.8,
+                (piece - 0.5) * 0.22,
+              );
+              const size = 0.28 + ((seed * 3.7 + piece * 0.37) % 1) * 0.2;
+              pebbleDummy.scale.set(size * 0.82, size * 0.54, size * 1.12);
+              pebbleDummy.updateMatrix();
+              const index = i * 2 + piece;
+              seamPebbles.setMatrixAt(index, pebbleDummy.matrix);
+              pebbleTint.set(site.tint).multiplyScalar(piece === 0 ? 0.82 : 1.12);
+              pebbleTint.offsetHSL((piece - 0.5) * 0.025, 0.04, (seed - 0.5) * 0.08);
+              seamPebbles.setColorAt(index, pebbleTint);
+            }
+          }
+          seamPebbles.instanceMatrix.needsUpdate = true;
+          if (seamPebbles.instanceColor) seamPebbles.instanceColor.needsUpdate = true;
+          seamPebbles.castShadow = false;
+          seamPebbles.receiveShadow = true;
+          terrainRoot.add(seamPebbles);
+        }
       }
 
       // 擴張地圖的道路格保持原有高度與碰撞資料，只在表面加石板鋪面。
