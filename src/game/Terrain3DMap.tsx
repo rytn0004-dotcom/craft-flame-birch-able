@@ -1272,6 +1272,42 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
     installShoreFoamFlow(shared.shoreFoam);
 
     // 崖壁使用材質內的細層理與緩慢礦脈光，不添加額外幾何，也不影響地形碰撞。
+    // One shared beveled rock slab for all cliff strata. Subdivided faces carry subtle erosion
+    // and rounded/chipped edges instead of the hard cube silhouette of stretched BoxGeometry.
+    const cliffBlockGeometry = (() => {
+      const geometry = new THREE.BoxGeometry(1, 1, 1, 4, 4, 2);
+      const positions = geometry.getAttribute("position");
+      for (let vertex = 0; vertex < positions.count; vertex++) {
+        let x = positions.getX(vertex);
+        let y = positions.getY(vertex);
+        let z = positions.getZ(vertex);
+        const bevelCore = 0.438;
+        const cx = THREE.MathUtils.clamp(x, -bevelCore, bevelCore);
+        const cy = THREE.MathUtils.clamp(y, -bevelCore, bevelCore);
+        const cz = THREE.MathUtils.clamp(z, -bevelCore, bevelCore);
+        const dx = x - cx;
+        const dy = y - cy;
+        const dz = z - cz;
+        const distance = Math.hypot(dx, dy, dz);
+        if (distance > 1e-5) {
+          x = cx + (dx / distance) * 0.062;
+          y = cy + (dy / distance) * 0.062;
+          z = cz + (dz / distance) * 0.062;
+        }
+        const erosion = Math.sin(y * 17.3 + z * 11.7) * Math.cos(x * 13.1 - z * 8.9);
+        const grain = Math.sin(x * 27.1 + y * 21.7 + z * 16.3);
+        x += erosion * 0.0026;
+        y += grain * 0.0022;
+        z += erosion * 0.0028;
+        positions.setXYZ(vertex, x, y, z);
+      }
+      positions.needsUpdate = true;
+      geometry.computeVertexNormals();
+      geometry.computeBoundingSphere();
+      geometry.userData.sharedGeometry = true;
+      return geometry;
+    })();
+
     const installCliffStrata = (material: THREE.MeshStandardMaterial) => {
       material.onBeforeCompile = (shader) => {
         shader.uniforms.uCliffStrataTime = cliffStrataUniforms.time;
@@ -3646,7 +3682,7 @@ vFoliageGust = 0.0;
         );
       }).slice(0, 1500);
       if (rockCells.length) {
-        const rocks = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(0.075, 0), shared.rockDetail, rockCells.length);
+        const rocks = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(0.075, 1), shared.rockDetail, rockCells.length);
         const dummy = new THREE.Object3D();
         const tint = new THREE.Color();
         for (let i = 0; i < rockCells.length; i++) {
@@ -5751,10 +5787,10 @@ vFoliageGust = 0.0;
         }
       }
       if (cliffFaces.length) {
-        const cliffMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), shared.cliff, cliffFaces.length);
-        const bandMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), shared.cliffBand, cliffFaces.length);
-        const upperBandMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), shared.cliffBandLight, cliffFaces.length);
-        const capMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), shared.cliffCap, cliffFaces.length);
+        const cliffMesh = new THREE.InstancedMesh(cliffBlockGeometry, shared.cliff, cliffFaces.length);
+        const bandMesh = new THREE.InstancedMesh(cliffBlockGeometry, shared.cliffBand, cliffFaces.length);
+        const upperBandMesh = new THREE.InstancedMesh(cliffBlockGeometry, shared.cliffBandLight, cliffFaces.length);
+        const capMesh = new THREE.InstancedMesh(cliffBlockGeometry, shared.cliffCap, cliffFaces.length);
         const matrix = new THREE.Matrix4();
         for (let i = 0; i < cliffFaces.length; i++) {
           const face = cliffFaces[i];
@@ -7125,6 +7161,7 @@ vFoliageGust = 0.0;
       shared.windblownLeaf.dispose();
       shared.treeCanopyWind.dispose();
       rockDebrisMaterial.dispose();
+      cliffBlockGeometry.dispose();
       shared.treeBark.dispose();
       shared.grass.dispose();
       shared.grassBlade.dispose();
