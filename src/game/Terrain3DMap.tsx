@@ -7620,24 +7620,33 @@ vFoliageAltitude = 0.0;
         for (let i = 0; i < rubbleEntries.length; i++) {
           const stone = rubbleEntries[i];
           for (let piece = 0; piece < 3; piece++) {
-            const angle = stone.rot + piece * (Math.PI * 2 / 3) + 0.18;
-            const radius = piece === 0 ? 0.012 : 0.052 + piece * 0.006;
-            const scale = stone.scale / 0.075 * (piece === 0 ? 0.92 : 0.58 + piece * 0.08);
+            const angle = stone.rot + piece * (Math.PI * 2 / 3) + 0.18
+              + Math.sin(stone.rot * 2.7 + piece * 1.9) * 0.16;
+            const clusterSeed = Math.abs(Math.sin(stone.x * 31.7 + stone.z * 17.3 + piece * 13.1) * 19341.7) % 1;
+            const radius = piece === 0 ? 0.012 : 0.045 + clusterSeed * 0.052 + piece * 0.008;
+            const scale = stone.scale / 0.075 * (piece === 0 ? 0.98 : 0.48 + clusterSeed * 0.22 + piece * 0.045);
             dummy.position.set(
               stone.x + Math.cos(angle) * radius,
-              stone.y + (piece === 0 ? 0.008 : 0.012 + piece * 0.006),
+              stone.y + (piece === 0 ? 0.008 : 0.009 + clusterSeed * 0.012 + piece * 0.003),
               stone.z + Math.sin(angle) * radius,
             );
             dummy.rotation.set(
-              stone.rot * 0.22 + piece * 0.31,
-              angle,
-              stone.rot * -0.16 + (piece - 1) * 0.12,
+              stone.rot * 0.22 + piece * 0.31 + (clusterSeed - 0.5) * 0.28,
+              angle + clusterSeed * 0.42,
+              stone.rot * -0.16 + (piece - 1) * 0.12 + (clusterSeed - 0.5) * 0.24,
             );
-            dummy.scale.set(scale * (0.9 + piece * 0.08), scale * (0.68 + piece * 0.12), scale * (1.02 - piece * 0.08));
+            // Each chip has its own battered silhouette, lean and flattened profile;
+            // the overlapping cluster reads as a small gravity-sorted scree fan.
+            dummy.scale.set(
+              scale * (0.78 + clusterSeed * 0.42),
+              scale * (0.52 + clusterSeed * 0.3),
+              scale * (0.86 + (1 - clusterSeed) * 0.34),
+            );
             dummy.updateMatrix();
             const index = i * 3 + piece;
             rubble.setMatrixAt(index, dummy.matrix);
-            tint.set(stone.tint).multiplyScalar(piece === 0 ? 1.04 : piece === 1 ? 0.9 : 0.98);
+            tint.set(stone.tint).multiplyScalar(piece === 0 ? 1.08 : piece === 1 ? 0.86 + clusterSeed * 0.12 : 0.94 + clusterSeed * 0.12);
+            tint.offsetHSL((piece - 1) * 0.012 + (clusterSeed - 0.5) * 0.018, 0.035, (clusterSeed - 0.5) * 0.045);
             rubble.setColorAt(index, tint);
           }
         }
