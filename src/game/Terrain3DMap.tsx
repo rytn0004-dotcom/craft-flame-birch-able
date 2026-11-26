@@ -1080,15 +1080,28 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           float abyssCurrentB = cos(vMistFieldUv.y * 23.0 - vMistFieldUv.x * 9.0 + uMistTime * 0.065);
           float abyssFlow = smoothstep(0.16, 0.92, abyssCurrentA * 0.5 + 0.5)
             * smoothstep(0.04, 0.96, abyssCurrentB * 0.5 + 0.5);
+          // 深淵視線：多層環狀暗流向視覺焦點收束，像霧下有巨大深洞在緩慢凝視。
+          vec2 abyssUv = vMistFieldUv - vec2(0.5);
+          float abyssAngle = atan(abyssUv.y, abyssUv.x);
+          float abyssRadius = length(abyssUv);
+          float abyssEyeRim = exp(-pow((abyssRadius - (0.19 + 0.018 * sin(abyssAngle * 5.0 - uMistTime * 0.18))) * 23.0, 2.0));
+          float abyssIris = pow(max(0.0, 0.5 + 0.5 * sin(abyssAngle * 7.0 + uMistTime * 0.12
+            + sin(abyssRadius * 28.0 - uMistTime * 0.2) * 1.2)), 5.0)
+            * smoothstep(0.34, 0.08, abyssRadius);
+          float abyssDepth = 1.0 - smoothstep(0.02, 0.72, abyssRadius);
+          float abyssVortex = sin(abyssAngle * 9.0 + abyssRadius * 31.0 - uMistTime * 0.24);
           diffuseColor.rgb = mix(diffuseColor.rgb,
-            diffuseColor.rgb * vec3(0.76, 0.88, 1.16), abyssFlow * 0.22);
-          diffuseColor.rgb += vec3(0.012, 0.02, 0.048)
-            * abyssFlow * (0.24 + uMistPower * 0.18);
-          diffuseColor.a *= 0.94 + 0.06 * (0.5 + 0.5 * sin(
+            diffuseColor.rgb * vec3(0.54, 0.66, 0.94), abyssFlow * 0.28);
+          diffuseColor.rgb *= 1.0 - abyssDepth * 0.34;
+          diffuseColor.rgb += vec3(0.035, 0.095, 0.18) * abyssEyeRim * (0.38 + uMistPower);
+          diffuseColor.rgb += vec3(0.022, 0.035, 0.09) * abyssIris * (0.32 + uMistPower);
+          diffuseColor.rgb += vec3(0.008, 0.018, 0.052)
+            * (abyssFlow * 0.32 + abyssDepth * 0.5 + max(0.0, abyssVortex) * 0.08);
+          diffuseColor.a *= 0.91 + 0.09 * (0.5 + 0.5 * sin(
             vMistFieldUv.x * 31.0 + vMistFieldUv.y * 19.0 - uMistTime * 0.16));`,
         );
       };
-      material.customProgramCacheKey = () => "tide-black-mist-tile-front-v3";
+      material.customProgramCacheKey = () => "tide-black-mist-abyss-gaze-v4";
     };
     installBlackMistFront(shared.blackMistField);
 
