@@ -357,9 +357,11 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       const longitudinalSections = 12;
       const rails = [-1, -0.5, 0, 0.5, 1];
       const strands = [
-        { offset: 0, width: 0.076, phase: 0, color: [0.82, 0.96, 1.0] },
+        { offset: 0, width: 0.076, phase: 0, color: [0.88, 0.98, 1.0] },
         { offset: -1, width: 0.034, phase: 1.8, color: [0.36, 0.78, 0.94] },
         { offset: 1, width: 0.034, phase: 3.2, color: [0.44, 0.86, 0.98] },
+        { offset: -1.72, width: 0.014, phase: 4.7, color: [0.28, 0.62, 0.82] },
+        { offset: 1.68, width: 0.014, phase: 5.9, color: [0.48, 0.76, 0.86] },
       ];
       for (let strand = 0; strand < strands.length; strand++) {
         const spec = strands[strand];
@@ -369,10 +371,12 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           const taper = Math.pow(1 - t, strand === 0 ? 0.84 : 0.7);
           const width = spec.width * taper + 0.0015;
           const spread = spec.offset === 0 ? 0 : spec.offset * (0.072 + 0.135 * Math.sin(t * Math.PI * 0.82));
-          const curl = Math.sin(t * 9.2 + spec.phase) * 0.012 * t;
-          const centerX = spread + curl;
-          const centerY = 0.009 + Math.sin(t * 10.5 + spec.phase) * 0.013 * t;
-          const centerZ = 0.08 - t * (strand === 0 ? 1.3 : 1.16);
+          const curl = Math.sin(t * (strand > 2 ? 13.4 : 9.2) + spec.phase) * (strand > 2 ? 0.018 : 0.012) * t;
+          const secondaryVortex = Math.sin(t * 22.0 + spec.phase * 1.7) * 0.004 * t;
+          const centerX = spread + curl + secondaryVortex;
+          const centerY = 0.009 + Math.sin(t * 10.5 + spec.phase) * 0.013 * t
+            + Math.cos(t * 19.0 + spec.phase) * 0.004 * t;
+          const centerZ = 0.08 - t * (strand === 0 ? 1.3 : strand > 2 ? 1.08 : 1.16);
           for (let rail = 0; rail < rails.length; rail++) {
             const across = rails[rail];
             const ridge = (1 - Math.abs(across)) * (strand === 0 ? 0.018 : 0.009);
