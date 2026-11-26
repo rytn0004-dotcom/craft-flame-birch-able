@@ -1618,15 +1618,22 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
         shader.uniforms.uCliffStrataTime = cliffStrataUniforms.time;
         shader.vertexShader = shader.vertexShader.replace(
           "#include <common>",
-          "#include <common>\nvarying vec2 vCliffStrataUv;",
+          "#include <common>\nvarying vec2 vCliffStrataUv;\nvarying vec3 vCliffWorldPosition;",
         );
         shader.vertexShader = shader.vertexShader.replace(
           "#include <begin_vertex>",
-          "#include <begin_vertex>\nvCliffStrataUv = uv;",
+          `#include <begin_vertex>
+          vCliffStrataUv = uv;
+          vec4 cliffWorldPosition = vec4(transformed, 1.0);
+          #ifdef USE_INSTANCING
+            cliffWorldPosition = instanceMatrix * cliffWorldPosition;
+          #endif
+          cliffWorldPosition = modelMatrix * cliffWorldPosition;
+          vCliffWorldPosition = cliffWorldPosition.xyz;`,
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <common>",
-          "#include <common>\nvarying vec2 vCliffStrataUv;\nuniform float uCliffStrataTime;",
+          "#include <common>\nvarying vec2 vCliffStrataUv;\nvarying vec3 vCliffWorldPosition;\nuniform float uCliffStrataTime;",
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <color_fragment>",
@@ -1643,16 +1650,36 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             "float fractureMask = fractureLine * fractureBranch * (0.35 + strataBreak * 0.65);",
             "float edgePatina = pow(max(0.0, sin(vCliffStrataUv.x * 17.0 + vCliffStrataUv.y * 5.0 + strataWarp)), 7.0) * strataBreak;",
             "float mineralDust = pow(max(0.0, sin(vCliffStrataUv.x * 71.0 + vCliffStrataUv.y * 53.0)), 18.0);",
+            // 世界座標岩層跨越相鄰方塊連續變化，暖色鐵鏽層、灰綠沉積層與冷色石英不再每塊重複同一張 UV。
+            "vec2 cliffWorldXZ = vCliffWorldPosition.xz;",
+            "float cliffFlow = sin(cliffWorldXZ.x * 0.31 + sin(cliffWorldXZ.y * 0.23) * 1.7) * cos(cliffWorldXZ.y * 0.27 - cliffWorldXZ.x * 0.14);",
+            "float cliffSediment = 0.5 + 0.5 * sin(vCliffWorldPosition.y * 8.8 + cliffFlow * 2.2 + sin(cliffWorldXZ.x * 0.19) * 0.8);",
+            "float sedimentBand = smoothstep(0.56, 0.72, cliffSediment) * (1.0 - smoothstep(0.82, 0.96, cliffSediment));",
+            "float ironOxide = pow(max(0.0, sin(cliffWorldXZ.x * 0.72 + cliffWorldXZ.y * 0.41 + cliffFlow * 2.0) * 0.5 + 0.5), 8.0) * (0.5 + 0.5 * sin(vCliffWorldPosition.y * 3.8));",
+            "float dampLichen = smoothstep(0.12, 0.84, sin(cliffWorldXZ.x * 0.19 - cliffWorldXZ.y * 0.26 + cliffFlow) * 0.5 + 0.5) * (1.0 - smoothstep(0.32, 0.72, vCliffWorldPosition.y - floor(vCliffWorldPosition.y)));",
+            "float saltBloom = pow(max(0.0, sin(cliffWorldXZ.x * 1.7 - cliffWorldXZ.y * 1.1 + vCliffWorldPosition.y * 0.7)), 11.0);",
             "diffuseColor.rgb *= 0.94 + strataLine * strataBreak * 0.09;",
             "diffuseColor.rgb *= 1.0 - fractureMask * 0.28;",
             "diffuseColor.rgb += vec3(0.11, 0.14, 0.16) * fractureMask * 0.12;",
+            "diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.16, 0.82, 0.61), sedimentBand * 0.18);",
+            "diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.78, 1.04, 0.82), dampLichen * 0.16);",
+            "diffuseColor.rgb += vec3(0.105, 0.043, 0.018) * ironOxide * 0.17;",
+            "diffuseColor.rgb += vec3(0.12, 0.15, 0.17) * saltBloom * 0.08;",
             "diffuseColor.rgb += vec3(0.018, 0.065, 0.052) * mineralVein * strataBreak * 0.55;",
             "diffuseColor.rgb += vec3(0.095, 0.073, 0.041) * edgePatina * 0.12;",
             "diffuseColor.rgb += vec3(0.16, 0.19, 0.2) * mineralDust * 0.045;",
           ].join("\n"),
         );
+        shader.fragmentShader = shader.fragmentShader.replace(
+          "#include <roughnessmap_fragment>",
+          [
+            "#include <roughnessmap_fragment>",
+            "float cliffGrain = sin(vCliffWorldPosition.x * 7.3 + vCliffWorldPosition.z * 5.7) * cos(vCliffWorldPosition.z * 8.1 - vCliffWorldPosition.x * 3.2);",
+            "roughnessFactor = clamp(roughnessFactor + cliffGrain * 0.035 + fractureMask * 0.11 - mineralVein * 0.08 - dampLichen * 0.035, 0.0, 1.0);",
+          ].join("\\n"),
+        );
       };
-      material.customProgramCacheKey = () => "tide-cliff-strata-fracture-patina-v2";
+      material.customProgramCacheKey = () => "tide-cliff-strata-world-weathering-v3";
     };
     installCliffStrata(shared.cliff);
 
