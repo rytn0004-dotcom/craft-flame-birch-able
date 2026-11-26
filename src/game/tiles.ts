@@ -512,6 +512,7 @@ export function buildHeights(board: TileBoard): number[] {
   };
 
   const roadDist = new Map<string, number>(); // 可建格到最近道路的粗距
+  const fixedHeightOverrides = new Map<number, number>();
   for (const p of board.placed) {
     const tpl = TEMPLATE_BY_ID[p.templateId];
     if (!tpl) continue;
@@ -571,11 +572,14 @@ export function buildHeights(board: TileBoard): number[] {
       const r = origin.r + fh.r;
       if (c < 0 || r < 0 || c >= COLS || r >= ROWS) continue;
       if (!blocked[fh.r]?.[fh.c]) continue;
-      heights[r * COLS + c] = Math.max(0, Math.min(3, fh.h | 0));
+      const index = r * COLS + c;
+      const fixedHeight = Math.max(0, Math.min(3, fh.h | 0));
+      heights[index] = fixedHeight;
+      fixedHeightOverrides.set(index, fixedHeight);
     }
   }
 
-  // 輕量平滑；可建格保底高度 1
+  // 八方向平滑；可建格保底高度 1
   const smoothed = heights.slice();
   for (const p of board.placed) {
     const origin = worldOrigin(p.tc, p.tr);
@@ -622,6 +626,8 @@ export function buildHeights(board: TileBoard): number[] {
       }
     }
   }
+  // 模板核心／特殊台地高度為設計錨點，最後覆寫一次，確保隨機平滑不會抹掉它們。
+  for (const [index, fixedHeight] of fixedHeightOverrides) smoothed[index] = fixedHeight;
   return smoothed;
 }
 
