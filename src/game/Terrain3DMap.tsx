@@ -4483,13 +4483,17 @@ vFoliageGust = 0.0;
         // Smooth, lightly irregular leaf masses: the contour has enough segments to stay round up close,
         // with tiny radial variation so the canopy is organic rather than a perfect sphere.
         const makeCanopyGeometry = (radius: number, phase: number) => {
-          const geometry = new THREE.SphereGeometry(radius, 24, 18);
+          const geometry = new THREE.SphereGeometry(radius, 28, 20);
           const positions = geometry.getAttribute("position");
           for (let vertex = 0; vertex < positions.count; vertex++) {
             const x = positions.getX(vertex) / radius;
             const y = positions.getY(vertex) / radius;
             const z = positions.getZ(vertex) / radius;
+            const azimuth = Math.atan2(z, x);
+            const canopyLobe = Math.sin(azimuth * 5.0 + y * 3.2 + phase)
+              * Math.pow(Math.max(0, 1 - Math.abs(y)), 0.65);
             const contour = 1
+              + canopyLobe * 0.014
               + Math.sin(x * 7.3 + phase) * Math.cos(z * 6.7 - phase * 0.8) * 0.024
               + Math.sin(y * 10.1 - z * 4.2 + phase * 1.7) * 0.012
               + Math.cos(x * 12.4 + y * 8.3 + phase) * 0.008
