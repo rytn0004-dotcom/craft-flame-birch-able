@@ -990,6 +990,13 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           diffuseColor.rgb = mix(diffuseColor.rgb,
             diffuseColor.rgb * vec3(0.87, 1.055, 1.105), dewPigment * 0.09);
           diffuseColor.rgb += vec3(0.075, 0.105, 0.13) * quartzSeam * 0.28;
+          // 高層地形的冷色晶脈更明顯，低地則保留柔暖草土色。
+          float ridgeGlint = pow(max(0.0,
+            sin(terrainWorld.x * 0.29 + terrainWorld.y * 0.21 + middleGrain)
+            * cos(terrainWorld.y * 0.33 - terrainWorld.x * 0.17)), 12.0);
+          diffuseColor.rgb = mix(diffuseColor.rgb,
+            diffuseColor.rgb * vec3(0.82, 1.015, 1.18),
+            ridgeGlint * ${height >= 2 ? "0.16" : "0.025"});
           diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.88, 1.06, 1.12),
             lichenField * ${height >= 1 ? "0.068" : "0.02"});`,
         );
@@ -1001,7 +1008,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           roughnessFactor = clamp(roughnessFactor + terrainRoughnessGrain * 0.018, 0.0, 1.0);`,
         );
       };
-      material.customProgramCacheKey = () => "tide-terrain-world-mottle-v2-" + height;
+      material.customProgramCacheKey = () => "tide-terrain-world-mottle-v3-" + height;
     };
     const installBlackMistVeil = (material: THREE.MeshBasicMaterial) => {
       material.onBeforeCompile = (shader) => {
@@ -1265,17 +1272,17 @@ vFoliageGust = 0.0;
           "#include <color_fragment>",
           `#include <color_fragment>
           float windLightCatch = smoothstep(0.12, 0.96, vFoliageGust);
-          diffuseColor.rgb *= 1.0 + vec3(0.026, 0.048, 0.018) * windLightCatch;`,
+          diffuseColor.rgb *= 1.0 + vec3(0.048, 0.072, 0.026) * windLightCatch;`,
         );
       };
       material.customProgramCacheKey = () => cacheKey;
     };
-    installFoliageWind(shared.foliageWind, "tide-foliage-wind-v3");
-    installFoliageWind(shared.grass, "tide-grass-stem-wind-v3");
-    installFoliageWind(shared.grassBlade, "tide-grass-blade-wind-v4");
-    installFoliageWind(shared.meadowBloom, "tide-meadow-bloom-wind-v3");
-    installFoliageWind(shared.coastGrass, "tide-coast-reed-wind-v3");
-    installFoliageWind(shared.reefCoral, "tide-reef-coral-current-v3");
+    installFoliageWind(shared.foliageWind, "tide-foliage-wind-v4");
+    installFoliageWind(shared.grass, "tide-grass-stem-wind-v4");
+    installFoliageWind(shared.grassBlade, "tide-grass-blade-wind-v5");
+    installFoliageWind(shared.meadowBloom, "tide-meadow-bloom-wind-v4");
+    installFoliageWind(shared.coastGrass, "tide-coast-reed-wind-v4");
+    installFoliageWind(shared.reefCoral, "tide-reef-coral-current-v4");
 
     // 花粉與草籽以少量實例漂浮；GPU 風場控制輕微三維漂移，不逐粒更新矩陣。
     const installPollenDrift = (material: THREE.MeshBasicMaterial) => {
@@ -2408,11 +2415,11 @@ vFoliageGust = 0.0;
       // 每格岩面依區域加入微色偏：海岸偏沙金、苔地偏冷綠、石灰岩偏暖白、遺跡偏灰青。
       const regionTint: Record<string, [number, number, number]> = {
         road: [1, 1, 1],
-        coast: [1.055, 1.015, 0.9],
-        moss: [0.9, 1.065, 0.89],
-        limestone: [1.075, 1.035, 0.94],
-        ancient: [0.94, 0.96, 0.91],
-        meadow: [0.985, 1.0, 0.96],
+        coast: [1.085, 1.045, 0.875],
+        moss: [0.835, 1.085, 0.965],
+        limestone: [1.105, 1.055, 0.915],
+        ancient: [0.915, 0.975, 1.065],
+        meadow: [1.015, 1.035, 0.925],
       };
 
       // 每格岩面保留些微色差，讓平台不再像單色網格。
