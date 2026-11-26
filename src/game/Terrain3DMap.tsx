@@ -570,11 +570,15 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           "#include <begin_vertex>",
           `#include <begin_vertex>
           vProjectileWakeUv = uv;
-          float wakeTurbulence = sin(vProjectileWakeUv.y * 23.0 - uProjectileWakeTime * 6.2)
-            + cos(vProjectileWakeUv.y * 11.0 - uProjectileWakeTime * 4.1) * 0.42;
-          float wakeCurl = cos(vProjectileWakeUv.y * 17.0 - uProjectileWakeTime * 5.2);
-          transformed.x += wakeTurbulence * 0.026 * vProjectileWakeUv.y;
-          transformed.y += wakeCurl * 0.019 * vProjectileWakeUv.y;`,
+          float wakeT = vProjectileWakeUv.y;
+          float wakeAcross = vProjectileWakeUv.x * 2.0 - 1.0;
+          float wakeTurbulence = sin(wakeT * 23.0 - uProjectileWakeTime * 6.2 + wakeAcross * 1.7)
+            + cos(wakeT * 11.0 - uProjectileWakeTime * 4.1 - wakeAcross * 2.4) * 0.42;
+          float wakeCurl = cos(wakeT * 17.0 - uProjectileWakeTime * 5.2 + wakeAcross * 3.1);
+          float wakeRoll = sin(wakeT * 34.0 - uProjectileWakeTime * 8.0 + wakeAcross * 5.2);
+          transformed.x += (wakeTurbulence * 0.026 + wakeRoll * 0.006) * wakeT;
+          transformed.y += (wakeCurl * 0.019 + wakeRoll * 0.008) * wakeT
+            + (1.0 - abs(wakeAcross)) * 0.006;`,
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <common>",
@@ -583,14 +587,23 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <color_fragment>",
           `#include <color_fragment>
-          float wakePulse = 0.76 + 0.24 * sin(vProjectileWakeUv.y * 19.0 - uProjectileWakeTime * 8.4);
-          float wakeShear = 0.5 + 0.5 * sin(vProjectileWakeUv.y * 31.0 - uProjectileWakeTime * 10.5);
-          float wakeTaper = 1.0 - smoothstep(0.72, 1.0, vProjectileWakeUv.y);
-          diffuseColor.rgb *= wakePulse * (0.92 + wakeShear * 0.08);
-          diffuseColor.a *= wakeTaper * (0.78 + wakeShear * 0.22);`,
+          float wakeT = vProjectileWakeUv.y;
+          float wakeAcross = vProjectileWakeUv.x;
+          float wakePulse = 0.72 + 0.28 * sin(wakeT * 19.0 - uProjectileWakeTime * 8.4);
+          float wakeShear = 0.5 + 0.5 * sin(wakeT * 31.0 - uProjectileWakeTime * 10.5 + wakeAcross * 5.8);
+          float wakeEdge = smoothstep(0.0, 0.22, wakeAcross)
+            * (1.0 - smoothstep(0.78, 1.0, wakeAcross));
+          float wakeTail = 1.0 - smoothstep(0.76, 1.0, wakeT);
+          float shockFront = exp(-pow((wakeT - 0.11) * 17.0, 2.0));
+          float vortexThread = pow(max(0.0, sin(wakeT * 29.0 - uProjectileWakeTime * 7.2
+            + wakeAcross * 4.4)), 5.0);
+          float wakeEnergy = wakePulse * (0.84 + wakeShear * 0.16);
+          diffuseColor.rgb *= wakeEnergy;
+          diffuseColor.rgb += vec3(0.28, 0.44, 0.58) * (shockFront * 0.42 + vortexThread * 0.12);
+          diffuseColor.a *= wakeEdge * wakeTail * (0.68 + wakeShear * 0.2 + shockFront * 0.22);`,
         );
       };
-      material.customProgramCacheKey = () => "tide-projectile-wake-flow-v2";
+      material.customProgramCacheKey = () => "tide-projectile-wake-flow-v3";
     };
     // 程序化黑霧貼圖：柔邊噪聲雲，不依賴外部圖檔，並以單一 InstancedMesh 控制效能。
     const blackMistSize = 64;
