@@ -4648,10 +4648,8 @@ vFoliageGust = 0.0;
             flowerDummy.scale.setScalar(0.82 + seed * 0.28);
             flowerDummy.updateMatrix();
             flowerStems.setMatrixAt(i, flowerDummy.matrix);
-            if (flowerStems.instanceColor) {
-              flowerTint.set("#668d5d");
-              flowerStems.setColorAt(i, flowerTint);
-            }
+            flowerTint.set("#668d5d");
+            flowerStems.setColorAt(i, flowerTint);
 
             const bloomY = groundY + 0.15;
             for (let petal = 0; petal < 5; petal++) {
