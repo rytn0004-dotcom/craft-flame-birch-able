@@ -1297,11 +1297,12 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       material.onBeforeCompile = (shader) => {
         shader.vertexShader = shader.vertexShader.replace(
           "#include <common>",
-          "#include <common>\nvarying vec3 vTerrainWorldPosition;",
+          "#include <common>\nvarying vec3 vTerrainWorldPosition;\nvarying vec3 vTerrainLocalPosition;\nvarying float vTerrainTopFacing;",
         );
         shader.vertexShader = shader.vertexShader.replace(
           "#include <begin_vertex>",
           `#include <begin_vertex>
+          vTerrainLocalPosition = position;
           vec4 terrainWorldPosition = vec4(transformed, 1.0);
           #ifdef USE_INSTANCING
             terrainWorldPosition = instanceMatrix * terrainWorldPosition;
@@ -1311,6 +1312,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           // and the actual logical tile height stay untouched; the subdivided shared mesh
           // lets the silhouette catch light without creating CPU-side per-tile animation.
           float terrainTopMask = smoothstep(0.86, 0.98, normal.y);
+          vTerrainTopFacing = terrainTopMask;
           float terrainCrest = sin(terrainWorldPosition.x * 1.72
             + sin(terrainWorldPosition.z * 1.13) * 1.2)
             * cos(terrainWorldPosition.z * 1.48 - terrainWorldPosition.x * 0.64);
@@ -1345,6 +1347,16 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           `#include <color_fragment>
           // 世界座標噪聲跨越地塊連續取樣，讓草土、岩層與微型礦斑不再沿方格邊界切斷。
           vec2 terrainWorld = vTerrainWorldPosition.xz;
+          // 頂面倒角受風化：世界座標噪聲打散直線磨損，避免每格形成一樣的描邊。
+          float tileEdgeDistance = min(0.49 - abs(vTerrainLocalPosition.x),
+            0.49 - abs(vTerrainLocalPosition.z));
+          float tileEdgeWear = (1.0 - smoothstep(0.018, 0.115, tileEdgeDistance))
+            * vTerrainTopFacing;
+          float edgeChipNoise = sin(terrainWorld.x * 17.3 + sin(terrainWorld.y * 11.7) * 2.1)
+            * cos(terrainWorld.y * 14.9 - terrainWorld.x * 8.3);
+          float chippedLip = tileEdgeWear * smoothstep(-0.42, 0.58, edgeChipNoise);
+          float exposedMineral = pow(max(0.0, sin(terrainWorld.x * 5.7
+            + terrainWorld.y * 4.3 + edgeChipNoise * 2.2)), 8.0) * tileEdgeWear;
           float broadMottle = sin(terrainWorld.x * 0.17 + sin(terrainWorld.y * 0.11 + ${height.toFixed(1)} * 0.3) * 2.0)
             * cos(terrainWorld.y * 0.21 - terrainWorld.x * 0.07);
           float middleGrain = sin(terrainWorld.x * 1.31 + cos(terrainWorld.y * 1.07) * 1.4 + ${height.toFixed(1)})
@@ -1376,6 +1388,8 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.12, 1.045, 0.88),
             sunlitMeadow * ${height === 0 ? "0.08" : "0.2"});
           diffuseColor.rgb += vec3(0.035, 0.042, 0.032) * mineralLode;
+          diffuseColor.rgb *= 1.0 - chippedLip * 0.075;
+          diffuseColor.rgb += vec3(0.12, 0.105, 0.073) * exposedMineral * 0.16;
           // 草甸暖金花粉色、潮濕青綠與高地石英色脈，沿世界座標自然延續。
           float meadowPigment = smoothstep(0.42, 0.91,
             sin(terrainWorld.x * 0.23 + terrainWorld.y * 0.17)
@@ -1433,7 +1447,8 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           float terrainRoughnessGrain = sin(vTerrainWorldPosition.x * 5.4 + vTerrainWorldPosition.z * 4.7)
             * cos(vTerrainWorldPosition.z * 6.2 - vTerrainWorldPosition.x * 2.9);
           roughnessFactor = clamp(roughnessFactor + terrainRoughnessGrain * 0.024
-            + microEtch * 0.012 + gritPore * 0.028, 0.0, 1.0);`,
+            + microEtch * 0.012 + gritPore * 0.028 + tileEdgeWear * 0.075
+            - exposedMineral * 0.045, 0.0, 1.0);`,
         );
       };
       material.customProgramCacheKey = () => "tide-terrain-ridgeline-scree-alpine-v7-" + height;
@@ -1717,6 +1732,11 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             "float fractureMask = fractureLine * fractureBranch * (0.35 + strataBreak * 0.65);",
             "float edgePatina = pow(max(0.0, sin(vCliffStrataUv.x * 17.0 + vCliffStrataUv.y * 5.0 + strataWarp)), 7.0) * strataBreak;",
             "float mineralDust = pow(max(0.0, sin(vCliffStrataUv.x * 71.0 + vCliffStrataUv.y * 53.0)), 18.0);",
+            // 世界座標斜向解理與細分枝礦脈，讓同一層岩壁跨越相鄰方塊仍保持連續。
+            "float cleavageWarp = sin(vCliffWorldPosition.y * 17.0 + sin(vCliffWorldPosition.x * 3.7 + vCliffWorldPosition.z * 2.9) * 2.4);",
+            "float cleavageLine = pow(max(0.0, 1.0 - abs(sin(vCliffWorldPosition.x * 2.7 - vCliffWorldPosition.z * 3.1 + cleavageWarp * 0.42))), 18.0);",
+            "float quartzBranch = pow(max(0.0, sin(vCliffWorldPosition.x * 5.1 + vCliffWorldPosition.z * 4.3 + cleavageWarp * 1.7)), 13.0);",
+            "float weatheredPocket = pow(max(0.0, sin(vCliffWorldPosition.x * 8.7 + vCliffWorldPosition.z * 6.1 + vCliffWorldPosition.y * 2.3)), 9.0) * (1.0 - strataBreak * 0.55);",
             // 世界座標岩層跨越相鄰方塊連續變化，暖色鐵鏽層、灰綠沉積層與冷色石英不再每塊重複同一張 UV。
             "vec2 cliffWorldXZ = vCliffWorldPosition.xz;",
             "float cliffFlow = sin(cliffWorldXZ.x * 0.31 + sin(cliffWorldXZ.y * 0.23) * 1.7) * cos(cliffWorldXZ.y * 0.27 - cliffWorldXZ.x * 0.14);",
@@ -1735,6 +1755,9 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             "diffuseColor.rgb += vec3(0.018, 0.065, 0.052) * mineralVein * strataBreak * 0.55;",
             "diffuseColor.rgb += vec3(0.095, 0.073, 0.041) * edgePatina * 0.12;",
             "diffuseColor.rgb += vec3(0.16, 0.19, 0.2) * mineralDust * 0.045;",
+            "diffuseColor.rgb *= 1.0 - weatheredPocket * 0.075;",
+            "diffuseColor.rgb += vec3(0.24, 0.29, 0.3) * cleavageLine * 0.038;",
+            "diffuseColor.rgb += vec3(0.12, 0.2, 0.19) * quartzBranch * mineralVein * 0.22;",
           ].join("\n"),
         );
         shader.fragmentShader = shader.fragmentShader.replace(
@@ -1742,11 +1765,11 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           [
             "#include <roughnessmap_fragment>",
             "float cliffGrain = sin(vCliffWorldPosition.x * 7.3 + vCliffWorldPosition.z * 5.7) * cos(vCliffWorldPosition.z * 8.1 - vCliffWorldPosition.x * 3.2);",
-            "roughnessFactor = clamp(roughnessFactor + cliffGrain * 0.035 + fractureMask * 0.11 - mineralVein * 0.08 - dampLichen * 0.035, 0.0, 1.0);",
+            "roughnessFactor = clamp(roughnessFactor + cliffGrain * 0.035 + fractureMask * 0.11 - mineralVein * 0.08 - dampLichen * 0.035 + weatheredPocket * 0.06 - cleavageLine * 0.025, 0.0, 1.0);",
           ].join("\\n"),
         );
       };
-      material.customProgramCacheKey = () => "tide-cliff-strata-world-weathering-v3";
+      material.customProgramCacheKey = () => "tide-cliff-strata-world-weathering-v4-cleavage";
     };
     installCliffStrata(shared.cliff);
 
