@@ -133,16 +133,19 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       return texture;
     };
     const tau = Math.PI * 2;
-    const surfaceReliefMap = makeSurfaceDataTexture(128, (u, v) => {
-      const broad = Math.sin(tau * (u * 3 + v * 2)) * 0.42 + Math.cos(tau * (v * 4 - u * 2)) * 0.32;
-      const grain = Math.sin(tau * (u * 19 + v * 13)) * 0.2 + Math.cos(tau * (u * 31 - v * 27)) * 0.13;
-      const pores = Math.sin(tau * (u * 47 + v * 37)) * 0.08 + Math.cos(tau * (u * 59 - v * 43)) * 0.07;
-      return 128 + (broad + grain + pores) * 30;
+    // 256² procedural micro-surfaces: stone pores, fine soil grain and soft mineral flecks remain crisp at close camera distance.
+    const surfaceReliefMap = makeSurfaceDataTexture(256, (u, v) => {
+      const broad = Math.sin(tau * (u * 3.1 + v * 2.2)) * 0.34 + Math.cos(tau * (v * 4.2 - u * 1.8)) * 0.28;
+      const grain = Math.sin(tau * (u * 27 + v * 19)) * 0.2 + Math.cos(tau * (u * 37 - v * 31)) * 0.15;
+      const pores = Math.sin(tau * (u * 83 + v * 67)) * 0.09 + Math.cos(tau * (u * 97 - v * 79)) * 0.075;
+      const hairline = Math.sin(tau * (u * 13 + v * 17) + Math.sin(v * tau * 5) * 0.7) * 0.08;
+      return 128 + (broad + grain + pores + hairline) * 34;
     });
-    const surfaceRoughnessMap = makeSurfaceDataTexture(128, (u, v) => {
-      const patches = Math.sin(tau * (u * 4 + v * 3)) * 0.45 + Math.cos(tau * (u * 5 - v * 2)) * 0.3;
-      const grain = Math.sin(tau * (u * 17 + v * 23)) * 0.25 + Math.cos(tau * (u * 29 - v * 31)) * 0.18;
-      return 176 + (patches + grain) * 42;
+    const surfaceRoughnessMap = makeSurfaceDataTexture(256, (u, v) => {
+      const patches = Math.sin(tau * (u * 7 + v * 5)) * 0.34 + Math.cos(tau * (u * 9 - v * 4)) * 0.26;
+      const grain = Math.sin(tau * (u * 39 + v * 29)) * 0.22 + Math.cos(tau * (u * 53 - v * 47)) * 0.18;
+      const pores = Math.sin(tau * (u * 109 + v * 91)) * 0.1 + Math.cos(tau * (u * 127 - v * 113)) * 0.08;
+      return 176 + (patches + grain + pores) * 40;
     });
     const waterBumpMap = makeSurfaceDataTexture(128, (u, v) => {
       const longWave = Math.sin(tau * (u * 3 + v * 2.2 + Math.sin(v * tau * 2) * 0.12));
@@ -1043,6 +1046,11 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             * cos(terrainWorld.y * 1.57 - terrainWorld.x * 0.63);
           float fineGrain = sin(terrainWorld.x * 7.3 + terrainWorld.y * 5.9)
             * cos(terrainWorld.y * 8.1 - terrainWorld.x * 3.7);
+          // Close-up micro relief: narrow wind-scoured grooves, tiny pores and mineral dust are frequency layered.
+          float microEtch = sin(terrainWorld.x * 18.7 + sin(terrainWorld.y * 13.2) * 1.3)
+            * cos(terrainWorld.y * 16.9 - terrainWorld.x * 11.4);
+          float gritPore = pow(max(0.0, sin(terrainWorld.x * 31.7 + terrainWorld.y * 27.3)
+            * cos(terrainWorld.y * 29.1 - terrainWorld.x * 23.7)), 12.0);
           float lichenField = smoothstep(0.12, 0.78, broadMottle * 0.5 + 0.5 + middleGrain * 0.045);
           float mineralSpeck = pow(max(0.0, sin(terrainWorld.x * 0.73 + terrainWorld.y * 0.51 + ${height.toFixed(1)})
             * cos(terrainWorld.y * 0.67 - terrainWorld.x * 0.39)), 10.0);
@@ -1054,7 +1062,8 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           float windScour = smoothstep(0.54, 0.94,
             sin(terrainWorld.x * 0.31 - terrainWorld.y * 0.27 + middleGrain) * 0.5 + 0.5);
           float mineralLode = mineralSpeck * ${height >= 2 ? "0.46" : "0.16"};
-          diffuseColor.rgb *= 0.968 + broadMottle * 0.026 + middleGrain * 0.016 + fineGrain * 0.006;
+          diffuseColor.rgb *= 0.968 + broadMottle * 0.026 + middleGrain * 0.016 + fineGrain * 0.006
+            + microEtch * 0.0048 + gritPore * 0.009;
           diffuseColor.rgb *= mix(vec3(1.055, 1.015, 0.89), vec3(0.91, 1.075, 0.93),
             richMoss * ${height >= 1 ? "0.34" : "0.12"});
           diffuseColor.rgb *= mix(vec3(1.045, 1.025, 0.91), vec3(0.91, 1.015, 1.075),
@@ -1091,10 +1100,11 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           `#include <roughnessmap_fragment>
           float terrainRoughnessGrain = sin(vTerrainWorldPosition.x * 5.4 + vTerrainWorldPosition.z * 4.7)
             * cos(vTerrainWorldPosition.z * 6.2 - vTerrainWorldPosition.x * 2.9);
-          roughnessFactor = clamp(roughnessFactor + terrainRoughnessGrain * 0.018, 0.0, 1.0);`,
+          roughnessFactor = clamp(roughnessFactor + terrainRoughnessGrain * 0.024
+            + microEtch * 0.012 + gritPore * 0.028, 0.0, 1.0);`,
         );
       };
-      material.customProgramCacheKey = () => "tide-terrain-world-mottle-v3-" + height;
+      material.customProgramCacheKey = () => "tide-terrain-world-mottle-micro-v4-" + height;
     };
     const installBlackMistVeil = (material: THREE.MeshBasicMaterial) => {
       material.onBeforeCompile = (shader) => {
@@ -1369,10 +1379,10 @@ vFoliageGust = 0.0;
       };
       material.customProgramCacheKey = () => cacheKey;
     };
-    installFoliageWind(shared.foliageWind, "tide-foliage-wind-v5");
+    installFoliageWind(shared.foliageWind, "tide-foliage-wind-v6");
     installFoliageWind(shared.treeCanopyWind, "tide-tree-canopy-gust-v2", 2.4);
     installFoliageWind(shared.grass, "tide-grass-stem-wind-v5", 1.45, 0.34);
-    installFoliageWind(shared.grassBlade, "tide-grass-blade-wind-v6", 2.15, 0.72);
+    installFoliageWind(shared.grassBlade, "tide-grass-blade-wind-v7", 2.35, 0.88);
     installFoliageWind(shared.meadowBloom, "tide-meadow-bloom-wind-v5", 1.5, 0.16);
     installFoliageWind(shared.coastGrass, "tide-coast-reed-wind-v5", 1.75, 0.3);
     installFoliageWind(shared.reefCoral, "tide-reef-coral-current-v5");
@@ -3683,24 +3693,50 @@ vFoliageGust = 0.0;
       }).slice(0, 1600);
       if (grassCells.length) {
         // 彎曲漸尖的葉片取代圓錐草刺；三片葉組成一簇，並共用樹冠風場材質。
+        // Each blade is a curved, tapered 3-rail ribbon with six height segments and a raised central vein.
+        // This smooth silhouette avoids the flat triangular "card" look while staying one instanced draw call.
         const bladeGeometry = new THREE.BufferGeometry();
-        bladeGeometry.setAttribute("position", new THREE.Float32BufferAttribute([
-          -0.052, 0, 0, 0.052, 0, 0,
-          -0.037, 0.12, 0.012, 0.037, 0.12, 0.012,
-          -0.018, 0.23, 0.038, 0.018, 0.23, 0.038,
-          0, 0.32, 0.066,
-        ], 3));
-        // 葉片由根部深綠漸層至尖端暖金，再乘上每株的生態色，讓草叢更有層次。
-        bladeGeometry.setAttribute("color", new THREE.Float32BufferAttribute([
-          0.19, 0.31, 0.22, 0.19, 0.31, 0.22,
-          0.36, 0.56, 0.29, 0.36, 0.56, 0.29,
-          0.62, 0.72, 0.39, 0.62, 0.72, 0.39,
-          0.88, 0.83, 0.53,
-        ], 3));
-        bladeGeometry.setIndex([0, 2, 1, 1, 2, 3, 2, 4, 3, 3, 4, 5, 4, 6, 5]);
+        const bladeRows = [
+          { y: 0.0, width: 0.038, x: 0.000, z: 0.000 },
+          { y: 0.072, width: 0.036, x: 0.010, z: 0.008 },
+          { y: 0.148, width: 0.031, x: 0.022, z: 0.022 },
+          { y: 0.226, width: 0.024, x: 0.030, z: 0.039 },
+          { y: 0.305, width: 0.015, x: 0.026, z: 0.054 },
+          { y: 0.374, width: 0.006, x: 0.010, z: 0.066 },
+        ];
+        const bladePositions: number[] = [];
+        const bladeColors: number[] = [];
+        const bladeIndices: number[] = [];
+        for (let row = 0; row < bladeRows.length; row++) {
+          const section = bladeRows[row];
+          const t = row / (bladeRows.length - 1);
+          for (let rail = 0; rail < 3; rail++) {
+            const lateral = rail === 0 ? -section.width : rail === 2 ? section.width : 0;
+            const veinLift = rail === 1 ? 0.008 * (1 - t * 0.5) : 0;
+            bladePositions.push(section.x + lateral, section.y + veinLift, section.z + (rail === 1 ? 0.006 : 0));
+            const rootToTip = 0.19 + t * 0.69;
+            const sideShade = rail === 1 ? 1.08 : 0.9;
+            bladeColors.push(
+              rootToTip * sideShade,
+              (0.31 + t * 0.52) * sideShade,
+              (0.22 + t * 0.31) * sideShade,
+            );
+          }
+        }
+        for (let row = 0; row < bladeRows.length - 1; row++) {
+          const base = row * 3;
+          const next = base + 3;
+          bladeIndices.push(
+            base, next, base + 1, base + 1, next, next + 1,
+            base + 1, next + 1, base + 2, base + 2, next + 1, next + 2,
+          );
+        }
+        bladeGeometry.setAttribute("position", new THREE.Float32BufferAttribute(bladePositions, 3));
+        bladeGeometry.setAttribute("color", new THREE.Float32BufferAttribute(bladeColors, 3));
+        bladeGeometry.setIndex(bladeIndices);
         bladeGeometry.computeVertexNormals();
         bladeGeometry.computeBoundingSphere();
-        const bladeCount = grassCells.length * 3;
+        const bladeCount = grassCells.length * 4;
         const grass = new THREE.InstancedMesh(
           bladeGeometry,
           shared.grassBlade,
@@ -3713,9 +3749,9 @@ vFoliageGust = 0.0;
         for (let i = 0; i < grassCells.length; i++) {
           const cell = grassCells[i];
           const seed = Math.abs(Math.sin(cell.x * 127.1 + cell.z * 311.7) * 43758.5453) % 1;
-          for (let blade = 0; blade < 3; blade++) {
+          for (let blade = 0; blade < 4; blade++) {
             const index = i * 3 + blade;
-            const angle = seed * Math.PI * 2 + blade * (Math.PI * 2 / 3);
+            const angle = seed * Math.PI * 2 + blade * (Math.PI * 2 / 4);
             const radius = 0.08 + seed * 0.08;
             dummy.position.set(
               cell.x + Math.cos(angle) * radius,
@@ -3771,27 +3807,47 @@ vFoliageGust = 0.0;
         : [];
       if (groveCells.length) {
         const trunks = new THREE.InstancedMesh(
-          new THREE.CylinderGeometry(0.075, 0.13, 0.88, 7),
+          new THREE.CylinderGeometry(0.075, 0.13, 0.88, 12),
           shared.treeBark,
           groveCells.length,
         );
         const rootFlare = new THREE.InstancedMesh(
-          new THREE.CylinderGeometry(0.025, 0.072, 0.42, 5),
+          new THREE.CylinderGeometry(0.025, 0.072, 0.42, 9),
           shared.treeBark,
           groveCells.length * 3,
         );
+        // Smooth, lightly irregular leaf masses: the contour has enough segments to stay round up close,
+        // with tiny radial variation so the canopy is organic rather than a perfect sphere.
+        const makeCanopyGeometry = (radius: number, phase: number) => {
+          const geometry = new THREE.SphereGeometry(radius, 20, 14);
+          const positions = geometry.getAttribute("position");
+          for (let vertex = 0; vertex < positions.count; vertex++) {
+            const x = positions.getX(vertex) / radius;
+            const y = positions.getY(vertex) / radius;
+            const z = positions.getZ(vertex) / radius;
+            const contour = 1
+              + Math.sin(x * 7.3 + phase) * Math.cos(z * 6.7 - phase * 0.8) * 0.018
+              + Math.sin(y * 10.1 - z * 4.2 + phase * 1.7) * 0.009
+              + Math.cos(x * 12.4 + y * 8.3 + phase) * 0.006;
+            positions.setXYZ(vertex, x * radius * contour, y * radius * contour, z * radius * contour);
+          }
+          positions.needsUpdate = true;
+          geometry.computeVertexNormals();
+          geometry.computeBoundingSphere();
+          return geometry;
+        };
         const sideCanopies = new THREE.InstancedMesh(
-          new THREE.IcosahedronGeometry(0.31, 0),
+          makeCanopyGeometry(0.31, 0.7),
           shared.treeCanopyWind,
           groveCells.length * 2,
         );
         const lowerCanopies = new THREE.InstancedMesh(
-          new THREE.DodecahedronGeometry(0.55, 0),
+          makeCanopyGeometry(0.55, 1.9),
           shared.treeCanopyWind,
           groveCells.length,
         );
         const upperCanopies = new THREE.InstancedMesh(
-          new THREE.IcosahedronGeometry(0.39, 0),
+          makeCanopyGeometry(0.39, 3.1),
           shared.treeCanopyWind,
           groveCells.length,
         );
