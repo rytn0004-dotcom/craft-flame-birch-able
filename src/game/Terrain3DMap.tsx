@@ -3982,6 +3982,116 @@ vFoliageGust = 0.0;
         grass.castShadow = false;
         grass.receiveShadow = false;
         terrainRoot.add(grass);
+
+        // Sparse meadow seed heads add a second vegetation height layer. Their stalks and
+        // kernels share one curved mesh and one instanced draw call, and inherit the same GPU gust.
+        const seedHeadCells = grassCells.filter((cell) => {
+          if (terrainRegion(cell) !== "meadow") return false;
+          const seed = Math.abs(Math.sin(cell.x * 41.7 + cell.z * 93.1) * 27183.9) % 1;
+          return seed > 0.79;
+        }).slice(0, 240);
+        if (seedHeadCells.length) {
+          const seedPositions: number[] = [];
+          const seedColors: number[] = [];
+          const seedIndices: number[] = [];
+          const stalkRows = 7;
+          for (let row = 0; row < stalkRows; row++) {
+            const t = row / (stalkRows - 1);
+            const base = seedPositions.length / 3;
+            const centerX = Math.sin(t * 2.2) * 0.009;
+            const centerY = 0.54 * t;
+            const centerZ = t * t * 0.038;
+            const width = 0.0048 * (1 - t * 0.48);
+            for (let rail = 0; rail < 3; rail++) {
+              const lateral = (rail - 1) * width;
+              seedPositions.push(centerX + lateral, centerY + (rail === 1 ? 0.0025 : 0), centerZ);
+              seedColors.push(0.42 + t * 0.2, 0.66 + t * 0.18, 0.34 + t * 0.06);
+            }
+            if (row > 0) {
+              const a = base - 3;
+              seedIndices.push(a, base, a + 1, a + 1, base, base + 1, a + 1, base + 1, a + 2, a + 2, base + 1, base + 2);
+            }
+          }
+          const appendSeedKernel = (centerX: number, centerY: number, centerZ: number, angle: number, tilt: number) => {
+            const base = seedPositions.length / 3;
+            const latitudes = 5;
+            const longitudes = 8;
+            for (let lat = 0; lat <= latitudes; lat++) {
+              const phi = -Math.PI / 2 + (lat / latitudes) * Math.PI;
+              const ring = Math.cos(phi);
+              const vertical = Math.sin(phi);
+              for (let lon = 0; lon < longitudes; lon++) {
+                const theta = (lon / longitudes) * Math.PI * 2;
+                const localX = Math.cos(theta) * ring * 0.009;
+                const localY = vertical * 0.026;
+                const localZ = Math.sin(theta) * ring * 0.008;
+                const tiltedX = localX * Math.cos(tilt) + localY * Math.sin(tilt);
+                const tiltedY = -localX * Math.sin(tilt) + localY * Math.cos(tilt);
+                seedPositions.push(
+                  centerX + tiltedX * Math.cos(angle) - localZ * Math.sin(angle),
+                  centerY + tiltedY,
+                  centerZ + tiltedX * Math.sin(angle) + localZ * Math.cos(angle),
+                );
+                const tipShade = 0.82 + Math.max(0, vertical) * 0.18;
+                seedColors.push(0.88 * tipShade, 0.78 * tipShade, 0.48 * tipShade);
+              }
+            }
+            for (let lat = 0; lat < latitudes; lat++) {
+              for (let lon = 0; lon < longitudes; lon++) {
+                const a = base + lat * longitudes + lon;
+                const b = base + lat * longitudes + (lon + 1) % longitudes;
+                const c = a + longitudes;
+                const d = b + longitudes;
+                seedIndices.push(a, c, b, b, c, d);
+              }
+            }
+          };
+          // Four to six small kernels radiate around the stalk tip, with a few hanging lower.
+          for (let kernel = 0; kernel < 6; kernel++) {
+            const angle = (kernel / 6) * Math.PI * 2 + 0.27;
+            const level = kernel < 3 ? 0.45 + kernel * 0.022 : 0.49 - (kernel - 3) * 0.035;
+            const radius = kernel < 3 ? 0.012 : 0.02;
+            appendSeedKernel(
+              Math.cos(angle) * radius,
+              level,
+              0.036 + Math.sin(angle) * radius * 0.72,
+              angle,
+              Math.cos(angle) * 0.42,
+            );
+          }
+          const seedHeadGeometry = new THREE.BufferGeometry();
+          seedHeadGeometry.setAttribute("position", new THREE.Float32BufferAttribute(seedPositions, 3));
+          seedHeadGeometry.setAttribute("color", new THREE.Float32BufferAttribute(seedColors, 3));
+          seedHeadGeometry.setIndex(seedIndices);
+          seedHeadGeometry.computeVertexNormals();
+          seedHeadGeometry.computeBoundingSphere();
+          const seedHeads = new THREE.InstancedMesh(seedHeadGeometry, shared.grassBlade, seedHeadCells.length);
+          const seedDummy = new THREE.Object3D();
+          const seedTint = new THREE.Color();
+          const seedPalette = ["#d6c184", "#c6b17a", "#e2d09a", "#aebc83", "#d7b6a0"];
+          for (let i = 0; i < seedHeadCells.length; i++) {
+            const cell = seedHeadCells[i];
+            const seed = Math.abs(Math.sin(cell.x * 127.1 + cell.z * 311.7) * 43758.5453) % 1;
+            const angle = seed * Math.PI * 2;
+            const scale = 0.78 + seed * 0.42;
+            seedDummy.position.set(
+              cell.x + Math.cos(angle) * 0.18,
+              groundTop(cell.h) + 0.012,
+              cell.z + Math.sin(angle) * 0.18,
+            );
+            seedDummy.rotation.set((seed - 0.5) * 0.08, angle, (seed - 0.5) * 0.1);
+            seedDummy.scale.set(scale, scale, scale);
+            seedDummy.updateMatrix();
+            seedHeads.setMatrixAt(i, seedDummy.matrix);
+            seedTint.set(seedPalette[Math.floor(seed * seedPalette.length)]);
+            seedHeads.setColorAt(i, seedTint);
+          }
+          seedHeads.instanceMatrix.needsUpdate = true;
+          if (seedHeads.instanceColor) seedHeads.instanceColor.needsUpdate = true;
+          seedHeads.castShadow = false;
+          seedHeads.receiveShadow = false;
+          terrainRoot.add(seedHeads);
+        }
       }
 
       // 草甸與苔地加入成簇的海岸林木；樹冠以頂點風場輕晃，不逐棵建立動畫。
