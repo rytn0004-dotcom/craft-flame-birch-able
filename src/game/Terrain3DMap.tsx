@@ -1105,6 +1105,46 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
     };
     installBlackMistFront(shared.blackMistField);
 
+    // 深淵底層雲團：以球面 UV 與實例世界座標產生互不同步的渦流，
+    // 讓黑霧深處像有多股暗流互相吞噬；維持單一 InstancedMesh，不增加逐雲 CPU 動畫。
+    shared.blackMistCloud.onBeforeCompile = (shader) => {
+      shader.uniforms.uAbyssCloudTime = blackMistVeilUniforms.time;
+      shader.vertexShader = shader.vertexShader.replace(
+        "#include <common>",
+        "#include <common>\nvarying vec2 vAbyssCloudUv;\nvarying float vAbyssCloudPhase;",
+      );
+      shader.vertexShader = shader.vertexShader.replace(
+        "#include <begin_vertex>",
+        `#include <begin_vertex>
+        vAbyssCloudUv = uv;
+        #ifdef USE_INSTANCING
+          vAbyssCloudPhase = dot(instanceMatrix[3].xz, vec2(0.017, 0.023));
+        #else
+          vAbyssCloudPhase = dot(position.xz, vec2(0.17, 0.23));
+        #endif`,
+      );
+      shader.fragmentShader = shader.fragmentShader.replace(
+        "#include <common>",
+        "#include <common>\\nvarying vec2 vAbyssCloudUv;\\nvarying float vAbyssCloudPhase;\\nuniform float uAbyssCloudTime;",
+      );
+      shader.fragmentShader = shader.fragmentShader.replace(
+        "#include <color_fragment>",
+        `#include <color_fragment>
+        vec2 cloudFlowUv = vAbyssCloudUv * vec2(2.2, 1.65);
+        float cloudCurrentA = sin(cloudFlowUv.x * 8.0 + sin(cloudFlowUv.y * 5.0
+          - uAbyssCloudTime * 0.19 + vAbyssCloudPhase) * 1.8 - uAbyssCloudTime * 0.11);
+        float cloudCurrentB = cos(cloudFlowUv.y * 11.0 - cloudFlowUv.x * 4.0
+          + uAbyssCloudTime * 0.075 + vAbyssCloudPhase * 1.7);
+        float cloudEye = pow(max(0.0, cloudCurrentA * 0.5 + 0.5), 3.0)
+          * pow(max(0.0, cloudCurrentB * 0.5 + 0.5), 2.0);
+        float cloudRim = pow(max(0.0, 1.0 - abs(cloudCurrentA * 0.55 + cloudCurrentB * 0.45)), 5.0);
+        diffuseColor.rgb *= mix(vec3(0.36, 0.43, 0.66), vec3(0.78, 0.86, 1.08), cloudEye * 0.42);
+        diffuseColor.rgb += vec3(0.018, 0.044, 0.11) * cloudRim * 0.38;
+        diffuseColor.a *= 0.76 + cloudEye * 0.15 + cloudRim * 0.09;`,
+      );
+    };
+    shared.blackMistCloud.customProgramCacheKey = () => "tide-abyss-cloud-maelstrom-v2";
+
     // 聖地地面符印與道路導光使用材質內動畫；不額外建立逐顆動畫物件。
     const installSanctuarySigil = (material: THREE.MeshBasicMaterial) => {
       material.onBeforeCompile = (shader) => {
