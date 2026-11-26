@@ -1107,16 +1107,26 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           vec2 abyssUv = vMistFieldUv - vec2(0.5);
           float abyssAngle = atan(abyssUv.y, abyssUv.x);
           float abyssRadius = length(abyssUv);
-          float abyssEyeRim = exp(-pow((abyssRadius - (0.19 + 0.018 * sin(abyssAngle * 5.0 - uMistTime * 0.18))) * 23.0, 2.0));
+          float abyssEyeBreath = 0.5 + 0.5 * sin(uMistTime * 0.31);
+          float abyssEyeRadius = 0.19 + 0.018 * sin(abyssAngle * 5.0 - uMistTime * 0.18)
+            + 0.006 * sin(uMistTime * 0.31);
+          float abyssEyeRim = exp(-pow((abyssRadius - abyssEyeRadius) * 23.0, 2.0));
           float abyssIris = pow(max(0.0, 0.5 + 0.5 * sin(abyssAngle * 7.0 + uMistTime * 0.12
             + sin(abyssRadius * 28.0 - uMistTime * 0.2) * 1.2)), 5.0)
             * (1.0 - smoothstep(0.08, 0.34, abyssRadius));
           float abyssDepth = 1.0 - smoothstep(0.02, 0.72, abyssRadius);
+          // 瞳孔像一道極細的直縫緩慢游移，呼吸時略微收縮；不改變地塊遮罩或實際開拓判定。
+          float abyssPupilX = sin(uMistTime * 0.19) * 0.009;
+          float abyssPupil = (1.0 - smoothstep(0.012, 0.034, abs(abyssUv.x - abyssPupilX)))
+            * (1.0 - smoothstep(0.095, 0.205, abs(abyssUv.y)))
+            * (0.58 + abyssEyeBreath * 0.42);
           float abyssVortex = sin(abyssAngle * 9.0 + abyssRadius * 31.0 - uMistTime * 0.24);
           diffuseColor.rgb = mix(diffuseColor.rgb,
             diffuseColor.rgb * vec3(0.54, 0.66, 0.94), abyssFlow * 0.28);
           diffuseColor.rgb *= 1.0 - abyssDepth * 0.34;
+          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.003, 0.008, 0.022), abyssPupil * 0.84);
           diffuseColor.rgb += vec3(0.035, 0.095, 0.18) * abyssEyeRim * (0.38 + uMistPower);
+          diffuseColor.rgb += vec3(0.012, 0.034, 0.082) * abyssEyeRim * abyssEyeBreath * 0.24;
           diffuseColor.rgb += vec3(0.022, 0.035, 0.09) * abyssIris * (0.32 + uMistPower);
           diffuseColor.rgb += vec3(0.008, 0.018, 0.052)
             * (abyssFlow * 0.32 + abyssDepth * 0.5 + max(0.0, abyssVortex) * 0.08);
