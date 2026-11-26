@@ -492,11 +492,23 @@ export function buildHeights(board: TileBoard): number[] {
     const b = v01 * (1 - fx) + v11 * fx;
     return a * (1 - fy) + b * fy;
   };
-  // 兩層八度：大形台地 + 細碎起伏
-  const fbm = (c: number, r: number, salt: number) => {
-    const n1 = valueNoise(c, r, salt, 6.5);
-    const n2 = valueNoise(c + 40, r - 17, salt ^ 0x9e3779b9, 3.2);
-    return n1 * 0.72 + n2 * 0.28;
+  // 沿用每局地塊 RNG 種子，使用世界座標統一採樣，地塊接縫不會突然換一套噪聲。
+  // 同一局重建／擴張時既有區域的高地分布保持穩定。
+  const worldSalt = tileRngSeed ?? 0x4e554c;
+  // 三層八度 + domain warp + ridged noise：先形成山脈大形，再雕出側脊與風蝕細溝。
+  const fbm = (c: number, r: number, _salt: number) => {
+    const warpX = (valueNoise(c + 17, r - 29, worldSalt ^ 0x68bc21eb, 16.0) - 0.5) * 5.2;
+    const warpY = (valueNoise(c - 23, r + 41, worldSalt ^ 0x02e5be93, 16.0) - 0.5) * 5.2;
+    const wx = c + warpX;
+    const wy = r + warpY;
+    const broad = valueNoise(wx, wy, worldSalt ^ 0x9e3779b9, 13.5);
+    const middle = valueNoise(wx * 0.98 + 31, wy * 0.98 - 19, worldSalt, 6.2);
+    const fine = valueNoise(c + 47, r - 13, worldSalt ^ 0x85ebca6b, 2.9);
+    const ridgeSource = valueNoise(wx * 0.82 - 7, wy * 0.82 + 11, worldSalt ^ 0xc2b2ae35, 9.2);
+    const ridged = 1.0 - Math.abs(ridgeSource * 2.0 - 1.0);
+    return Math.max(0, Math.min(1,
+      broad * 0.39 + middle * 0.31 + fine * 0.12 + ridged * 0.18,
+    ));
   };
 
   const roadDist = new Map<string, number>(); // 可建格到最近道路的粗距
@@ -505,7 +517,7 @@ export function buildHeights(board: TileBoard): number[] {
     if (!tpl) continue;
     const { blocked } = rotatedTemplate(tpl, p.rot);
     const origin = worldOrigin(p.tc, p.tr);
-    const salt = (p.tc * 31 + p.tr * 17 + p.rot * 7 + p.templateId.length * 13) | 0;
+    const salt = worldSalt;
     const isHq = p.templateId === "hq";
 
     // 先標記道路鄰居距離（切比雪夫 0～3）
@@ -552,7 +564,7 @@ export function buildHeights(board: TileBoard): number[] {
         heights[r * COLS + c] = h;
       }
     }
-    // 模板指定高度覆蓋（中島／台地等）
+    // 模板指定高度覆蓋（中島／台地等），並記錄為鎖定節點，後續平滑不改變設計高度。
     const { heights: fixed } = rotatedTemplate(tpl, p.rot);
     for (const fh of fixed) {
       const c = origin.c + fh.c;
@@ -576,14 +588,25 @@ export function buildHeights(board: TileBoard): number[] {
         if (c < 1 || r < 1 || c >= COLS - 1 || r >= ROWS - 1) continue;
         const i = r * COLS + c;
         if (heights[i] === 0) continue;
-        let sum = heights[i];
-        let n = 1;
+        // 八方向坡度濾波：保留山脊核心，讓肩部自然退到 Lv.2／Lv.1，
+        // 對角鄰格採較低權重，減少棋盤式十字台階。
+        let sum = heights[i] * 2.6;
+        let weight = 2.6;
         for (const [dc, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
           const j = (r + dr) * COLS + (c + dc);
           sum += heights[j];
-          n++;
+          weight += 1;
         }
-        smoothed[i] = Math.max(1, Math.min(3, Math.round(sum / n)));
+        for (const [dc, dr] of [[1, 1], [1, -1], [-1, 1], [-1, -1]] as const) {
+          const j = (r + dr) * COLS + (c + dc);
+          sum += heights[j] * 0.48;
+          weight += 0.48;
+        }
+        const neighborhood = sum / weight;
+        const ridgePreservation = heights[i] >= 3 ? 0.58 : 0.46;
+        smoothed[i] = Math.max(1, Math.min(3,
+          Math.round(heights[i] * ridgePreservation + neighborhood * (1 - ridgePreservation)),
+        ));
       }
     }
     if (rotBlocked) {
