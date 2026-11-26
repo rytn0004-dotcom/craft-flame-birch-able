@@ -1016,6 +1016,13 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
         color: "#ffffff", vertexColors: true, roughness: 0.9, side: THREE.DoubleSide,
         bumpMap: surfaceReliefMap, bumpScale: 0.004,
       }),
+      alpineBlade: new THREE.MeshStandardMaterial({
+        color: "#ffffff", vertexColors: true, roughness: 0.96, side: THREE.DoubleSide,
+        bumpMap: surfaceReliefMap, bumpScale: 0.006,
+      }),
+      alpineCushion: new THREE.MeshStandardMaterial({
+        color: "#82998d", roughness: 0.99, bumpMap: surfaceReliefMap, bumpScale: 0.012,
+      }),
       treeBark: new THREE.MeshStandardMaterial({ color: "#6e5943", roughness: 0.98, bumpMap: surfaceReliefMap, bumpScale: 0.018 }),
       foliageWind: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.94, bumpMap: surfaceReliefMap, bumpScale: 0.008, side: THREE.DoubleSide }),
       treeCanopyWind: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.93, bumpMap: surfaceReliefMap, bumpScale: 0.008, side: THREE.DoubleSide }),
@@ -1953,6 +1960,8 @@ vFoliageGust = 0.0;
     installFoliageWind(shared.treeCanopyWind, "tide-tree-canopy-gust-v3", 2.4);
     installFoliageWind(shared.grass, "tide-grass-stem-wind-v6", 1.45, 0.34);
     installFoliageWind(shared.grassBlade, "tide-grass-blade-wind-v9", 2.35, 0.88);
+    // 高地矮生草具有較硬的根部與較短的葉身：受高速尾流時側偏較小，但仍會有可見的壓低與回彈。
+    installFoliageWind(shared.alpineBlade, "tide-alpine-rosette-wind-v1", 0.82, 0.48);
     installFoliageWind(shared.meadowBloom, "tide-meadow-bloom-wind-v6", 1.5, 0.16);
     installFoliageWind(shared.coastGrass, "tide-coast-reed-wind-v6", 1.75, 0.3);
     installFoliageWind(shared.reefCoral, "tide-reef-coral-current-v6");
@@ -5188,6 +5197,118 @@ vFoliageGust = 0.0;
       }
 
       // 苔地以羽狀蕨葉填補樹叢下層：單一自訂葉片幾何、多實例批次，風動沿用 GPU 材質。
+      // 高地生態帶：石灰岩稜線不再只是裸露方塊，加入成簇的匍匐墊狀植物與短葉叢。
+      // 依高度、岩脊斑塊與固定種子分布，避開建築；所有葉片採 InstancedMesh + GPU 風場。
+      const alpineCells = Array.from(tileCells.values()).filter((cell) => {
+        if (cell.h < 2 || terrainRegion(cell) !== "limestone") return false;
+        const key = Math.floor(cell.x) + "," + Math.floor(cell.z);
+        if (coastBandKeys.has(key)) return false;
+        const ridgePatch = Math.sin(cell.x * 0.23 + Math.cos(cell.z * 0.17) * 1.4)
+          + Math.cos(cell.z * 0.19 - cell.x * 0.07);
+        if (ridgePatch < -0.18) return false;
+        const seed = Math.abs(Math.sin(cell.x * 91.7 + cell.z * 57.3) * 24731.9) % 1;
+        if (seed < 0.79) return false;
+        return !protectedBuildings.some((building) =>
+          Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 0.62,
+        );
+      }).slice(0, 120);
+      if (alpineCells.length) {
+        const cushionGeometry = new THREE.SphereGeometry(1, 12, 8);
+        const cushions = new THREE.InstancedMesh(shared.alpineCushion, cushionGeometry, alpineCells.length);
+        const bladeRows = [
+          { y: 0.000, width: 0.018, x: 0.000, z: 0.000 },
+          { y: 0.038, width: 0.019, x: 0.003, z: 0.004 },
+          { y: 0.078, width: 0.016, x: 0.009, z: 0.011 },
+          { y: 0.121, width: 0.012, x: 0.014, z: 0.019 },
+          { y: 0.164, width: 0.008, x: 0.014, z: 0.027 },
+          { y: 0.201, width: 0.004, x: 0.009, z: 0.034 },
+          { y: 0.225, width: 0.001, x: 0.002, z: 0.039 },
+        ];
+        const rails = [-1, -0.5, 0, 0.5, 1];
+        const positions: number[] = [];
+        const colors: number[] = [];
+        const indices: number[] = [];
+        for (let row = 0; row < bladeRows.length; row++) {
+          const section = bladeRows[row];
+          const t = row / (bladeRows.length - 1);
+          for (let rail = 0; rail < rails.length; rail++) {
+            const across = rails[rail];
+            const cup = (1 - Math.abs(across)) * 0.006;
+            positions.push(
+              section.x + across * section.width,
+              section.y + cup + (rail === 2 ? 0.005 : 0),
+              section.z + Math.sin(t * 5.2 + across) * 0.0018,
+            );
+            colors.push(
+              0.48 + t * 0.38 + (rail === 2 ? 0.05 : 0),
+              0.66 + t * 0.27,
+              0.62 + t * 0.31 + Math.max(0, across) * 0.035,
+            );
+          }
+        }
+        for (let row = 0; row < bladeRows.length - 1; row++) {
+          for (let rail = 0; rail < rails.length - 1; rail++) {
+            const base = row * rails.length + rail;
+            const next = base + rails.length;
+            indices.push(base, next, base + 1, base + 1, next, next + 1);
+          }
+        }
+        const alpineBladeGeometry = new THREE.BufferGeometry();
+        alpineBladeGeometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+        alpineBladeGeometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+        alpineBladeGeometry.setIndex(indices);
+        alpineBladeGeometry.computeVertexNormals();
+        alpineBladeGeometry.computeBoundingSphere();
+        const alpineGrass = new THREE.InstancedMesh(
+          alpineBladeGeometry,
+          shared.alpineBlade,
+          alpineCells.length * 3,
+        );
+        const dummy = new THREE.Object3D();
+        const tint = new THREE.Color();
+        const cushionPalette = ["#526f66", "#6d8c7b", "#8da99a", "#a9bfae", "#718b96"];
+        const bladePalette = ["#527d77", "#6e9b8e", "#91b6a4", "#b2c8b4", "#8ba8bd", "#c2d1c0"];
+        for (let i = 0; i < alpineCells.length; i++) {
+          const cell = alpineCells[i];
+          const seed = Math.abs(Math.sin(cell.x * 127.1 + cell.z * 311.7) * 43758.5453) % 1;
+          dummy.position.set(cell.x, groundTop(cell.h) + 0.025, cell.z);
+          dummy.rotation.set(0, seed * Math.PI * 2, 0);
+          dummy.scale.set(0.13 + seed * 0.045, 0.035 + seed * 0.012, 0.12 + seed * 0.04);
+          dummy.updateMatrix();
+          cushions.setMatrixAt(i, dummy.matrix);
+          tint.set(cushionPalette[Math.floor(seed * cushionPalette.length)]);
+          cushions.setColorAt(i, tint);
+          for (let blade = 0; blade < 3; blade++) {
+            const index = i * 3 + blade;
+            const angle = seed * Math.PI * 2 + blade * (Math.PI * 2 / 3);
+            const radius = 0.035 + seed * 0.025;
+            dummy.position.set(
+              cell.x + Math.cos(angle) * radius,
+              groundTop(cell.h) + 0.045,
+              cell.z + Math.sin(angle) * radius,
+            );
+            dummy.rotation.set(Math.cos(angle) * 0.16, angle, Math.sin(angle) * -0.16);
+            const scale = 0.78 + ((seed * 5.7 + blade * 0.37) % 1) * 0.34;
+            dummy.scale.set(0.88 + seed * 0.18, scale, 0.88 + seed * 0.18);
+            dummy.updateMatrix();
+            alpineGrass.setMatrixAt(index, dummy.matrix);
+            tint.set(bladePalette[Math.floor((seed * 7.1 + blade * 1.6) % bladePalette.length)]);
+            alpineGrass.setColorAt(index, tint);
+          }
+        }
+        cushions.instanceMatrix.needsUpdate = true;
+        if (cushions.instanceColor) cushions.instanceColor.needsUpdate = true;
+        cushions.computeBoundingSphere();
+        cushions.castShadow = false;
+        cushions.receiveShadow = false;
+        alpineGrass.instanceMatrix.needsUpdate = true;
+        if (alpineGrass.instanceColor) alpineGrass.instanceColor.needsUpdate = true;
+        alpineGrass.computeBoundingSphere();
+        alpineGrass.castShadow = false;
+        alpineGrass.receiveShadow = false;
+        terrainRoot.add(cushions, alpineGrass);
+      }
+
       const fernCells = Array.from(tileCells.values()).filter((cell) => {
         if (cell.h < 1 || cell.h > 2 || terrainRegion(cell) !== "moss") return false;
         const key = Math.floor(cell.x) + "," + Math.floor(cell.z);
