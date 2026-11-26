@@ -6667,6 +6667,7 @@ vFoliageGust = 0.0;
         shotNode.children[3]?.material?.dispose();
       }
       clearGroup(effectRoot);
+      terrainDustMaterial.dispose();
       projectileWakeGeometry.dispose();
       scene.remove(skyDome);
       skyGeometry.dispose();
