@@ -4294,12 +4294,12 @@ vFoliageGust = 0.0;
       }).slice(0, 64);
       if (mushroomCells.length) {
         const mushroomStems = new THREE.InstancedMesh(
-          new THREE.CylinderGeometry(0.018, 0.028, 0.11, 5),
+          new THREE.CylinderGeometry(0.018, 0.028, 0.11, 9),
           shared.ivory,
           mushroomCells.length,
         );
         const mushroomCaps = new THREE.InstancedMesh(
-          new THREE.DodecahedronGeometry(0.075, 0),
+          new THREE.IcosahedronGeometry(0.075, 1),
           shared.meadowBloom,
           mushroomCells.length,
         );
@@ -4449,12 +4449,12 @@ vFoliageGust = 0.0;
         );
         // 五瓣橢圓花冠＋獨立花心；每種零件各一個實例批次，不再用單顆球體代表整朵花。
         const flowerPetals = new THREE.InstancedMesh(
-          new THREE.SphereGeometry(0.042, 7, 5),
+          new THREE.SphereGeometry(0.042, 12, 8),
           shared.meadowBloom,
           bloomCount * 5,
         );
         const flowerCenters = new THREE.InstancedMesh(
-          new THREE.SphereGeometry(0.019, 7, 5),
+          new THREE.SphereGeometry(0.019, 10, 7),
           shared.foundationGold,
           bloomCount,
         );
@@ -6032,7 +6032,7 @@ vFoliageGust = 0.0;
 
       if (cliffFragments.length) {
         const fragments = new THREE.InstancedMesh(
-          new THREE.DodecahedronGeometry(0.22, 0),
+          new THREE.IcosahedronGeometry(0.22, 1),
           shared.cliffFacet,
           cliffFragments.length,
         );
@@ -6695,10 +6695,11 @@ vFoliageGust = 0.0;
         if (!shotNodes[i]) {
           const group = new THREE.Group();
           const material = new THREE.MeshStandardMaterial({ color: shot.color, emissive: shot.color, emissiveIntensity: 1.1, roughness: 0.28 });
-          const core = new THREE.Mesh(new THREE.OctahedronGeometry(0.16, 0), material);
+          const core = new THREE.Mesh(new THREE.IcosahedronGeometry(0.16, 1), material);
           core.castShadow = false;
           group.add(core);
-          const trail = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.055, 0.48), material);
+          const trail = new THREE.Mesh(new THREE.CapsuleGeometry(0.032, 0.42, 4, 10), material);
+          trail.rotation.x = Math.PI / 2;
           trail.position.z = -0.28;
           group.add(trail);
           const wakeMaterial = new THREE.MeshBasicMaterial({
@@ -6743,7 +6744,7 @@ vFoliageGust = 0.0;
         skimWake.material.color.set(shot.color);
         skimWake.material.opacity = speedFactor > 0.08 ? 0.08 + speedFactor * 0.34 : 0;
         skimWake.scale.set(1.3 + speedFactor * 0.9, 1, 1.0 + speedFactor * 1.8);
-        node.children[1].scale.z = 1 + speedFactor * 1.9;
+        node.children[1].scale.y = 1 + speedFactor * 1.9;
         node.children[1].position.z = -0.28 - speedFactor * 0.16;
         node.children[0].scale.setScalar(1 + speedFactor * 0.13);
         const dx = (shot.tx - shot.x) / CELL;
