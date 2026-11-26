@@ -453,7 +453,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       shader.uniforms.uRockDebrisAge = rockDebrisUniforms.age;
       shader.vertexShader = shader.vertexShader.replace(
         "#include <common>",
-        "#include <common>\\nuniform float uRockDebrisAge;\\nvarying float vRockDebrisFade;",
+        "#include <common>\nuniform float uRockDebrisAge;\nvarying float vRockDebrisFade;",
       );
       shader.vertexShader = shader.vertexShader.replace(
         "#include <begin_vertex>",
@@ -474,7 +474,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       );
       shader.fragmentShader = shader.fragmentShader.replace(
         "#include <common>",
-        "#include <common>\\nvarying float vRockDebrisFade;",
+        "#include <common>\nvarying float vRockDebrisFade;",
       );
       shader.fragmentShader = shader.fragmentShader.replace(
         "#include <color_fragment>",
