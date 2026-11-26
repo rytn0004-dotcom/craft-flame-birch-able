@@ -370,15 +370,15 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
         shader.uniforms.uProjectileWakeTime = projectileWakeUniforms.time;
         shader.vertexShader = shader.vertexShader.replace(
           "#include <common>",
-          "#include <common>\\nvarying vec2 vProjectileWakeUv;",
+          "#include <common>\nvarying vec2 vProjectileWakeUv;",
         );
         shader.vertexShader = shader.vertexShader.replace(
           "#include <begin_vertex>",
-          "#include <begin_vertex>\\nvProjectileWakeUv = uv;",
+          "#include <begin_vertex>\nvProjectileWakeUv = uv;",
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <common>",
-          "#include <common>\\nvarying vec2 vProjectileWakeUv;\\nuniform float uProjectileWakeTime;",
+          "#include <common>\nvarying vec2 vProjectileWakeUv;\nuniform float uProjectileWakeTime;",
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <color_fragment>",
