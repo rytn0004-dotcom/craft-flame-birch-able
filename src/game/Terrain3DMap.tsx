@@ -989,7 +989,16 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
         opacity: 0.92,
         depthWrite: false,
       }),
+      caveDepth: new THREE.MeshBasicMaterial({
+        color: "#030812",
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.98,
+        depthWrite: false,
+        toneMapped: false,
+      }),
       caveRim: new THREE.MeshStandardMaterial({ color: "#68786e", roughness: 0.99, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.028 }),
+      caveInnerRim: new THREE.MeshStandardMaterial({ color: "#89917c", roughness: 0.96, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.018 }),
       bridgeStone: new THREE.MeshStandardMaterial({ color: "#c0b69b", roughness: 0.96, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.022 }),
       bridgeTrim: new THREE.MeshPhysicalMaterial({ color: "#b99560", metalness: 0.54, roughness: 0.36, roughnessMap: surfaceRoughnessMap, clearcoat: 0.48, clearcoatRoughness: 0.24, envMapIntensity: 1.02 }),
       grass: new THREE.MeshStandardMaterial({ color: "#83a878", roughness: 0.96 }),
@@ -6587,6 +6596,7 @@ vFoliageGust = 0.0;
       const caveEntrances: { x: number; y: number; z: number; rot: number; scale: number }[] = [];
       const cliffRibs: { x: number; y: number; z: number; rot: number; height: number; tint: string }[] = [];
       const cliffLedges: { x: number; y: number; z: number; rot: number }[] = [];
+      const cliffShelves: { x: number; y: number; z: number; rot: number; width: number; depth: number; height: number; tint: string }[] = [];
       const cliffMosses: { x: number; y: number; z: number; rot: number; width: number; depth: number; tint: string }[] = [];
       const heightRims: { x: number; y: number; z: number; rot: number; width: number; depth: number; tint: string }[] = [];
       const cliffFragments: {
@@ -6675,6 +6685,26 @@ vFoliageGust = 0.0;
               rot: Math.atan2(d.dx, d.dz),
               height: ridgeVertical * 0.78,
               tint: ridgeSeed > 0.965 ? "#b9b29a" : "#78877a",
+            });
+          }
+
+          // 高差較大的崖面會長出少量斷續岩棚：高度、寬度與色層由世界座標種子決定。
+          // 使用同一個倒角岩塊的 InstancedMesh，限制數量且不建立逐個 Mesh。
+          const shelfSeed = Math.abs(Math.sin(cell.x * 83.7 + cell.z * 47.3 + d.dc * 19.1 + d.dr * 13.7) * 23671.31) % 1;
+          if (
+            cell.h >= 2 && ridgeVertical >= 0.78 && shelfSeed > 0.79 &&
+            cliffShelves.length < 280 && !nearRidgeBuilding
+          ) {
+            const along = (shelfSeed - 0.5) * 0.58;
+            cliffShelves.push({
+              x: cell.x + d.dx * 0.515 + (d.dc === 0 ? along : 0),
+              y: low + ridgeVertical * (0.22 + shelfSeed * 0.48),
+              z: cell.z + d.dz * 0.515 + (d.dr === 0 ? along : 0),
+              rot: d.dc === 0 ? 0 : Math.PI / 2,
+              width: 0.22 + (shelfSeed - 0.79) * 0.88,
+              depth: 0.13 + (shelfSeed - 0.79) * 0.26,
+              height: 0.052 + shelfSeed * 0.028,
+              tint: shelfSeed > 0.94 ? "#c9b894" : shelfSeed > 0.87 ? "#89927c" : "#687c70",
             });
           }
 
@@ -6877,9 +6907,19 @@ vFoliageGust = 0.0;
           shared.caveShadow,
           caveEntrances.length,
         );
+        const caveDepths = new THREE.InstancedMesh(
+          new THREE.CircleGeometry(0.205, 24),
+          shared.caveDepth,
+          caveEntrances.length,
+        );
         const caveArches = new THREE.InstancedMesh(
           new THREE.TorusGeometry(0.29, 0.055, 7, 24, Math.PI),
           shared.caveRim,
+          caveEntrances.length,
+        );
+        const caveInnerArches = new THREE.InstancedMesh(
+          new THREE.TorusGeometry(0.19, 0.026, 6, 20, Math.PI),
+          shared.caveInnerRim,
           caveEntrances.length,
         );
         const dummy = new THREE.Object3D();
@@ -6890,19 +6930,33 @@ vFoliageGust = 0.0;
           dummy.scale.setScalar(cave.scale);
           dummy.updateMatrix();
           caveMouths.setMatrixAt(i, dummy.matrix);
+          // 深色內腔向岩壁後方退入，與外圈洞緣形成真正的前後層次。
+          dummy.position.set(cave.x - Math.sin(cave.rot) * 0.052, cave.y, cave.z - Math.cos(cave.rot) * 0.052);
+          dummy.rotation.set(0, cave.rot, 0);
+          dummy.scale.setScalar(cave.scale * 0.9);
+          dummy.updateMatrix();
+          caveDepths.setMatrixAt(i, dummy.matrix);
           dummy.position.set(cave.x + Math.sin(cave.rot) * 0.024, cave.y, cave.z + Math.cos(cave.rot) * 0.024);
           dummy.rotation.set(0, cave.rot, 0);
           dummy.scale.setScalar(cave.scale);
           dummy.updateMatrix();
           caveArches.setMatrixAt(i, dummy.matrix);
+          dummy.position.set(cave.x + Math.sin(cave.rot) * 0.031, cave.y, cave.z + Math.cos(cave.rot) * 0.031);
+          dummy.rotation.set(0, cave.rot, 0);
+          dummy.scale.setScalar(cave.scale * 0.96);
+          dummy.updateMatrix();
+          caveInnerArches.setMatrixAt(i, dummy.matrix);
         }
-        caveMouths.instanceMatrix.needsUpdate = true;
-        caveArches.instanceMatrix.needsUpdate = true;
+        for (const mesh of [caveMouths, caveDepths, caveArches, caveInnerArches]) {
+          mesh.instanceMatrix.needsUpdate = true;
+          mesh.castShadow = mesh === caveArches;
+          mesh.receiveShadow = mesh === caveArches || mesh === caveInnerArches;
+        }
         caveMouths.castShadow = false;
         caveMouths.receiveShadow = false;
-        caveArches.castShadow = true;
-        caveArches.receiveShadow = true;
-        terrainRoot.add(caveMouths, caveArches);
+        caveDepths.castShadow = false;
+        caveDepths.receiveShadow = false;
+        terrainRoot.add(caveMouths, caveDepths, caveArches, caveInnerArches);
 
         // 最多 4 處洞口使用不投影的青綠微光，讓洞穴有深度而不增加陰影成本。
         for (let i = 0; i < Math.min(4, caveEntrances.length); i++) {
@@ -7098,6 +7152,32 @@ vFoliageGust = 0.0;
         ledges.instanceMatrix.needsUpdate = true;
         ledges.receiveShadow = true;
         terrainRoot.add(ledges);
+      }
+
+      if (cliffShelves.length) {
+        const shelves = new THREE.InstancedMesh(
+          cliffBlockGeometry,
+          shared.cliffLip,
+          cliffShelves.length,
+        );
+        shelves.userData.sharedGeometry = true;
+        const shelfDummy = new THREE.Object3D();
+        const shelfTint = new THREE.Color();
+        for (let i = 0; i < cliffShelves.length; i++) {
+          const shelf = cliffShelves[i];
+          shelfDummy.position.set(shelf.x, shelf.y, shelf.z);
+          shelfDummy.rotation.set(0, shelf.rot, 0);
+          shelfDummy.scale.set(shelf.width, shelf.height, shelf.depth);
+          shelfDummy.updateMatrix();
+          shelves.setMatrixAt(i, shelfDummy.matrix);
+          shelfTint.set(shelf.tint);
+          shelves.setColorAt(i, shelfTint);
+        }
+        shelves.instanceMatrix.needsUpdate = true;
+        if (shelves.instanceColor) shelves.instanceColor.needsUpdate = true;
+        shelves.castShadow = true;
+        shelves.receiveShadow = true;
+        terrainRoot.add(shelves);
       }
 
       if (cliffMosses.length) {
