@@ -537,6 +537,12 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
     };
 
     const foliageWindUniform = { value: 0 };
+    // 高速彈體只更新一組共享風場；草葉與花粉在 GPU 依距離計算掠過擾動。
+    const slipWindUniforms = {
+      position: { value: new THREE.Vector2(-1000, -1000) },
+      direction: { value: new THREE.Vector2(1, 0) },
+      strength: { value: 0 },
+    };
     const pollenUniforms = { time: { value: 0 } };
     const sanctuarySigilUniforms = { time: { value: 0 }, power: { value: 0.18 } };
     const roadGuideUniforms = {
@@ -897,6 +903,20 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.12, 1.045, 0.88),
             sunlitMeadow * ${height === 0 ? "0.08" : "0.2"});
           diffuseColor.rgb += vec3(0.035, 0.042, 0.032) * mineralLode;
+          // 草甸暖金花粉色、潮濕青綠與高地石英色脈，沿世界座標自然延續。
+          float meadowPigment = smoothstep(0.42, 0.91,
+            sin(terrainWorld.x * 0.23 + terrainWorld.y * 0.17)
+            * cos(terrainWorld.y * 0.19 - terrainWorld.x * 0.13) * 0.5 + 0.5);
+          float dewPigment = smoothstep(0.56, 0.96,
+            sin(terrainWorld.x * 0.14 - terrainWorld.y * 0.21 + middleGrain) * 0.5 + 0.5);
+          float quartzSeam = pow(max(0.0,
+            sin(terrainWorld.x * 0.41 + cos(terrainWorld.y * 0.29) * 2.0)
+            * cos(terrainWorld.y * 0.37 - terrainWorld.x * 0.18)), 10.0);
+          diffuseColor.rgb = mix(diffuseColor.rgb,
+            diffuseColor.rgb * vec3(1.12, 1.025, 0.88), meadowPigment * 0.085);
+          diffuseColor.rgb = mix(diffuseColor.rgb,
+            diffuseColor.rgb * vec3(0.87, 1.055, 1.105), dewPigment * 0.09);
+          diffuseColor.rgb += vec3(0.075, 0.105, 0.13) * quartzSeam * 0.28;
           diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.88, 1.06, 1.12),
             lichenField * ${height >= 1 ? "0.068" : "0.02"});`,
         );
@@ -1082,10 +1102,16 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
     const installFoliageWind = (material: THREE.MeshStandardMaterial, cacheKey: string) => {
       material.onBeforeCompile = (shader) => {
         shader.uniforms.uFoliageTime = foliageWindUniform;
+        shader.uniforms.uSlipPosition = slipWindUniforms.position;
+        shader.uniforms.uSlipDirection = slipWindUniforms.direction;
+        shader.uniforms.uSlipStrength = slipWindUniforms.strength;
         shader.vertexShader = shader.vertexShader.replace(
           "#include <common>",
           `#include <common>
 uniform float uFoliageTime;
+uniform vec2 uSlipPosition;
+uniform vec2 uSlipDirection;
+uniform float uSlipStrength;
 varying float vFoliageGust;`,
         );
         shader.vertexShader = shader.vertexShader.replace(
@@ -1109,6 +1135,19 @@ vFoliageGust = 0.0;
         transformed.x += (foliageSway * 0.092 + gustLean * 0.026) * foliageMask;
         transformed.z += (cos(uFoliageTime * 0.91 + foliagePhase * 1.27 + position.y * 1.8)
           + foliageFlutter * 0.45 + gustLean * 0.34) * 0.048 * foliageMask;
+        vec2 slipRelative = instanceMatrix[3].xz - uSlipPosition;
+        float slipAlong = dot(slipRelative, uSlipDirection);
+        vec2 slipPerpendicular = vec2(-uSlipDirection.y, uSlipDirection.x);
+        float slipSide = abs(dot(slipRelative, slipPerpendicular));
+        float slipWake = smoothstep(-9.0, -7.0, slipAlong)
+          * (1.0 - smoothstep(-1.25, 0.15, slipAlong))
+          * (1.0 - smoothstep(0.55, 2.8, slipSide));
+        float slipGust = slipWake * uSlipStrength * foliageMask;
+        float slipSideSign = sign(dot(slipRelative, slipPerpendicular));
+        vec2 slipBend = -uSlipDirection * 0.16
+          + slipPerpendicular * slipSideSign * 0.12;
+        transformed.xz += slipBend * slipGust;
+        vFoliageGust = max(vFoliageGust, slipGust);
 #endif`,
         );
         shader.fragmentShader = shader.fragmentShader.replace(
@@ -1135,9 +1174,12 @@ vFoliageGust = 0.0;
     const installPollenDrift = (material: THREE.MeshBasicMaterial) => {
       material.onBeforeCompile = (shader) => {
         shader.uniforms.uPollenTime = pollenUniforms.time;
+        shader.uniforms.uSlipPosition = slipWindUniforms.position;
+        shader.uniforms.uSlipDirection = slipWindUniforms.direction;
+        shader.uniforms.uSlipStrength = slipWindUniforms.strength;
         shader.vertexShader = shader.vertexShader.replace(
           "#include <common>",
-          "#include <common>\nuniform float uPollenTime;\nvarying float vPollenPhase;",
+          "#include <common>\nuniform float uPollenTime;\nuniform vec2 uSlipPosition;\nuniform vec2 uSlipDirection;\nuniform float uSlipStrength;\nvarying float vPollenPhase;",
         );
         shader.vertexShader = shader.vertexShader.replace(
           "#include <begin_vertex>",
@@ -1149,7 +1191,19 @@ vFoliageGust = 0.0;
           vPollenPhase = pollenPhase;
           transformed.x += sin(uPollenTime * 0.62 + pollenPhase) * 0.082;
           transformed.y += cos(uPollenTime * 0.86 + pollenPhase * 1.37) * 0.065;
-          transformed.z += sin(uPollenTime * 0.51 + pollenPhase * 0.83) * 0.074;`,
+          transformed.z += sin(uPollenTime * 0.51 + pollenPhase * 0.83) * 0.074;
+          #ifdef USE_INSTANCING
+            vec2 pollenSlipRelative = instanceMatrix[3].xz - uSlipPosition;
+            float pollenSlipAlong = dot(pollenSlipRelative, uSlipDirection);
+            vec2 pollenSlipSide = vec2(-uSlipDirection.y, uSlipDirection.x);
+            float pollenSlipWidth = abs(dot(pollenSlipRelative, pollenSlipSide));
+            float pollenSlipWake = smoothstep(-9.0, -7.0, pollenSlipAlong)
+              * (1.0 - smoothstep(-1.25, 0.15, pollenSlipAlong))
+              * (1.0 - smoothstep(0.5, 3.1, pollenSlipWidth)) * uSlipStrength;
+            transformed.x -= uSlipDirection.x * pollenSlipWake * 0.18;
+            transformed.y += pollenSlipWake * (0.18 + 0.06 * sin(uPollenTime * 9.0 + pollenPhase));
+            transformed.z -= uSlipDirection.y * pollenSlipWake * 0.18;
+          #endif`,
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <common>",
@@ -5929,6 +5983,26 @@ vFoliageGust = 0.0;
     effectRoot.add(placementPreview);
 
     const updateEffects = (data: Terrain3DSnapshot) => {
+      // 只追蹤當下最快的一枚高速彈體，讓後方草葉短暫伏倒、花粉被氣流抬起。
+      let slipShot: Terrain3DShot | null = null;
+      let slipSpeed = 260;
+      for (const shot of data.shots) {
+        const speed = shot.speed ?? 220;
+        if (speed > slipSpeed) {
+          slipShot = shot;
+          slipSpeed = speed;
+        }
+      }
+      if (slipShot) {
+        const slipDx = (slipShot.tx - slipShot.x) / CELL;
+        const slipDz = (slipShot.ty - slipShot.y) / CELL;
+        const slipLength = Math.hypot(slipDx, slipDz) || 1;
+        slipWindUniforms.position.value.set(slipShot.x / CELL, slipShot.y / CELL);
+        slipWindUniforms.direction.value.set(slipDx / slipLength, slipDz / slipLength);
+        slipWindUniforms.strength.value = THREE.MathUtils.clamp((slipSpeed - 250) / 420, 0, 1);
+      } else {
+        slipWindUniforms.strength.value = 0;
+      }
       for (let i = 0; i < data.shots.length; i++) {
         const shot = data.shots[i];
         if (!shotNodes[i]) {
