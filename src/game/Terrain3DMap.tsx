@@ -7924,10 +7924,11 @@ vFoliageGust = 0.0;
         });
         if (stairRamps.length) {
           const stairSteps = new THREE.InstancedMesh(
-            new THREE.BoxGeometry(0.76, 0.045, 0.18),
+            cliffBlockGeometry,
             shared.rampStep,
             stairRamps.length * 3,
           );
+          stairSteps.userData.sharedGeometry = true;
           const stairDummy = new THREE.Object3D();
           for (let i = 0; i < stairRamps.length; i++) {
             const ramp = stairRamps[i];
@@ -7938,7 +7939,7 @@ vFoliageGust = 0.0;
               const worldZ = ramp.z + Math.cos(ramp.rot) * localZ;
               stairDummy.position.set(worldX, ramp.y + heightAlongRamp, worldZ);
               stairDummy.rotation.set(0, ramp.rot, 0);
-              stairDummy.scale.set(1, 1, 1);
+              stairDummy.scale.set(0.76, 0.045, 0.18);
               stairDummy.updateMatrix();
               stairSteps.setMatrixAt(i * 3 + step, stairDummy.matrix);
             }
