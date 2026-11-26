@@ -7684,13 +7684,85 @@ vFoliageGust = 0.0;
         { dc: 0, dr: 1, rot: Math.PI },
         { dc: -1, dr: 0, rot: Math.PI / 2 },
       ];
-      const rampGeometry = new THREE.BufferGeometry();
-      rampGeometry.setAttribute("position", new THREE.Float32BufferAttribute([
-        -0.46, HEIGHT_STEP, -0.46, 0.46, HEIGHT_STEP, -0.46,
-        -0.46, 0, 0.46, 0.46, 0, 0.46,
-      ], 3));
-      rampGeometry.setIndex([0, 2, 1, 1, 2, 3]);
-      rampGeometry.computeVertexNormals();
+      // 雕塑式坡面：多段縱向剖面與圓化側緣取代單張四邊形平面。
+      // 頂／底端仍精確貼齊原本平台高度；中段只做視覺微起伏，不改碰撞或地塊高度。
+      const rampGeometry = (() => {
+        const geometry = new THREE.BufferGeometry();
+        const across = [-0.46, -0.438, -0.395, -0.28, -0.14, 0, 0.14, 0.28, 0.395, 0.438, 0.46];
+        const rows = 15;
+        const columns = across.length;
+        const positions: number[] = [];
+        const uvs: number[] = [];
+        const indices: number[] = [];
+        const topY = (row: number, rail: number) => {
+          const t = row / (rows - 1);
+          const x = across[rail];
+          const longitudinalFade = Math.sin(Math.PI * t);
+          const edge = Math.pow(Math.abs(x) / 0.46, 5.0);
+          const shoulder = Math.max(0, 1.0 - Math.abs(x) / 0.46);
+          const erosion = Math.sin(t * 18.0 + x * 13.0) * 0.0032
+            + Math.sin(t * 39.0 - x * 21.0) * 0.0011;
+          const crown = shoulder * 0.007;
+          const rolledLip = -edge * 0.012;
+          return HEIGHT_STEP * (1.0 - t)
+            + longitudinalFade * (crown + rolledLip + erosion);
+        };
+        for (let row = 0; row < rows; row++) {
+          const t = row / (rows - 1);
+          const z = -0.46 + t * 0.92;
+          for (let rail = 0; rail < columns; rail++) {
+            positions.push(across[rail], topY(row, rail), z);
+            uvs.push(rail / (columns - 1), t);
+          }
+        }
+        const topVertexCount = positions.length / 3;
+        // 頂面多細分網格：中線略微隆起、兩側圓化，細微蝕溝沿坡向延伸。
+        for (let row = 0; row < rows - 1; row++) {
+          for (let rail = 0; rail < columns - 1; rail++) {
+            const a = row * columns + rail;
+            const b = a + 1;
+            const c = a + columns;
+            const d = c + 1;
+            indices.push(a, c, b, b, c, d);
+          }
+        }
+        // 薄岩層底面，避免坡道像沒有厚度的紙片。
+        for (let i = 0; i < topVertexCount; i++) {
+          positions.push(positions[i * 3], positions[i * 3 + 1] - 0.038, positions[i * 3 + 2]);
+          uvs.push(uvs[i * 2], uvs[i * 2 + 1]);
+        }
+        const bottomOffset = topVertexCount;
+        for (let row = 0; row < rows - 1; row++) {
+          for (let rail = 0; rail < columns - 1; rail++) {
+            const a = bottomOffset + row * columns + rail;
+            const b = a + 1;
+            const c = a + columns;
+            const d = c + 1;
+            indices.push(a, b, c, b, d, c);
+          }
+        }
+        // 左右側邊、坡頂與坡腳收成封閉薄片，側緣不再露出單面薄片。
+        const addSideQuad = (topA: number, topB: number) => {
+          const bottomA = topA + bottomOffset;
+          const bottomB = topB + bottomOffset;
+          indices.push(topA, bottomA, topB, topB, bottomA, bottomB);
+        };
+        for (let row = 0; row < rows - 1; row++) {
+          addSideQuad(row * columns, (row + 1) * columns);
+          addSideQuad(row * columns + columns - 1, (row + 1) * columns + columns - 1);
+        }
+        for (let rail = 0; rail < columns - 1; rail++) {
+          addSideQuad(rail, rail + 1);
+          addSideQuad((rows - 1) * columns + rail + 1, (rows - 1) * columns + rail);
+        }
+        geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+        geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+        geometry.setIndex(indices);
+        geometry.computeVertexNormals();
+        geometry.computeBoundingSphere();
+        geometry.userData.sharedGeometry = true;
+        return geometry;
+      })();
       const rampCells: { x: number; y: number; z: number; rot: number; level: number; rise: number }[] = [];
       for (const cell of tileCells.values()) {
         if (cell.h <= 0) continue;
