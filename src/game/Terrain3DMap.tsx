@@ -1389,7 +1389,7 @@ vFoliageGust = 0.0;
           diffuseColor.a *= 0.78 + leafLight * 0.22;`,
         );
       };
-      material.customProgramCacheKey = () => "tide-windblown-leaf-petal-v1";
+      material.customProgramCacheKey = () => "tide-windblown-leaf-petal-v2";
     };
     installWindblownDrift(shared.windblownLeaf);
 
