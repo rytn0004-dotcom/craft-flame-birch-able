@@ -346,27 +346,66 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
     const enemyHealthBars: { back: any; fill: any }[] = [];
     const shotNodes: any[] = [];
     const ringNodes: any[] = [];
-    // 三股交錯的尾流共用單一幾何與 draw call：中央亮核、兩側細流，像高速掠過時拉開的氣流絲。
-    const projectileWakeGeometry = new THREE.BufferGeometry();
-    projectileWakeGeometry.setAttribute("position", new THREE.Float32BufferAttribute([
-      -0.095, 0, 0.08,  0.095, 0, 0.08,  0, 0, -1.12,
-      -0.205, 0, 0.025, -0.17, 0, 0.025, -0.095, 0, -0.86,
-       0.17, 0, 0.025,  0.205, 0, 0.025,  0.095, 0, -0.86,
-    ], 3));
-    projectileWakeGeometry.setAttribute("uv", new THREE.Float32BufferAttribute([
-      0, 0, 1, 0, 0.5, 1,
-      0, 0, 1, 0, 0.5, 1,
-      0, 0, 1, 0, 0.5, 1,
-    ], 2));
-    projectileWakeGeometry.setAttribute("color", new THREE.Float32BufferAttribute([
-      1, 1, 1, 1, 1, 1, 1, 1, 1,
-      0.48, 0.72, 0.86, 0.48, 0.72, 0.86, 0.62, 0.82, 0.92,
-      0.48, 0.72, 0.86, 0.48, 0.72, 0.86, 0.62, 0.82, 0.92,
-    ], 3));
-    projectileWakeGeometry.setIndex([0, 1, 2, 3, 4, 5, 6, 7, 8]);
-    projectileWakeGeometry.computeVertexNormals();
-    projectileWakeGeometry.computeBoundingSphere();
-    projectileWakeGeometry.userData.sharedGeometry = true;
+    // Three aerodynamic ribbons share one geometry and one draw call per shot.
+    // Every strand has 12 longitudinal sections and a raised 5-rail cross section:
+    // the core stays tight while the side vortices spread, curl and taper behind the projectile.
+    const projectileWakeGeometry = (() => {
+      const positions: number[] = [];
+      const uvs: number[] = [];
+      const colors: number[] = [];
+      const indices: number[] = [];
+      const longitudinalSections = 12;
+      const rails = [-1, -0.5, 0, 0.5, 1];
+      const strands = [
+        { offset: 0, width: 0.076, phase: 0, color: [0.82, 0.96, 1.0] },
+        { offset: -1, width: 0.034, phase: 1.8, color: [0.36, 0.78, 0.94] },
+        { offset: 1, width: 0.034, phase: 3.2, color: [0.44, 0.86, 0.98] },
+      ];
+      for (let strand = 0; strand < strands.length; strand++) {
+        const spec = strands[strand];
+        const base = positions.length / 3;
+        for (let section = 0; section < longitudinalSections; section++) {
+          const t = section / (longitudinalSections - 1);
+          const taper = Math.pow(1 - t, strand === 0 ? 0.84 : 0.7);
+          const width = spec.width * taper + 0.0015;
+          const spread = spec.offset === 0 ? 0 : spec.offset * (0.072 + 0.135 * Math.sin(t * Math.PI * 0.82));
+          const curl = Math.sin(t * 9.2 + spec.phase) * 0.012 * t;
+          const centerX = spread + curl;
+          const centerY = 0.009 + Math.sin(t * 10.5 + spec.phase) * 0.013 * t;
+          const centerZ = 0.08 - t * (strand === 0 ? 1.3 : 1.16);
+          for (let rail = 0; rail < rails.length; rail++) {
+            const across = rails[rail];
+            const ridge = (1 - Math.abs(across)) * (strand === 0 ? 0.018 : 0.009);
+            positions.push(centerX + across * width, centerY + ridge, centerZ);
+            uvs.push((across + 1) * 0.5, t);
+            const edgeFade = 1 - Math.pow(Math.abs(across), 1.35) * 0.34;
+            const frontGlow = 1 - smoothstep(0.7, 1.0, t);
+            const colorBoost = strand === 0 ? 1.0 : 0.9;
+            colors.push(
+              Math.min(1, spec.color[0] * edgeFade * colorBoost + frontGlow * 0.12),
+              Math.min(1, spec.color[1] * edgeFade * colorBoost + frontGlow * 0.06),
+              Math.min(1, spec.color[2] * edgeFade * colorBoost),
+            );
+          }
+        }
+        for (let section = 0; section < longitudinalSections - 1; section++) {
+          for (let rail = 0; rail < rails.length - 1; rail++) {
+            const a = base + section * rails.length + rail;
+            const b = a + rails.length;
+            indices.push(a, a + 1, b, a + 1, b + 1, b);
+          }
+        }
+      }
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+      geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+      geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+      geometry.setIndex(indices);
+      geometry.computeVertexNormals();
+      geometry.computeBoundingSphere();
+      geometry.userData.sharedGeometry = true;
+      return geometry;
+    })();
     const projectileWakeUniforms = { time: { value: 0 } };
 
     // 高地高速掠過會拖起一條短暫碎塵尾帶：單一 InstancedMesh，粒子漂浮由 GPU 控制。
