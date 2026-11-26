@@ -1783,9 +1783,41 @@ vFoliageGust = 0.0;
     installWindblownDrift(shared.windblownLeaf);
 
     // 所有地形區塊共用 4 種高度幾何，避免切塊後重複建立數百份相同頂點資料。
-    const terrainGeometries = [0, 1, 2, 3].map(
-      (height) => new THREE.BoxGeometry(0.98, groundTop(height), 0.98, 6, 1, 6),
-    );
+    const terrainGeometries = [0, 1, 2, 3].map((height) => {
+      // 每個地塊使用共享倒角岩台：頂面邊緣微圓、側壁略帶收分，
+      // 不改變格子中心、邏輯高度或可放置範圍，避免方塊拼接感。
+      const halfY = groundTop(height) * 0.5;
+      const bevel = 0.022;
+      const geometry = new THREE.BoxGeometry(0.98, groundTop(height), 0.98, 8, 2, 8);
+      const positions = geometry.getAttribute("position");
+      for (let i = 0; i < positions.count; i++) {
+        let x = positions.getX(i);
+        let y = positions.getY(i);
+        let z = positions.getZ(i);
+        const cx = THREE.MathUtils.clamp(x, -0.49 + bevel, 0.49 - bevel);
+        const cy = THREE.MathUtils.clamp(y, -halfY + bevel, halfY - bevel);
+        const cz = THREE.MathUtils.clamp(z, -0.49 + bevel, 0.49 - bevel);
+        const dx = x - cx;
+        const dy = y - cy;
+        const dz = z - cz;
+        const length = Math.hypot(dx, dy, dz);
+        if (length > 1e-5) {
+          x = cx + dx / length * bevel;
+          y = cy + dy / length * bevel;
+          z = cz + dz / length * bevel;
+        }
+        const erosion = Math.sin(x * 19.0 + z * 13.0 + height * 0.7)
+          * Math.cos(z * 17.0 - x * 8.0);
+        x += erosion * 0.0014;
+        z -= erosion * 0.0012;
+        positions.setXYZ(i, x, y, z);
+      }
+      positions.needsUpdate = true;
+      geometry.computeVertexNormals();
+      geometry.computeBoundingSphere();
+      geometry.userData.sharedGeometry = true;
+      return geometry;
+    });
 
     // 透明命中盒只供 Raycaster 使用，完全不參與顯示與深度寫入；保證 HQ 屋頂／城牆容易選取。
     const buildingHitMaterial = new THREE.MeshBasicMaterial({
