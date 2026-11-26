@@ -3769,7 +3769,11 @@ vFoliageGust = 0.0;
           + Math.cos(cell.z * 0.16 - cell.x * 0.08);
         if (patchField < -0.28) return false;
         const seed = Math.abs(Math.sin(cell.x * 63.7 + cell.z * 29.3) * 18341.73) % 1;
-        if (seed < 0.925) return false;
+        // Grass density follows the large meadow patch field: lush pockets gather naturally,
+        // while wind-scoured gaps and exposed limestone remain open.
+        const patchDensity = THREE.MathUtils.clamp((patchField + 0.28) * 0.31, 0, 1);
+        const densityThreshold = 0.938 - patchDensity * 0.12;
+        if (seed < densityThreshold) return false;
         return !data.towers.some((tower) => {
           const tx = tower.x / CELL;
           const tz = tower.y / CELL;
@@ -3778,7 +3782,7 @@ vFoliageGust = 0.0;
         }) && !protectedBuildings.some((building) =>
           Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 0.38,
         );
-      }).slice(0, 1600);
+      }).slice(0, 1900);
       if (grassCells.length) {
         // 彎曲漸尖的葉片取代圓錐草刺；三片葉組成一簇，並共用樹冠風場材質。
         // Each blade is a curved, tapered 3-rail ribbon with six height segments and a raised central vein.
@@ -6056,22 +6060,39 @@ vFoliageGust = 0.0;
       }
 
       if (talusDebris.length) {
+        // Three-piece talus clusters overlap at different heights and angles, reading as a
+        // natural scree pile rather than a single repeated pebble on every cliff foot.
+        const rubbleEntries = talusDebris.slice(0, 1500);
         const rubble = new THREE.InstancedMesh(
-          new THREE.DodecahedronGeometry(0.075, 0),
+          new THREE.IcosahedronGeometry(0.075, 1),
           shared.rockDetail,
-          talusDebris.length,
+          rubbleEntries.length * 3,
         );
         const dummy = new THREE.Object3D();
         const tint = new THREE.Color();
-        for (let i = 0; i < talusDebris.length; i++) {
-          const stone = talusDebris[i];
-          dummy.position.set(stone.x, stone.y, stone.z);
-          dummy.rotation.set(stone.rot * 0.22, stone.rot, stone.rot * -0.16);
-          dummy.scale.setScalar(stone.scale / 0.075);
-          dummy.updateMatrix();
-          rubble.setMatrixAt(i, dummy.matrix);
-          tint.set(stone.tint);
-          rubble.setColorAt(i, tint);
+        for (let i = 0; i < rubbleEntries.length; i++) {
+          const stone = rubbleEntries[i];
+          for (let piece = 0; piece < 3; piece++) {
+            const angle = stone.rot + piece * (Math.PI * 2 / 3) + 0.18;
+            const radius = piece === 0 ? 0.012 : 0.052 + piece * 0.006;
+            const scale = stone.scale / 0.075 * (piece === 0 ? 0.92 : 0.58 + piece * 0.08);
+            dummy.position.set(
+              stone.x + Math.cos(angle) * radius,
+              stone.y + (piece === 0 ? 0.008 : 0.012 + piece * 0.006),
+              stone.z + Math.sin(angle) * radius,
+            );
+            dummy.rotation.set(
+              stone.rot * 0.22 + piece * 0.31,
+              angle,
+              stone.rot * -0.16 + (piece - 1) * 0.12,
+            );
+            dummy.scale.set(scale * (0.9 + piece * 0.08), scale * (0.68 + piece * 0.12), scale * (1.02 - piece * 0.08));
+            dummy.updateMatrix();
+            const index = i * 3 + piece;
+            rubble.setMatrixAt(index, dummy.matrix);
+            tint.set(stone.tint).multiplyScalar(piece === 0 ? 1.04 : piece === 1 ? 0.9 : 0.98);
+            rubble.setColorAt(index, tint);
+          }
         }
         rubble.instanceMatrix.needsUpdate = true;
         if (rubble.instanceColor) rubble.instanceColor.needsUpdate = true;
