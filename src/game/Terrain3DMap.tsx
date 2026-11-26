@@ -379,7 +379,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             positions.push(centerX + across * width, centerY + ridge, centerZ);
             uvs.push((across + 1) * 0.5, t);
             const edgeFade = 1 - Math.pow(Math.abs(across), 1.35) * 0.34;
-            const frontGlow = 1 - smoothstep(0.7, 1.0, t);
+            const frontGlow = 1 - THREE.MathUtils.smoothstep(t, 0.7, 1.0);
             const colorBoost = strand === 0 ? 1.0 : 0.9;
             colors.push(
               Math.min(1, spec.color[0] * edgeFade * colorBoost + frontGlow * 0.12),
