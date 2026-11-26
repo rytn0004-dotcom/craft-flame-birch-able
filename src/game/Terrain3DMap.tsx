@@ -1023,6 +1023,10 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       alpineCushion: new THREE.MeshStandardMaterial({
         color: "#82998d", roughness: 0.99, bumpMap: surfaceReliefMap, bumpScale: 0.012,
       }),
+      alpineBloom: new THREE.MeshStandardMaterial({
+        color: "#ffffff", roughness: 0.68, emissive: "#234c70", emissiveIntensity: 0.09,
+        side: THREE.DoubleSide,
+      }),
       treeBark: new THREE.MeshStandardMaterial({ color: "#6e5943", roughness: 0.98, bumpMap: surfaceReliefMap, bumpScale: 0.018 }),
       foliageWind: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.94, bumpMap: surfaceReliefMap, bumpScale: 0.008, side: THREE.DoubleSide }),
       treeCanopyWind: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.93, bumpMap: surfaceReliefMap, bumpScale: 0.008, side: THREE.DoubleSide }),
@@ -1962,6 +1966,7 @@ vFoliageGust = 0.0;
     installFoliageWind(shared.grassBlade, "tide-grass-blade-wind-v9", 2.35, 0.88);
     // 高地矮生草具有較硬的根部與較短的葉身：受高速尾流時側偏較小，但仍會有可見的壓低與回彈。
     installFoliageWind(shared.alpineBlade, "tide-alpine-rosette-wind-v1", 0.82, 0.48);
+    installFoliageWind(shared.alpineBloom, "tide-alpine-frost-bloom-wind-v1", 1.12, 0.12);
     installFoliageWind(shared.meadowBloom, "tide-meadow-bloom-wind-v6", 1.5, 0.16);
     installFoliageWind(shared.coastGrass, "tide-coast-reed-wind-v6", 1.75, 0.3);
     installFoliageWind(shared.reefCoral, "tide-reef-coral-current-v6");
@@ -5306,7 +5311,61 @@ vFoliageGust = 0.0;
         alpineGrass.computeBoundingSphere();
         alpineGrass.castShadow = false;
         alpineGrass.receiveShadow = false;
-        terrainRoot.add(cushions, alpineGrass);
+
+        // 稀疏霜花沿墊狀植物間隙出現，花瓣採圓潤立體形，不形成大量重複貼片。
+        const frostBloomCells = alpineCells.filter((cell) => {
+          const seed = Math.abs(Math.sin(cell.x * 47.3 + cell.z * 81.9) * 21871.3) % 1;
+          return seed > 0.82;
+        }).slice(0, 28);
+        const alpineMeshes: THREE.Object3D[] = [cushions, alpineGrass];
+        if (frostBloomCells.length) {
+          const stemGeometry = new THREE.CylinderGeometry(0.0045, 0.007, 0.11, 7);
+          const stems = new THREE.InstancedMesh(stemGeometry, shared.foliageWind, frostBloomCells.length);
+          const petalGeometry = new THREE.SphereGeometry(1, 10, 7);
+          const petals = new THREE.InstancedMesh(petalGeometry, shared.alpineBloom, frostBloomCells.length * 5);
+          const centerGeometry = new THREE.SphereGeometry(1, 10, 7);
+          const centers = new THREE.InstancedMesh(centerGeometry, shared.brightGold, frostBloomCells.length);
+          const flowerTint = new THREE.Color();
+          const flowerPalette = ["#d9edf2", "#c6dcf0", "#d9d0ed", "#e9edce"];
+          for (let i = 0; i < frostBloomCells.length; i++) {
+            const cell = frostBloomCells[i];
+            const seed = Math.abs(Math.sin(cell.x * 127.1 + cell.z * 311.7) * 43758.5453) % 1;
+            dummy.position.set(cell.x, groundTop(cell.h) + 0.056, cell.z);
+            dummy.rotation.set(0.06 * Math.sin(seed * 8), seed * Math.PI * 2, 0.06 * Math.cos(seed * 7));
+            dummy.scale.set(1, 1, 1);
+            dummy.updateMatrix();
+            stems.setMatrixAt(i, dummy.matrix);
+            for (let petal = 0; petal < 5; petal++) {
+              const index = i * 5 + petal;
+              const angle = seed * Math.PI * 2 + petal * (Math.PI * 2 / 5);
+              dummy.position.set(
+                cell.x + Math.cos(angle) * 0.026,
+                groundTop(cell.h) + 0.119,
+                cell.z + Math.sin(angle) * 0.026,
+              );
+              dummy.rotation.set(0.16 * Math.sin(angle), -angle, 0.08 * Math.cos(angle));
+              dummy.scale.set(0.034, 0.012, 0.021);
+              dummy.updateMatrix();
+              petals.setMatrixAt(index, dummy.matrix);
+              flowerTint.set(flowerPalette[Math.floor((seed * 7.3 + petal * 1.7) % flowerPalette.length)]);
+              petals.setColorAt(index, flowerTint);
+            }
+            dummy.position.set(cell.x, groundTop(cell.h) + 0.126, cell.z);
+            dummy.rotation.set(0, 0, 0);
+            dummy.scale.set(0.012, 0.009, 0.012);
+            dummy.updateMatrix();
+            centers.setMatrixAt(i, dummy.matrix);
+          }
+          for (const mesh of [stems, petals, centers]) {
+            mesh.instanceMatrix.needsUpdate = true;
+            if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+            mesh.computeBoundingSphere();
+            mesh.castShadow = false;
+            mesh.receiveShadow = false;
+            alpineMeshes.push(mesh);
+          }
+        }
+        terrainRoot.add(...alpineMeshes);
       }
 
       const fernCells = Array.from(tileCells.values()).filter((cell) => {
