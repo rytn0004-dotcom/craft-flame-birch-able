@@ -1511,6 +1511,47 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
     };
     installCliffStrata(shared.cliff);
 
+    // Procedural bark relief: longitudinal fibers, narrow dark fissures and soft growth marks
+    // are generated in the shader, so trunks and curved branches share detail without extra meshes.
+    const installBarkRelief = (material: THREE.MeshStandardMaterial) => {
+      material.onBeforeCompile = (shader) => {
+        shader.vertexShader = shader.vertexShader.replace(
+          "#include <common>",
+          "#include <common>\nvarying vec3 vBarkCoord;",
+        );
+        shader.vertexShader = shader.vertexShader.replace(
+          "#include <begin_vertex>",
+          "#include <begin_vertex>\nvBarkCoord = position;",
+        );
+        shader.fragmentShader = shader.fragmentShader.replace(
+          "#include <common>",
+          "#include <common>\nvarying vec3 vBarkCoord;",
+        );
+        shader.fragmentShader = shader.fragmentShader.replace(
+          "#include <color_fragment>",
+          [
+            "#include <color_fragment>",
+            "float barkWarp = sin(vBarkCoord.x * 7.3 + vBarkCoord.z * 9.1 + cos(vBarkCoord.y * 8.0) * 1.8);",
+            "float barkFiberWave = sin(vBarkCoord.y * 92.0 + barkWarp * 2.2 + sin(vBarkCoord.x * 13.0) * 1.1);",
+            "float barkFiber = pow(0.5 + 0.5 * barkFiberWave, 7.0);",
+            "float barkCrease = pow(max(0.0, sin(vBarkCoord.y * 31.0 + vBarkCoord.x * 17.0 + vBarkCoord.z * 19.0)), 12.0);",
+            "float barkKnot = pow(max(0.0, 1.0 - abs(sin(vBarkCoord.x * 8.0 + vBarkCoord.z * 6.0 + sin(vBarkCoord.y * 14.0)))), 9.0);",
+            "diffuseColor.rgb *= 0.88 + barkFiber * 0.11 + barkCrease * 0.035;",
+            "diffuseColor.rgb += vec3(0.075, 0.043, 0.018) * (barkKnot * 0.16 + (1.0 - barkFiber) * 0.035);",
+          ].join("\n"),
+        );
+        shader.fragmentShader = shader.fragmentShader.replace(
+          "#include <roughnessmap_fragment>",
+          [
+            "#include <roughnessmap_fragment>",
+            "roughnessFactor = clamp(roughnessFactor + (1.0 - barkFiber) * 0.035 - barkCrease * 0.012, 0.0, 1.0);",
+          ].join("\n"),
+        );
+      };
+      material.customProgramCacheKey = () => "tide-tree-bark-longitudinal-relief-v2";
+    };
+    installBarkRelief(shared.treeBark);
+
     // 草、花、樹冠與蘑菇共用頂點風場；每個實例只在 GPU 彎曲頂端，不逐物件跑動畫.
     const installFoliageWind = (material: THREE.MeshStandardMaterial, cacheKey: string, slipResponse = 1, pressResponse = 0) => {
       material.onBeforeCompile = (shader) => {
@@ -4330,12 +4371,12 @@ vFoliageGust = 0.0;
         : [];
       if (groveCells.length) {
         const trunks = new THREE.InstancedMesh(
-          new THREE.CylinderGeometry(0.075, 0.13, 0.88, 12),
+          new THREE.CylinderGeometry(0.075, 0.13, 0.88, 16, 5),
           shared.treeBark,
           groveCells.length,
         );
         const rootFlare = new THREE.InstancedMesh(
-          new THREE.CylinderGeometry(0.025, 0.072, 0.42, 9),
+          new THREE.CylinderGeometry(0.025, 0.072, 0.42, 12, 3),
           shared.treeBark,
           groveCells.length * 3,
         );
