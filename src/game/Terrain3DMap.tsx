@@ -3898,7 +3898,7 @@ vFoliageGust = 0.0;
         );
       }).slice(0, 1900);
       if (grassCells.length) {
-        // 彎曲漸尖的葉片取代圓錐草刺；三片葉組成一簇，並共用樹冠風場材質。
+        // 彎曲漸尖的葉片取代圓錐草刺；四片葉組成一簇，並共用樹冠風場材質。
         // Each blade is a curved, tapered 3-rail ribbon with six height segments and a raised central vein.
         // This smooth silhouette avoids the flat triangular "card" look while staying one instanced draw call.
         const bladeGeometry = new THREE.BufferGeometry();
@@ -4531,6 +4531,166 @@ vFoliageGust = 0.0;
         ferns.castShadow = false;
         ferns.receiveShadow = false;
         terrainRoot.add(ferns);
+      }
+
+      // 低矮三葉草填補草叢間的裸露縫隙：每株由三片有厚度起伏的心形葉面組成，
+      // 葉脈隆起、葉緣微捲；以單一 InstancedMesh 批次繪製，並繼承 GPU 陣風與彈體掠過反應。
+      const cloverCells = Array.from(tileCells.values()).filter((cell) => {
+        if (cell.h < 1 || cell.h > 2) return false;
+        const region = terrainRegion(cell);
+        if (region !== "meadow" && region !== "moss") return false;
+        const key = Math.floor(cell.x) + "," + Math.floor(cell.z);
+        if (coastBandKeys.has(key)) return false;
+        const seed = Math.abs(Math.sin(cell.x * 57.3 + cell.z * 117.9) * 31871.7) % 1;
+        if (seed < 0.81) return false;
+        if (protectedBuildings.some((building) =>
+          Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 0.62,
+        )) return false;
+        return !fernCells.some((fern) => Math.hypot(cell.x - fern.x, cell.z - fern.z) < 0.74);
+      }).slice(0, 420);
+      if (cloverCells.length) {
+        const cloverPositions: number[] = [];
+        const cloverIndices: number[] = [];
+        const cloverRails = [-1, -0.5, 0, 0.5, 1];
+        const cloverRows = 8;
+        for (let leaf = 0; leaf < 3; leaf++) {
+          const angle = leaf * (Math.PI * 2 / 3) + 0.18;
+          const axisX = Math.cos(angle);
+          const axisZ = Math.sin(angle);
+          const base = cloverPositions.length / 3;
+          for (let row = 0; row < cloverRows; row++) {
+            const t = row / (cloverRows - 1);
+            const width = 0.066 * Math.pow(Math.sin(Math.PI * t), 0.72);
+            const distance = 0.022 + t * 0.158;
+            for (let rail = 0; rail < cloverRails.length; rail++) {
+              const across = cloverRails[rail];
+              const lateral = across * width;
+              const ridge = (1 - Math.abs(across)) * Math.sin(Math.PI * t) * 0.011;
+              const edgeCurl = Math.pow(Math.abs(across), 2.4) * Math.sin(Math.PI * t) * 0.004;
+              cloverPositions.push(
+                axisX * distance - axisZ * lateral,
+                0.018 + Math.sin(Math.PI * t) * 0.023 + ridge + edgeCurl,
+                axisZ * distance + axisX * lateral,
+              );
+            }
+          }
+          for (let row = 0; row < cloverRows - 1; row++) {
+            for (let rail = 0; rail < cloverRails.length - 1; rail++) {
+              const a = base + row * cloverRails.length + rail;
+              const b = a + cloverRails.length;
+              cloverIndices.push(a, b, a + 1, a + 1, b, b + 1);
+            }
+          }
+        }
+        const cloverGeometry = new THREE.BufferGeometry();
+        cloverGeometry.setAttribute("position", new THREE.Float32BufferAttribute(cloverPositions, 3));
+        cloverGeometry.setIndex(cloverIndices);
+        cloverGeometry.computeVertexNormals();
+        cloverGeometry.computeBoundingSphere();
+        const clovers = new THREE.InstancedMesh(cloverGeometry, shared.foliageWind, cloverCells.length);
+        const cloverDummy = new THREE.Object3D();
+        const cloverTint = new THREE.Color();
+        const meadowCloverPalette = ["#86ad70", "#a5b978", "#6f9d69", "#91b17c"];
+        const mossCloverPalette = ["#5c9069", "#78a977", "#477d61", "#8cac75"];
+        for (let i = 0; i < cloverCells.length; i++) {
+          const cell = cloverCells[i];
+          const seed = Math.abs(Math.sin(cell.x * 127.1 + cell.z * 311.7) * 43758.5453) % 1;
+          cloverDummy.position.set(cell.x, groundTop(cell.h) + 0.014, cell.z);
+          cloverDummy.rotation.set(0, seed * Math.PI * 2, (seed - 0.5) * 0.045);
+          const size = 0.72 + seed * 0.42;
+          cloverDummy.scale.set(size, 0.82 + seed * 0.22, size);
+          cloverDummy.updateMatrix();
+          clovers.setMatrixAt(i, cloverDummy.matrix);
+          const palette = terrainRegion(cell) === "moss" ? mossCloverPalette : meadowCloverPalette;
+          cloverTint.set(palette[Math.floor(seed * palette.length)]);
+          clovers.setColorAt(i, cloverTint);
+        }
+        clovers.instanceMatrix.needsUpdate = true;
+        if (clovers.instanceColor) clovers.instanceColor.needsUpdate = true;
+        clovers.computeBoundingSphere();
+        clovers.castShadow = false;
+        clovers.receiveShadow = false;
+        terrainRoot.add(clovers);
+
+        // 少量粉白、淡紫與奶油黃小花從三葉草間探出；花瓣、花心與花莖分批實例化，
+        // 保留清楚的立體輪廓，但把總量限制在 72 朵以內。
+        const flowerCells = cloverCells.filter((cell) => {
+          const seed = Math.abs(Math.sin(cell.x * 89.7 + cell.z * 43.3) * 19371.1) % 1;
+          return seed > 0.84;
+        }).slice(0, 72);
+        if (flowerCells.length) {
+          const flowerStemGeometry = new THREE.CylinderGeometry(0.006, 0.009, 0.14, 7);
+          const flowerStems = new THREE.InstancedMesh(flowerStemGeometry, shared.foliageWind, flowerCells.length);
+          const flowerPetalGeometry = new THREE.SphereGeometry(1, 10, 7);
+          const flowerPetals = new THREE.InstancedMesh(
+            flowerPetalGeometry,
+            shared.meadowBloom,
+            flowerCells.length * 5,
+          );
+          const flowerCenterGeometry = new THREE.SphereGeometry(1, 10, 7);
+          const flowerCenters = new THREE.InstancedMesh(
+            flowerCenterGeometry,
+            shared.brightGold,
+            flowerCells.length,
+          );
+          const flowerDummy = new THREE.Object3D();
+          const flowerTint = new THREE.Color();
+          const petalPalette = ["#f4d6cb", "#e7d5f1", "#f4e2a8", "#d7e8c0"];
+          for (let i = 0; i < flowerCells.length; i++) {
+            const cell = flowerCells[i];
+            const seed = Math.abs(Math.sin(cell.x * 127.1 + cell.z * 311.7) * 43758.5453) % 1;
+            const flowerAngle = seed * Math.PI * 2;
+            const flowerX = cell.x + Math.cos(flowerAngle) * 0.11;
+            const flowerZ = cell.z + Math.sin(flowerAngle) * 0.11;
+            const groundY = groundTop(cell.h);
+            flowerDummy.position.set(flowerX, groundY + 0.07, flowerZ);
+            flowerDummy.rotation.set(0, flowerAngle, (seed - 0.5) * 0.08);
+            flowerDummy.scale.setScalar(0.82 + seed * 0.28);
+            flowerDummy.updateMatrix();
+            flowerStems.setMatrixAt(i, flowerDummy.matrix);
+            if (flowerStems.instanceColor) {
+              flowerTint.set("#668d5d");
+              flowerStems.setColorAt(i, flowerTint);
+            }
+
+            const bloomY = groundY + 0.15;
+            for (let petal = 0; petal < 5; petal++) {
+              const angle = (petal / 5) * Math.PI * 2 + flowerAngle;
+              const index = i * 5 + petal;
+              flowerDummy.position.set(
+                flowerX + Math.cos(angle) * 0.029,
+                bloomY + Math.sin(angle * 2.0 + seed) * 0.003,
+                flowerZ + Math.sin(angle) * 0.029,
+              );
+              flowerDummy.rotation.set(0, -angle, (seed - 0.5) * 0.12);
+              flowerDummy.scale.set(0.022, 0.011, 0.034);
+              flowerDummy.updateMatrix();
+              flowerPetals.setMatrixAt(index, flowerDummy.matrix);
+              flowerTint.set(petalPalette[(Math.floor(seed * 17) + petal) % petalPalette.length]);
+              flowerPetals.setColorAt(index, flowerTint);
+            }
+            flowerDummy.position.set(flowerX, bloomY + 0.004, flowerZ);
+            flowerDummy.rotation.set(0, flowerAngle, 0);
+            flowerDummy.scale.set(0.015, 0.012, 0.015);
+            flowerDummy.updateMatrix();
+            flowerCenters.setMatrixAt(i, flowerDummy.matrix);
+          }
+          flowerStems.instanceMatrix.needsUpdate = true;
+          flowerPetals.instanceMatrix.needsUpdate = true;
+          flowerCenters.instanceMatrix.needsUpdate = true;
+          if (flowerStems.instanceColor) flowerStems.instanceColor.needsUpdate = true;
+          if (flowerPetals.instanceColor) flowerPetals.instanceColor.needsUpdate = true;
+          flowerStems.computeBoundingSphere();
+          flowerPetals.computeBoundingSphere();
+          flowerCenters.computeBoundingSphere();
+          flowerStems.castShadow = false;
+          flowerPetals.castShadow = false;
+          flowerCenters.castShadow = false;
+          flowerStems.receiveShadow = false;
+          flowerPetals.receiveShadow = false;
+          flowerCenters.receiveShadow = false;
+          terrainRoot.add(flowerStems, flowerPetals, flowerCenters);
+        }
       }
 
       // 苔地零星長出成簇蘑菇，提供近景尺度變化；數量固定上限，不加入逐物件動畫。
