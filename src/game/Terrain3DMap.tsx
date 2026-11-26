@@ -1348,7 +1348,7 @@ vFoliageGust = 0.0;
         shader.uniforms.uLeafSlipStrength = slipWindUniforms.strength;
         shader.vertexShader = shader.vertexShader.replace(
           "#include <common>",
-          "#include <common>\\nuniform float uWindLeafTime;\\nuniform vec2 uLeafSlipPosition;\\nuniform vec2 uLeafSlipDirection;\\nuniform float uLeafSlipStrength;\\nvarying float vWindLeafPhase;",
+          "#include <common>\nuniform float uWindLeafTime;\nuniform vec2 uLeafSlipPosition;\nuniform vec2 uLeafSlipDirection;\nuniform float uLeafSlipStrength;\nvarying float vWindLeafPhase;",
         );
         shader.vertexShader = shader.vertexShader.replace(
           "#include <begin_vertex>",
@@ -1379,7 +1379,7 @@ vFoliageGust = 0.0;
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <common>",
-          "#include <common>\\nuniform float uWindLeafTime;\\nvarying float vWindLeafPhase;",
+          "#include <common>\nuniform float uWindLeafTime;\nvarying float vWindLeafPhase;",
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <color_fragment>",
