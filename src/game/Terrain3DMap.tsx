@@ -438,6 +438,85 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
     terrainDustMesh.renderOrder = 5;
     terrainDustMesh.visible = false;
     effectRoot.add(terrainDustMesh);
+
+    // 岩壁高速震動時掉落的碎石：固定 10 顆低面數實例，拋物線與翻滾交由 GPU。
+    const rockDebrisUniforms = { age: { value: 1 } };
+    const rockDebrisMaterial = new THREE.MeshStandardMaterial({
+      color: "#ffffff",
+      vertexColors: true,
+      roughness: 0.96,
+      transparent: true,
+      opacity: 0.88,
+      depthWrite: false,
+    });
+    rockDebrisMaterial.onBeforeCompile = (shader) => {
+      shader.uniforms.uRockDebrisAge = rockDebrisUniforms.age;
+      shader.vertexShader = shader.vertexShader.replace(
+        "#include <common>",
+        "#include <common>\\nuniform float uRockDebrisAge;\\nvarying float vRockDebrisFade;",
+      );
+      shader.vertexShader = shader.vertexShader.replace(
+        "#include <begin_vertex>",
+        `#include <begin_vertex>
+        float rockSeed = dot(instanceMatrix[3].xyz, vec3(17.17, 31.71, 9.23));
+        float rockRandom = fract(sin(rockSeed * 12.9898) * 43758.5453);
+        float rockAge = clamp(uRockDebrisAge / 0.82, 0.0, 1.0);
+        float rockAngle = rockSeed * 2.4 + rockAge * (2.2 + rockRandom * 3.8);
+        float rockTravel = rockAge * (0.18 + rockRandom * 0.42);
+        transformed.x += cos(rockSeed * 4.1) * rockTravel;
+        transformed.z += sin(rockSeed * 4.1) * rockTravel;
+        transformed.y += rockAge * (0.18 + rockRandom * 0.2)
+          - rockAge * rockAge * (0.22 + rockRandom * 0.28);
+        vec2 rockSpin = transformed.xz;
+        transformed.x = rockSpin.x * cos(rockAngle) - rockSpin.y * sin(rockAngle);
+        transformed.z = rockSpin.x * sin(rockAngle) + rockSpin.y * cos(rockAngle);
+        vRockDebrisFade = 1.0 - smoothstep(0.58, 1.0, rockAge);`,
+      );
+      shader.fragmentShader = shader.fragmentShader.replace(
+        "#include <common>",
+        "#include <common>\\nvarying float vRockDebrisFade;",
+      );
+      shader.fragmentShader = shader.fragmentShader.replace(
+        "#include <color_fragment>",
+        `#include <color_fragment>
+        diffuseColor.a *= vRockDebrisFade;`,
+      );
+    };
+    rockDebrisMaterial.customProgramCacheKey = () => "tide-cliff-slip-debris-v1";
+    const rockDebrisCount = 10;
+    const rockDebrisMesh = new THREE.InstancedMesh(
+      new THREE.DodecahedronGeometry(0.062, 0),
+      rockDebrisMaterial,
+      rockDebrisCount,
+    );
+    const rockDebrisDummy = new THREE.Object3D();
+    const rockDebrisTint = new THREE.Color();
+    const rockDebrisPalette = ["#b4a78a", "#d0c2a2", "#8b9384", "#6f8079", "#c5b99b"];
+    for (let i = 0; i < rockDebrisCount; i++) {
+      const seed = Math.abs(Math.sin((i + 1) * 91.7) * 23741.3) % 1;
+      const angle = i * 2.399963;
+      rockDebrisDummy.position.set(
+        Math.cos(angle) * (0.12 + seed * 0.22),
+        0.035 + seed * 0.12,
+        Math.sin(angle) * (0.12 + seed * 0.22),
+      );
+      const scale = 0.52 + seed * 0.78;
+      rockDebrisDummy.rotation.set(seed * 2.1, angle, seed * 1.7);
+      rockDebrisDummy.scale.set(scale, scale * (0.62 + seed * 0.48), scale * (0.72 + seed * 0.4));
+      rockDebrisDummy.updateMatrix();
+      rockDebrisMesh.setMatrixAt(i, rockDebrisDummy.matrix);
+      rockDebrisTint.set(rockDebrisPalette[Math.floor(seed * rockDebrisPalette.length)]);
+      rockDebrisMesh.setColorAt(i, rockDebrisTint);
+    }
+    rockDebrisMesh.instanceMatrix.needsUpdate = true;
+    if (rockDebrisMesh.instanceColor) rockDebrisMesh.instanceColor.needsUpdate = true;
+    rockDebrisMesh.frustumCulled = false;
+    rockDebrisMesh.castShadow = false;
+    rockDebrisMesh.receiveShadow = false;
+    rockDebrisMesh.renderOrder = 6;
+    rockDebrisMesh.visible = false;
+    effectRoot.add(rockDebrisMesh);
+
     const installProjectileWakeFlow = (material: THREE.MeshBasicMaterial) => {
       material.onBeforeCompile = (shader) => {
         shader.uniforms.uProjectileWakeTime = projectileWakeUniforms.time;
@@ -739,6 +818,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       }),
       treeBark: new THREE.MeshStandardMaterial({ color: "#6e5943", roughness: 0.98, bumpMap: surfaceReliefMap, bumpScale: 0.018 }),
       foliageWind: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.94, bumpMap: surfaceReliefMap, bumpScale: 0.008, side: THREE.DoubleSide }),
+      treeCanopyWind: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.93, bumpMap: surfaceReliefMap, bumpScale: 0.008, side: THREE.DoubleSide }),
       meadowBloom: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.72, emissive: "#473b20", emissiveIntensity: 0.06 }),
       roadGuide: new THREE.MeshStandardMaterial({
         color: "#ffffff", roughness: 0.78, metalness: 0.12,
@@ -1213,7 +1293,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
     installCliffStrata(shared.cliff);
 
     // 草、花、樹冠與蘑菇共用頂點風場；每個實例只在 GPU 彎曲頂端，不逐物件跑動畫.
-    const installFoliageWind = (material: THREE.MeshStandardMaterial, cacheKey: string) => {
+    const installFoliageWind = (material: THREE.MeshStandardMaterial, cacheKey: string, slipResponse = 1) => {
       material.onBeforeCompile = (shader) => {
         shader.uniforms.uFoliageTime = foliageWindUniform;
         shader.uniforms.uSlipPosition = slipWindUniforms.position;
@@ -1262,10 +1342,13 @@ vFoliageGust = 0.0;
           * (1.0 - smoothstep(0.55, 2.8, slipSide));
         float slipGust = slipWake * uSlipStrength * foliageMask;
         float slipSideSign = sign(dot(slipRelative, slipPerpendicular));
-        vec2 slipBend = -uSlipDirection * 0.16
-          + slipPerpendicular * slipSideSign * 0.12;
+        vec2 slipBend = -uSlipDirection * ${(0.16 * slipResponse).toFixed(3)}
+          + slipPerpendicular * slipSideSign * ${(0.12 * slipResponse).toFixed(3)};
+        float canopyRecoil = sin(uFoliageTime * 5.2 + foliagePhase * 2.4)
+          * slipGust * ${(0.035 * slipResponse).toFixed(3)};
         transformed.xz += slipBend * slipGust;
-        vFoliageGust = max(vFoliageGust, slipGust);
+        transformed.y += canopyRecoil;
+        vFoliageGust = max(vFoliageGust, min(1.0, slipGust * ${slipResponse.toFixed(2)}));
 #endif`,
         );
         shader.fragmentShader = shader.fragmentShader.replace(
@@ -1282,6 +1365,7 @@ vFoliageGust = 0.0;
       material.customProgramCacheKey = () => cacheKey;
     };
     installFoliageWind(shared.foliageWind, "tide-foliage-wind-v4");
+    installFoliageWind(shared.treeCanopyWind, "tide-tree-canopy-gust-v1", 2.4);
     installFoliageWind(shared.grass, "tide-grass-stem-wind-v4");
     installFoliageWind(shared.grassBlade, "tide-grass-blade-wind-v5");
     installFoliageWind(shared.meadowBloom, "tide-meadow-bloom-wind-v4");
@@ -3693,17 +3777,17 @@ vFoliageGust = 0.0;
         );
         const sideCanopies = new THREE.InstancedMesh(
           new THREE.IcosahedronGeometry(0.31, 0),
-          shared.foliageWind,
+          shared.treeCanopyWind,
           groveCells.length * 2,
         );
         const lowerCanopies = new THREE.InstancedMesh(
           new THREE.DodecahedronGeometry(0.55, 0),
-          shared.foliageWind,
+          shared.treeCanopyWind,
           groveCells.length,
         );
         const upperCanopies = new THREE.InstancedMesh(
           new THREE.IcosahedronGeometry(0.39, 0),
-          shared.foliageWind,
+          shared.treeCanopyWind,
           groveCells.length,
         );
         const groveDummy = new THREE.Object3D();
@@ -6248,6 +6332,9 @@ vFoliageGust = 0.0;
     let lastWaterWakeStrength = 0;
     let lastRockDustAt = -Infinity;
     let lastRockDustOpacity = 0;
+    let lastCliffDebrisAt = -Infinity;
+    let lastCliffDebrisCell = "";
+    let activeCliffDebrisAt = -Infinity;
 
     const updateEffects = (data: Terrain3DSnapshot, time: number) => {
       // 只追蹤當下最快的一枚高速彈體，讓後方草葉短暫伏倒、花粉被氣流抬起。
@@ -6258,6 +6345,13 @@ vFoliageGust = 0.0;
       let rockSlipShot: Terrain3DShot | null = null;
       let rockSlipSpeed = 315;
       let rockSlipHeight = 0;
+      let cliffDebrisShot: Terrain3DShot | null = null;
+      let cliffDebrisSpeed = 345;
+      let cliffDebrisHeight = 0;
+      let cliffDebrisCellX = 0;
+      let cliffDebrisCellY = 0;
+      let cliffDebrisDirX = 0;
+      let cliffDebrisDirZ = 0;
       for (const shot of data.shots) {
         const speed = shot.speed ?? 220;
         if (speed > slipSpeed) {
@@ -6276,6 +6370,24 @@ vFoliageGust = 0.0;
           rockSlipShot = shot;
           rockSlipSpeed = speed;
           rockSlipHeight = terrainHeight;
+        }
+        if (terrainHeight !== undefined && terrainHeight >= 2 && speed > cliffDebrisSpeed) {
+          const cliffDirections = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+          for (const [edgeDx, edgeDz] of cliffDirections) {
+            const neighborHeight = terrainCellHeights.get(
+              (shotCellX + edgeDx) + "," + (shotCellY + edgeDz),
+            ) ?? 0;
+            if (neighborHeight < terrainHeight) {
+              cliffDebrisShot = shot;
+              cliffDebrisSpeed = speed;
+              cliffDebrisHeight = terrainHeight;
+              cliffDebrisCellX = shotCellX;
+              cliffDebrisCellY = shotCellY;
+              cliffDebrisDirX = edgeDx;
+              cliffDebrisDirZ = edgeDz;
+              break;
+            }
+          }
         }
       }
       if (slipShot) {
@@ -6328,6 +6440,25 @@ vFoliageGust = 0.0;
         terrainDustMesh.visible = dustFade > 0.018;
         terrainDustMaterial.opacity = lastRockDustOpacity * dustFade;
       }
+      if (cliffDebrisShot) {
+        const debrisCellKey = cliffDebrisCellX + "," + cliffDebrisCellY;
+        if (debrisCellKey !== lastCliffDebrisCell && time - lastCliffDebrisAt > 420) {
+          rockDebrisMesh.position.set(
+            cliffDebrisCellX + 0.5 + cliffDebrisDirX * 0.43,
+            groundTop(cliffDebrisHeight) - 0.015,
+            cliffDebrisCellY + 0.5 + cliffDebrisDirZ * 0.43,
+          );
+          rockDebrisMesh.rotation.y = Math.atan2(cliffDebrisDirX, cliffDebrisDirZ);
+          activeCliffDebrisAt = time;
+          lastCliffDebrisAt = time;
+          lastCliffDebrisCell = debrisCellKey;
+        }
+      } else {
+        lastCliffDebrisCell = "";
+      }
+      const debrisAge = time - activeCliffDebrisAt;
+      rockDebrisUniforms.age.value = Math.max(0, debrisAge * 0.001);
+      rockDebrisMesh.visible = debrisAge >= 0 && debrisAge < 900;
       for (let i = 0; i < data.shots.length; i++) {
         const shot = data.shots[i];
         if (!shotNodes[i]) {
@@ -6852,6 +6983,8 @@ vFoliageGust = 0.0;
       shared.firefly.dispose();
       shared.pollen.dispose();
       shared.windblownLeaf.dispose();
+      shared.treeCanopyWind.dispose();
+      rockDebrisMaterial.dispose();
       shared.treeBark.dispose();
       shared.grass.dispose();
       shared.grassBlade.dispose();
