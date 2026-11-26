@@ -771,6 +771,10 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
         color: "#fff3ce", transparent: true, opacity: 0.46,
         blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
       }),
+      windblownLeaf: new THREE.MeshBasicMaterial({
+        color: "#ffffff", vertexColors: true, transparent: true, opacity: 0.82,
+        side: THREE.DoubleSide, depthWrite: false, toneMapped: false,
+      }),
       rockCrack: new THREE.MeshStandardMaterial({ color: "#263c3b", roughness: 1, bumpMap: surfaceReliefMap, bumpScale: 0.012 }),
       rockCrackEdge: new THREE.MeshStandardMaterial({ color: "#8f9075", roughness: 0.96, bumpMap: surfaceReliefMap, bumpScale: 0.008 }),
       contactShadow: new THREE.MeshBasicMaterial({
@@ -1334,6 +1338,60 @@ vFoliageGust = 0.0;
       material.customProgramCacheKey = () => "tide-pollen-drift-twinkle-v2";
     };
     installPollenDrift(shared.pollen);
+
+    // 落葉與花瓣共用 GPU 飄動材質；時間、方向及高速尾流都共用既有風場。
+    const installWindblownDrift = (material: THREE.MeshBasicMaterial) => {
+      material.onBeforeCompile = (shader) => {
+        shader.uniforms.uWindLeafTime = foliageWindUniform;
+        shader.uniforms.uLeafSlipPosition = slipWindUniforms.position;
+        shader.uniforms.uLeafSlipDirection = slipWindUniforms.direction;
+        shader.uniforms.uLeafSlipStrength = slipWindUniforms.strength;
+        shader.vertexShader = shader.vertexShader.replace(
+          "#include <common>",
+          "#include <common>\\nuniform float uWindLeafTime;\\nuniform vec2 uLeafSlipPosition;\\nuniform vec2 uLeafSlipDirection;\\nuniform float uLeafSlipStrength;\\nvarying float vWindLeafPhase;",
+        );
+        shader.vertexShader = shader.vertexShader.replace(
+          "#include <begin_vertex>",
+          `#include <begin_vertex>
+          float leafSeed = 0.0;
+          vec2 leafOrigin = vec2(0.0);
+          #ifdef USE_INSTANCING
+            leafOrigin = instanceMatrix[3].xz;
+            leafSeed = dot(leafOrigin, vec2(0.173, 0.219));
+          #endif
+          vWindLeafPhase = leafSeed;
+          float leafFlap = sin(uWindLeafTime * 2.7 + leafSeed * 1.9 + position.y * 8.0 + position.x * 4.0);
+          transformed.x += sin(uWindLeafTime * 0.48 + leafSeed) * 0.13 + leafFlap * position.y * 0.2;
+          transformed.y += sin(uWindLeafTime * 1.6 + leafSeed * 1.31) * 0.045;
+          transformed.z += cos(uWindLeafTime * 0.63 + leafSeed * 0.9) * 0.11 + leafFlap * position.y * 0.12;
+          #ifdef USE_INSTANCING
+            vec2 leafSlipRelative = leafOrigin - uLeafSlipPosition;
+            float leafSlipAlong = dot(leafSlipRelative, uLeafSlipDirection);
+            vec2 leafSlipSide = vec2(-uLeafSlipDirection.y, uLeafSlipDirection.x);
+            float leafSlipWidth = abs(dot(leafSlipRelative, leafSlipSide));
+            float leafSlipWake = smoothstep(-9.0, -7.0, leafSlipAlong)
+              * (1.0 - smoothstep(-1.25, 0.15, leafSlipAlong))
+              * (1.0 - smoothstep(0.5, 3.2, leafSlipWidth)) * uLeafSlipStrength;
+            transformed.x -= uLeafSlipDirection.x * leafSlipWake * 0.24;
+            transformed.y += leafSlipWake * (0.1 + 0.04 * sin(uWindLeafTime * 7.0 + leafSeed));
+            transformed.z -= uLeafSlipDirection.y * leafSlipWake * 0.24;
+          #endif`,
+        );
+        shader.fragmentShader = shader.fragmentShader.replace(
+          "#include <common>",
+          "#include <common>\\nuniform float uWindLeafTime;\\nvarying float vWindLeafPhase;",
+        );
+        shader.fragmentShader = shader.fragmentShader.replace(
+          "#include <color_fragment>",
+          `#include <color_fragment>
+          float leafLight = 0.88 + 0.12 * (0.5 + 0.5 * sin(uWindLeafTime * 1.9 + vWindLeafPhase * 1.7));
+          diffuseColor.rgb *= leafLight;
+          diffuseColor.a *= 0.78 + leafLight * 0.22;`,
+        );
+      };
+      material.customProgramCacheKey = () => "tide-windblown-leaf-petal-v1";
+    };
+    installWindblownDrift(shared.windblownLeaf);
 
     // 所有地形區塊共用 4 種高度幾何，避免切塊後重複建立數百份相同頂點資料。
     const terrainGeometries = [0, 1, 2, 3].map(
@@ -3722,6 +3780,56 @@ vFoliageGust = 0.0;
         }
       }
 
+      // 樹冠偶爾飄出少量秋色葉片；每株樹最多兩片，GPU 風場帶動旋轉與漂移。
+      const windLeafCount = Math.min(48, groveCells.length * 2);
+      if (windLeafCount > 0) {
+        const leafGeometry = new THREE.BufferGeometry();
+        leafGeometry.setAttribute("position", new THREE.Float32BufferAttribute([
+          0, 0, 0,
+          -0.045, 0.065, 0.006,
+          -0.052, 0.135, 0.016,
+          0, 0.245, 0.035,
+          0.052, 0.135, 0.016,
+          0.045, 0.065, 0.006,
+        ], 3));
+        leafGeometry.setIndex([0, 1, 2, 0, 2, 3, 0, 3, 4, 0, 4, 5]);
+        leafGeometry.computeVertexNormals();
+        leafGeometry.computeBoundingSphere();
+        const windLeaves = new THREE.InstancedMesh(
+          leafGeometry,
+          shared.windblownLeaf,
+          windLeafCount,
+        );
+        const leafDummy = new THREE.Object3D();
+        const leafTint = new THREE.Color();
+        const leafPalette = ["#d9ad62", "#e5c879", "#c77d62", "#9fbe7d", "#76aaa0", "#d9a5a5"];
+        for (let i = 0; i < windLeafCount; i++) {
+          const cell = groveCells[Math.floor(i * groveCells.length / windLeafCount)];
+          const seed = Math.abs(Math.sin(cell.x * 127.1 + cell.z * 311.7 + i * 17.3) * 43758.5453) % 1;
+          const angle = seed * Math.PI * 2;
+          const radius = 0.24 + seed * 0.56;
+          leafDummy.position.set(
+            cell.x + Math.cos(angle) * radius,
+            groundTop(cell.h) + 1.02 + seed * 0.62,
+            cell.z + Math.sin(angle) * radius,
+          );
+          leafDummy.rotation.set((seed - 0.5) * 0.85, angle, (seed - 0.5) * 0.72);
+          const scale = 0.52 + seed * 0.52;
+          leafDummy.scale.set(scale, scale, scale);
+          leafDummy.updateMatrix();
+          windLeaves.setMatrixAt(i, leafDummy.matrix);
+          leafTint.set(leafPalette[Math.floor(seed * leafPalette.length)]);
+          windLeaves.setColorAt(i, leafTint);
+        }
+        windLeaves.instanceMatrix.needsUpdate = true;
+        if (windLeaves.instanceColor) windLeaves.instanceColor.needsUpdate = true;
+        windLeaves.frustumCulled = false;
+        windLeaves.castShadow = false;
+        windLeaves.receiveShadow = false;
+        windLeaves.renderOrder = 5;
+        terrainRoot.add(windLeaves);
+      }
+
       // 林地邊緣的低矮灌木叢：以不同葉形與尺寸打散樹木之間的空白，避免植被只剩單株模型。
       const shrubCells = Array.from(tileCells.values()).filter((cell) => {
         if (cell.h < 1 || cell.h > 2) return false;
@@ -4100,6 +4208,43 @@ vFoliageGust = 0.0;
         flowerPetals.receiveShadow = false;
         flowerCenters.receiveShadow = false;
         terrainRoot.add(stems, flowerPetals, flowerCenters);
+      }
+
+      // 花叢在較強風場中飄出少量花瓣；它們會跟隨全域風與高速彈體尾流起伏。
+      const windPetalCount = Math.min(56, flowerCells.length);
+      if (windPetalCount > 0) {
+        const windPetalGeometry = new THREE.SphereGeometry(0.034, 6, 4);
+        const windPetals = new THREE.InstancedMesh(
+          windPetalGeometry,
+          shared.windblownLeaf,
+          windPetalCount,
+        );
+        const petalDummy = new THREE.Object3D();
+        const petalTint = new THREE.Color();
+        const petalPalette = ["#f2d8c2", "#e9b7c8", "#c5e2d6", "#f0e5b3", "#b8d6e8"];
+        for (let i = 0; i < windPetalCount; i++) {
+          const cell = flowerCells[Math.floor(i * flowerCells.length / windPetalCount)];
+          const seed = Math.abs(Math.sin(cell.x * 91.7 + cell.z * 37.3 + i * 11.9) * 29471.3) % 1;
+          const angle = seed * Math.PI * 2;
+          petalDummy.position.set(
+            cell.x + Math.cos(angle) * (0.18 + seed * 0.24),
+            groundTop(cell.h) + 0.24 + seed * 0.34,
+            cell.z + Math.sin(angle) * (0.18 + seed * 0.24),
+          );
+          petalDummy.rotation.set(seed * 1.2, angle, (seed - 0.5) * 0.8);
+          petalDummy.scale.set(0.58 + seed * 0.24, 1.18 + seed * 0.48, 0.42 + seed * 0.2);
+          petalDummy.updateMatrix();
+          windPetals.setMatrixAt(i, petalDummy.matrix);
+          petalTint.set(petalPalette[Math.floor(seed * petalPalette.length)]);
+          windPetals.setColorAt(i, petalTint);
+        }
+        windPetals.instanceMatrix.needsUpdate = true;
+        if (windPetals.instanceColor) windPetals.instanceColor.needsUpdate = true;
+        windPetals.frustumCulled = false;
+        windPetals.castShadow = false;
+        windPetals.receiveShadow = false;
+        windPetals.renderOrder = 5;
+        terrainRoot.add(windPetals);
       }
 
       // 高台邊緣偶爾露出低矮的海蝕礦晶，密度刻意偏低，避免水元素搶過建築主體。
@@ -6706,6 +6851,7 @@ vFoliageGust = 0.0;
       shared.waterGlint.dispose();
       shared.firefly.dispose();
       shared.pollen.dispose();
+      shared.windblownLeaf.dispose();
       shared.treeBark.dispose();
       shared.grass.dispose();
       shared.grassBlade.dispose();
