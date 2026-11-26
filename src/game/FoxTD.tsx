@@ -1493,7 +1493,7 @@ export function FoxTD() {
         };
       }),
       shots: current.shots.map((shot) => ({
-        x: shot.x, y: shot.y, tx: shot.tx, ty: shot.ty, color: shot.color,
+        x: shot.x, y: shot.y, tx: shot.tx, ty: shot.ty, color: shot.color, speed: shot.speed,
         sanctuary: shot.fromTower != null && !!current.towers[shot.fromTower]?.sanctuary,
       })),
       rings: current.rings.map((ring) => ({
