@@ -971,7 +971,12 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
 
     // 海面焦散：兩組交錯波紋在材質內運算，不建立額外粒子或平面。
     // 透過共用 uniform 驅動深海與淺灘，讓遠景水域也有連續的潮汐流動感。
-    const oceanSurfaceUniforms = { time: { value: 0 } };
+    const oceanSurfaceUniforms = {
+      time: { value: 0 },
+      slipPosition: { value: new THREE.Vector2(-1000, -1000) },
+      slipDirection: { value: new THREE.Vector2(1, 0) },
+      slipStrength: { value: 0 },
+    };
     const installOceanSurface = (material: THREE.MeshPhysicalMaterial, cacheKey: string, isShelf = false) => {
       const shelfGradient = isShelf
         ? "float shelfEdgeDistance = min(min(vUv.x, 1.0 - vUv.x), min(vUv.y, 1.0 - vUv.y));\n"
@@ -981,15 +986,20 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
         : "";
       material.onBeforeCompile = (shader) => {
         shader.uniforms.uOceanTime = oceanSurfaceUniforms.time;
+        shader.uniforms.uOceanSlipPosition = oceanSurfaceUniforms.slipPosition;
+        shader.uniforms.uOceanSlipDirection = oceanSurfaceUniforms.slipDirection;
+        shader.uniforms.uOceanSlipStrength = oceanSurfaceUniforms.slipStrength;
         // 細分海面頂點沿法線做低幅度長波形變，真正改變剪影而非只改變貼圖顏色。
         shader.vertexShader = shader.vertexShader.replace(
           "#include <common>",
-          "#include <common>\nuniform float uOceanTime;\nvarying vec2 vOceanLocal;",
+          "#include <common>\nuniform float uOceanTime;\nvarying vec2 vOceanLocal;\nvarying vec2 vOceanWorldPosition;",
         );
         shader.vertexShader = shader.vertexShader.replace(
           "#include <begin_vertex>",
           `#include <begin_vertex>
           vOceanLocal = position.xy;
+          vec4 oceanWorldPosition = modelMatrix * vec4(transformed, 1.0);
+          vOceanWorldPosition = oceanWorldPosition.xz;
           float swellA = sin(position.x * 0.055 + position.y * 0.039 + uOceanTime * 0.34);
           float swellB = sin(position.y * 0.083 - position.x * 0.026 - uOceanTime * 0.23);
           float capillary = sin((position.x + position.y) * 0.12 + uOceanTime * 0.52);
@@ -1011,7 +1021,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <common>",
-          "#include <common>\nuniform float uOceanTime;\nvarying vec2 vOceanLocal;",
+          "#include <common>\nuniform float uOceanTime;\nuniform vec2 uOceanSlipPosition;\nuniform vec2 uOceanSlipDirection;\nuniform float uOceanSlipStrength;\nvarying vec2 vOceanLocal;\nvarying vec2 vOceanWorldPosition;",
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <color_fragment>",
@@ -1025,13 +1035,33 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           diffuseColor.rgb += vec3(0.018, 0.072, 0.074) * tideCaustic;
 #endif
           float swellSheen = pow(max(0.0, 0.5 + 0.5 * sin(vOceanLocal.x * 0.055 + vOceanLocal.y * 0.039 + uOceanTime * 0.34)), 7.0);
-          diffuseColor.rgb += vec3(0.012, 0.038, 0.04) * swellSheen;`,
+          diffuseColor.rgb += vec3(0.012, 0.038, 0.04) * swellSheen;
+          // 高速彈體掠過海域時，兩道斜向浪軌向後展開，內側帶細碎泡沫。
+          vec2 oceanSlipRelative = vOceanWorldPosition - uOceanSlipPosition;
+          float oceanSlipAlong = dot(oceanSlipRelative, uOceanSlipDirection);
+          vec2 oceanSlipSide = vec2(-uOceanSlipDirection.y, uOceanSlipDirection.x);
+          float oceanSlipAcross = dot(oceanSlipRelative, oceanSlipSide);
+          float oceanSlipEnvelope = smoothstep(-16.0, -12.0, oceanSlipAlong)
+            * (1.0 - smoothstep(-1.2, 0.8, oceanSlipAlong))
+            * (1.0 - smoothstep(3.8, 5.2, abs(oceanSlipAcross)))
+            * uOceanSlipStrength;
+          float oceanWakeEdge = 0.38 + min(1.0, abs(oceanSlipAlong) * 0.055)
+            + 0.035 * sin(oceanSlipAlong * 1.4 - uOceanTime * 3.8);
+          float oceanWakeRail = 1.0 - smoothstep(0.035, 0.19,
+            abs(abs(oceanSlipAcross) - oceanWakeEdge));
+          float oceanWakeChop = 0.52 + 0.48 * sin(oceanSlipAlong * 2.7 - uOceanTime * 5.2
+            + oceanSlipAcross * 0.9) * sin(oceanSlipAlong * 1.3 - uOceanTime * 2.1);
+          float oceanWakeFoam = oceanSlipEnvelope * oceanWakeRail * (0.55 + 0.45 * oceanWakeChop);
+          float oceanWakeCurrent = oceanSlipEnvelope
+            * (1.0 - smoothstep(0.2, 1.25, abs(oceanSlipAcross))) * 0.22;
+          diffuseColor.rgb += vec3(0.055, 0.19, 0.17) * oceanWakeFoam;
+          diffuseColor.rgb += vec3(0.008, 0.045, 0.085) * oceanWakeCurrent;`,
         );
       };
       material.customProgramCacheKey = () => cacheKey;
     };
-    installOceanSurface(shared.floor, "tide-ocean-floor-caustics-v1");
-    installOceanSurface(shared.seaShelf, "tide-ocean-shelf-caustics-v2", true);
+    installOceanSurface(shared.floor, "tide-ocean-floor-caustics-wake-v2");
+    installOceanSurface(shared.seaShelf, "tide-ocean-shelf-caustics-wake-v3", true);
 
     // 海岸浪沫：沿實例世界座標產生不同相位，讓浪花沿岸流動，而非整條海岸同步閃爍。
     const installShoreFoamFlow = (material: THREE.MeshBasicMaterial) => {
@@ -5986,11 +6016,20 @@ vFoliageGust = 0.0;
       // 只追蹤當下最快的一枚高速彈體，讓後方草葉短暫伏倒、花粉被氣流抬起。
       let slipShot: Terrain3DShot | null = null;
       let slipSpeed = 260;
+      let waterSlipShot: Terrain3DShot | null = null;
+      let waterSlipSpeed = 280;
       for (const shot of data.shots) {
         const speed = shot.speed ?? 220;
         if (speed > slipSpeed) {
           slipShot = shot;
           slipSpeed = speed;
+        }
+        const shotCellX = Math.floor(shot.x / CELL);
+        const shotCellY = Math.floor(shot.y / CELL);
+        const overOpenWater = !terrainCellHeights.has(shotCellX + "," + shotCellY);
+        if (overOpenWater && speed > waterSlipSpeed) {
+          waterSlipShot = shot;
+          waterSlipSpeed = speed;
         }
       }
       if (slipShot) {
@@ -6002,6 +6041,16 @@ vFoliageGust = 0.0;
         slipWindUniforms.strength.value = THREE.MathUtils.clamp((slipSpeed - 250) / 420, 0, 1);
       } else {
         slipWindUniforms.strength.value = 0;
+      }
+      if (waterSlipShot) {
+        const waterDx = (waterSlipShot.tx - waterSlipShot.x) / CELL;
+        const waterDz = (waterSlipShot.ty - waterSlipShot.y) / CELL;
+        const waterLength = Math.hypot(waterDx, waterDz) || 1;
+        oceanSurfaceUniforms.slipPosition.value.set(waterSlipShot.x / CELL, waterSlipShot.y / CELL);
+        oceanSurfaceUniforms.slipDirection.value.set(waterDx / waterLength, waterDz / waterLength);
+        oceanSurfaceUniforms.slipStrength.value = THREE.MathUtils.clamp((waterSlipSpeed - 270) / 390, 0, 1);
+      } else {
+        oceanSurfaceUniforms.slipStrength.value = 0;
       }
       for (let i = 0; i < data.shots.length; i++) {
         const shot = data.shots[i];
