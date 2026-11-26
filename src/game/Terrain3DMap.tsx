@@ -343,17 +343,54 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
     const enemyHealthBars: { back: any; fill: any }[] = [];
     const shotNodes: any[] = [];
     const ringNodes: any[] = [];
-    // 共用水平三角尾流幾何；每枚高速彈只建立一個輕量 additive ribbon。
+    // 三股交錯的尾流共用單一幾何與 draw call：中央亮核、兩側細流，像高速掠過時拉開的氣流絲。
     const projectileWakeGeometry = new THREE.BufferGeometry();
     projectileWakeGeometry.setAttribute("position", new THREE.Float32BufferAttribute([
-      -0.105, 0, 0.08,
-       0.105, 0, 0.08,
-       0, 0, -0.92,
+      -0.095, 0, 0.08,  0.095, 0, 0.08,  0, 0, -1.12,
+      -0.205, 0, 0.025, -0.17, 0, 0.025, -0.095, 0, -0.86,
+       0.17, 0, 0.025,  0.205, 0, 0.025,  0.095, 0, -0.86,
     ], 3));
-    projectileWakeGeometry.setIndex([0, 1, 2]);
+    projectileWakeGeometry.setAttribute("uv", new THREE.Float32BufferAttribute([
+      0, 0, 1, 0, 0.5, 1,
+      0, 0, 1, 0, 0.5, 1,
+      0, 0, 1, 0, 0.5, 1,
+    ], 2));
+    projectileWakeGeometry.setAttribute("color", new THREE.Float32BufferAttribute([
+      1, 1, 1, 1, 1, 1, 1, 1, 1,
+      0.48, 0.72, 0.86, 0.48, 0.72, 0.86, 0.62, 0.82, 0.92,
+      0.48, 0.72, 0.86, 0.48, 0.72, 0.86, 0.62, 0.82, 0.92,
+    ], 3));
+    projectileWakeGeometry.setIndex([0, 1, 2, 3, 4, 5, 6, 7, 8]);
     projectileWakeGeometry.computeVertexNormals();
     projectileWakeGeometry.computeBoundingSphere();
     projectileWakeGeometry.userData.sharedGeometry = true;
+    const projectileWakeUniforms = { time: { value: 0 } };
+    const installProjectileWakeFlow = (material: THREE.MeshBasicMaterial) => {
+      material.onBeforeCompile = (shader) => {
+        shader.uniforms.uProjectileWakeTime = projectileWakeUniforms.time;
+        shader.vertexShader = shader.vertexShader.replace(
+          "#include <common>",
+          "#include <common>\\nvarying vec2 vProjectileWakeUv;",
+        );
+        shader.vertexShader = shader.vertexShader.replace(
+          "#include <begin_vertex>",
+          "#include <begin_vertex>\\nvProjectileWakeUv = uv;",
+        );
+        shader.fragmentShader = shader.fragmentShader.replace(
+          "#include <common>",
+          "#include <common>\\nvarying vec2 vProjectileWakeUv;\\nuniform float uProjectileWakeTime;",
+        );
+        shader.fragmentShader = shader.fragmentShader.replace(
+          "#include <color_fragment>",
+          `#include <color_fragment>
+          float wakePulse = 0.8 + 0.2 * sin(vProjectileWakeUv.y * 15.0 - uProjectileWakeTime * 7.0);
+          float wakeTaper = 1.0 - smoothstep(0.76, 1.0, vProjectileWakeUv.y);
+          diffuseColor.rgb *= wakePulse;
+          diffuseColor.a *= wakeTaper;`,
+        );
+      };
+      material.customProgramCacheKey = () => "tide-projectile-wake-flow-v1";
+    };
     // 程序化黑霧貼圖：柔邊噪聲雲，不依賴外部圖檔，並以單一 InstancedMesh 控制效能。
     const blackMistSize = 64;
     const blackMistPixels = new Uint8Array(blackMistSize * blackMistSize * 4);
@@ -5796,10 +5833,11 @@ uniform float uFoliageTime;`,
           trail.position.z = -0.28;
           group.add(trail);
           const wakeMaterial = new THREE.MeshBasicMaterial({
-            color: shot.color, transparent: true, opacity: 0.24,
+            color: shot.color, vertexColors: true, transparent: true, opacity: 0.24,
             blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
             depthWrite: false, toneMapped: false,
           });
+          installProjectileWakeFlow(wakeMaterial);
           const wake = new THREE.Mesh(projectileWakeGeometry, wakeMaterial);
           wake.position.y = -0.12;
           wake.renderOrder = 4;
@@ -5808,10 +5846,11 @@ uniform float uFoliageTime;`,
           group.add(wake);
           // 低空掠地的第二道氣流貼近地表滑過；速度不足時自動隱藏，不會變成常駐地面光帶。
           const skimMaterial = new THREE.MeshBasicMaterial({
-            color: "#d8f5e9", transparent: true, opacity: 0.16,
+            color: shot.color, vertexColors: true, transparent: true, opacity: 0.16,
             blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
             depthWrite: false, toneMapped: false,
           });
+          installProjectileWakeFlow(skimMaterial);
           const skimWake = new THREE.Mesh(projectileWakeGeometry, skimMaterial);
           skimWake.position.y = -0.665;
           skimWake.renderOrder = 3;
@@ -5832,6 +5871,7 @@ uniform float uFoliageTime;`,
         wake.scale.set(0.82 + speedFactor * 0.44, 1, 0.72 + speedFactor * 1.3);
         const skimWake = node.children[3];
         skimWake.visible = speedFactor > 0.08;
+        skimWake.material.color.set(shot.color);
         skimWake.material.opacity = speedFactor > 0.08 ? 0.06 + speedFactor * 0.3 : 0;
         skimWake.scale.set(1.15 + speedFactor * 0.7, 1, 0.9 + speedFactor * 1.6);
         node.children[1].scale.z = 1 + speedFactor * 1.9;
@@ -6243,6 +6283,7 @@ uniform float uFoliageTime;`,
       sanctuarySigilUniforms.power.value = THREE.MathUtils.clamp(data.sanctuaryPower ?? 0.18, 0, 1);
       roadGuideUniforms.time.value = time * 0.001;
       foliageWindUniform.value = time * 0.00048;
+      projectileWakeUniforms.time.value = time * 0.001;
       controls.update();
       renderer.render(scene, camera);
     };
