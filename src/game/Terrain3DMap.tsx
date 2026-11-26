@@ -4652,6 +4652,7 @@ vFoliageGust = 0.0;
             flowerStems.setColorAt(i, flowerTint);
 
             const bloomY = groundY + 0.15;
+            const bloomTint = new THREE.Color(petalPalette[Math.floor(seed * petalPalette.length)]);
             for (let petal = 0; petal < 5; petal++) {
               const angle = (petal / 5) * Math.PI * 2 + flowerAngle;
               const index = i * 5 + petal;
@@ -4664,8 +4665,7 @@ vFoliageGust = 0.0;
               flowerDummy.scale.set(0.022, 0.011, 0.034);
               flowerDummy.updateMatrix();
               flowerPetals.setMatrixAt(index, flowerDummy.matrix);
-              flowerTint.set(petalPalette[(Math.floor(seed * 17) + petal) % petalPalette.length]);
-              flowerPetals.setColorAt(index, flowerTint);
+              flowerPetals.setColorAt(index, bloomTint);
             }
             flowerDummy.position.set(flowerX, bloomY + 0.004, flowerZ);
             flowerDummy.rotation.set(0, flowerAngle, 0);
