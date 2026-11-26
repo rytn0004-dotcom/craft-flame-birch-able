@@ -365,6 +365,79 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
     projectileWakeGeometry.computeBoundingSphere();
     projectileWakeGeometry.userData.sharedGeometry = true;
     const projectileWakeUniforms = { time: { value: 0 } };
+
+    // 高地高速掠過會拖起一條短暫碎塵尾帶：單一 InstancedMesh，粒子漂浮由 GPU 控制。
+    const terrainDustUniforms = { time: projectileWakeUniforms.time };
+    const terrainDustMaterial = new THREE.MeshBasicMaterial({
+      color: "#c9ad7d",
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.34,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      toneMapped: false,
+    });
+    terrainDustMaterial.onBeforeCompile = (shader) => {
+      shader.uniforms.uTerrainDustTime = terrainDustUniforms.time;
+      shader.vertexShader = shader.vertexShader.replace(
+        "#include <common>",
+        "#include <common>\\nuniform float uTerrainDustTime;\\nvarying float vTerrainDustPhase;",
+      );
+      shader.vertexShader = shader.vertexShader.replace(
+        "#include <begin_vertex>",
+        `#include <begin_vertex>
+        float dustPhase = dot(instanceMatrix[3].xz, vec2(1.71, 2.37));
+        vTerrainDustPhase = dustPhase;
+        transformed.y += sin(uTerrainDustTime * 2.6 + dustPhase) * 0.026;
+        transformed.x += cos(uTerrainDustTime * 1.8 + dustPhase * 1.31) * 0.018;`,
+      );
+      shader.fragmentShader = shader.fragmentShader.replace(
+        "#include <common>",
+        "#include <common>\\nuniform float uTerrainDustTime;\\nvarying float vTerrainDustPhase;",
+      );
+      shader.fragmentShader = shader.fragmentShader.replace(
+        "#include <color_fragment>",
+        `#include <color_fragment>
+        float dustPulse = 0.72 + 0.28 * (0.5 + 0.5 * sin(uTerrainDustTime * 3.2 + vTerrainDustPhase));
+        diffuseColor.rgb *= 0.82 + dustPulse * 0.28;
+        diffuseColor.a *= dustPulse;`,
+      );
+    };
+    terrainDustMaterial.customProgramCacheKey = () => "tide-highland-slip-dust-v1";
+    const terrainDustMesh = new THREE.InstancedMesh(
+      new THREE.IcosahedronGeometry(0.032, 0),
+      terrainDustMaterial,
+      28,
+    );
+    const terrainDustDummy = new THREE.Object3D();
+    const terrainDustTint = new THREE.Color();
+    const terrainDustPalette = ["#c7a879", "#e0c79a", "#9e9a85", "#b6bba3", "#d0b8a1"];
+    for (let i = 0; i < 28; i++) {
+      const seed = Math.abs(Math.sin((i + 1) * 127.1) * 43758.5453) % 1;
+      const trail = (i + 0.5) / 28;
+      const angle = i * 2.399963;
+      const spread = 0.12 + trail * 0.72;
+      terrainDustDummy.position.set(
+        Math.cos(angle) * spread,
+        0.018 + seed * 0.12,
+        -0.24 - trail * 3.15,
+      );
+      const dustScale = 0.48 + seed * 0.9;
+      terrainDustDummy.scale.set(dustScale, dustScale * (0.55 + seed * 0.4), dustScale);
+      terrainDustDummy.rotation.set(seed * 2.4, angle, seed * 1.7);
+      terrainDustDummy.updateMatrix();
+      terrainDustMesh.setMatrixAt(i, terrainDustDummy.matrix);
+      terrainDustTint.set(terrainDustPalette[Math.floor(seed * terrainDustPalette.length)]);
+      terrainDustMesh.setColorAt(i, terrainDustTint);
+    }
+    terrainDustMesh.instanceMatrix.needsUpdate = true;
+    if (terrainDustMesh.instanceColor) terrainDustMesh.instanceColor.needsUpdate = true;
+    terrainDustMesh.frustumCulled = false;
+    terrainDustMesh.castShadow = false;
+    terrainDustMesh.receiveShadow = false;
+    terrainDustMesh.renderOrder = 5;
+    terrainDustMesh.visible = false;
+    effectRoot.add(terrainDustMesh);
     const installProjectileWakeFlow = (material: THREE.MeshBasicMaterial) => {
       material.onBeforeCompile = (shader) => {
         shader.uniforms.uProjectileWakeTime = projectileWakeUniforms.time;
@@ -6022,6 +6095,9 @@ vFoliageGust = 0.0;
       let slipSpeed = 260;
       let waterSlipShot: Terrain3DShot | null = null;
       let waterSlipSpeed = 280;
+      let rockSlipShot: Terrain3DShot | null = null;
+      let rockSlipSpeed = 315;
+      let rockSlipHeight = 0;
       for (const shot of data.shots) {
         const speed = shot.speed ?? 220;
         if (speed > slipSpeed) {
@@ -6034,6 +6110,12 @@ vFoliageGust = 0.0;
         if (overOpenWater && speed > waterSlipSpeed) {
           waterSlipShot = shot;
           waterSlipSpeed = speed;
+        }
+        const terrainHeight = terrainCellHeights.get(shotCellX + "," + shotCellY);
+        if (terrainHeight !== undefined && terrainHeight >= 2 && speed > rockSlipSpeed) {
+          rockSlipShot = shot;
+          rockSlipSpeed = speed;
+          rockSlipHeight = terrainHeight;
         }
       }
       if (slipShot) {
@@ -6055,6 +6137,21 @@ vFoliageGust = 0.0;
         oceanSurfaceUniforms.slipStrength.value = THREE.MathUtils.clamp((waterSlipSpeed - 270) / 390, 0, 1);
       } else {
         oceanSurfaceUniforms.slipStrength.value = 0;
+      }
+      if (rockSlipShot) {
+        const rockDx = (rockSlipShot.tx - rockSlipShot.x) / CELL;
+        const rockDz = (rockSlipShot.ty - rockSlipShot.y) / CELL;
+        const rockLength = Math.hypot(rockDx, rockDz) || 1;
+        terrainDustMesh.visible = true;
+        terrainDustMesh.position.set(
+          rockSlipShot.x / CELL,
+          groundTop(rockSlipHeight) + 0.035,
+          rockSlipShot.y / CELL,
+        );
+        terrainDustMesh.rotation.y = Math.atan2(rockDx / rockLength, rockDz / rockLength);
+        terrainDustMaterial.opacity = 0.12 + THREE.MathUtils.clamp((rockSlipSpeed - 300) / 420, 0, 1) * 0.32;
+      } else {
+        terrainDustMesh.visible = false;
       }
       for (let i = 0; i < data.shots.length; i++) {
         const shot = data.shots[i];
