@@ -1839,10 +1839,12 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           `#include <roughnessmap_fragment>
           float rampRoughnessGrain = sin(vRampWorldPosition.x * 7.1 + vRampWorldPosition.z * 5.7)
             * cos(vRampWorldPosition.z * 8.3 - vRampWorldPosition.x * 3.7);
+          float rampLongRough = sin(vRampSurfaceUv.y * 57.0
+            + sin(vRampSurfaceUv.x * 8.0 + vRampWorldPosition.x * 0.7) * 2.1);
           float rampWetness = smoothstep(0.68, 0.98,
             sin(vRampWorldPosition.x * 0.47 - vRampWorldPosition.z * 0.33) * 0.5 + 0.5);
           roughnessFactor = clamp(roughnessFactor + rampRoughnessGrain * 0.035
-            + abs(rampLongGrain) * 0.018 - rampWetness * 0.08, 0.0, 1.0);`,
+            + abs(rampLongRough) * 0.018 - rampWetness * 0.08, 0.0, 1.0);`,
         );
       };
       material.customProgramCacheKey = () => "tide-sculpted-ramp-stone-strata-v1";
