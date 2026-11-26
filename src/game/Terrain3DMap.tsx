@@ -1787,6 +1787,68 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
     };
     installCliffStrata(shared.cliff);
 
+    // 坡面岩材以世界座標連續取樣：沿坡向刻出細溝、磨亮凸脊與濕潤裂隙。
+    // 使用既有共享材質，不為每一段坡道建立獨立 Shader 或額外動畫物件。
+    const installRampStone = (material: THREE.MeshStandardMaterial) => {
+      material.onBeforeCompile = (shader) => {
+        shader.vertexShader = shader.vertexShader.replace(
+          "#include <common>",
+          "#include <common>\nvarying vec3 vRampWorldPosition;\nvarying vec2 vRampSurfaceUv;",
+        );
+        shader.vertexShader = shader.vertexShader.replace(
+          "#include <begin_vertex>",
+          `#include <begin_vertex>
+          vRampSurfaceUv = uv;
+          vec4 rampWorldPosition = vec4(transformed, 1.0);
+          #ifdef USE_INSTANCING
+            rampWorldPosition = instanceMatrix * rampWorldPosition;
+          #endif
+          rampWorldPosition = modelMatrix * rampWorldPosition;
+          vRampWorldPosition = rampWorldPosition.xyz;`,
+        );
+        shader.fragmentShader = shader.fragmentShader.replace(
+          "#include <common>",
+          "#include <common>\nvarying vec3 vRampWorldPosition;\nvarying vec2 vRampSurfaceUv;",
+        );
+        shader.fragmentShader = shader.fragmentShader.replace(
+          "#include <color_fragment>",
+          `#include <color_fragment>
+          vec2 rampWorld = vRampWorldPosition.xz;
+          float rampBroadStone = sin(rampWorld.x * 0.31 + sin(rampWorld.y * 0.23) * 1.8)
+            * cos(rampWorld.y * 0.27 - rampWorld.x * 0.14);
+          float rampLongGrain = sin(vRampSurfaceUv.y * 57.0
+            + sin(vRampSurfaceUv.x * 8.0 + rampWorld.x * 0.7) * 2.1);
+          float rampFineGrain = sin(rampWorld.x * 13.7 + rampWorld.y * 11.3)
+            * cos(rampWorld.y * 16.1 - rampWorld.x * 8.7);
+          float rampShoulder = 1.0 - smoothstep(0.72, 0.98, abs(vRampSurfaceUv.x * 2.0 - 1.0));
+          float rampEdgeQuartz = pow(max(0.0, sin(rampWorld.x * 4.7 + rampWorld.y * 3.9
+            + rampBroadStone * 1.8)), 9.0) * (1.0 - rampShoulder);
+          float rampWaterStain = smoothstep(0.68, 0.98,
+            sin(rampWorld.x * 0.47 - rampWorld.y * 0.33 + rampBroadStone) * 0.5 + 0.5);
+          float rampWearLine = pow(max(0.0, sin(rampLongGrain * 2.1
+            + rampWorld.x * 1.7 - rampWorld.y * 1.3)), 5.0);
+          diffuseColor.rgb *= 0.972 + rampBroadStone * 0.026 + rampFineGrain * 0.012;
+          diffuseColor.rgb *= mix(vec3(1.08, 1.015, 0.91), vec3(0.82, 0.98, 0.94),
+            rampWaterStain * 0.16);
+          diffuseColor.rgb *= 1.0 - rampWearLine * 0.045;
+          diffuseColor.rgb += vec3(0.14, 0.17, 0.18) * rampEdgeQuartz * 0.11;
+          diffuseColor.rgb += vec3(0.035, 0.074, 0.066) * rampWaterStain * 0.065;`,
+        );
+        shader.fragmentShader = shader.fragmentShader.replace(
+          "#include <roughnessmap_fragment>",
+          `#include <roughnessmap_fragment>
+          float rampRoughnessGrain = sin(vRampWorldPosition.x * 7.1 + vRampWorldPosition.z * 5.7)
+            * cos(vRampWorldPosition.z * 8.3 - vRampWorldPosition.x * 3.7);
+          float rampWetness = smoothstep(0.68, 0.98,
+            sin(vRampWorldPosition.x * 0.47 - vRampWorldPosition.z * 0.33) * 0.5 + 0.5);
+          roughnessFactor = clamp(roughnessFactor + rampRoughnessGrain * 0.035
+            + abs(rampLongGrain) * 0.018 - rampWetness * 0.08, 0.0, 1.0);`,
+        );
+      };
+      material.customProgramCacheKey = () => "tide-sculpted-ramp-stone-strata-v1";
+    };
+    installRampStone(shared.ramp);
+
     // 生態交界帶以世界座標生成土壤沉積、苔根與露水微光，讓不同地貌之間有自然的混合區，
     // 而不是單純用一條固定色帶切開；動畫共用花粉時間，不增加逐物件更新。
     const installBiomeTransition = (material: THREE.MeshStandardMaterial) => {
