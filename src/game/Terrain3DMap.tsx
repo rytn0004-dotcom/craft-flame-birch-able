@@ -673,10 +673,14 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             "float skimT = uv.y;",
             "float skimAcross = uv.x * 2.0 - 1.0;",
             "float skimRipple = sin(skimT * 28.0 - uGroundSkimTime * 7.0 + skimAcross * 5.4);",
+            "float shearWave = sin(skimT * 44.0 - uGroundSkimTime * 10.5 + skimAcross * 8.2);",
             "float skimCurl = cos(skimT * 16.0 - uGroundSkimTime * 4.5 + skimAcross * 3.2);",
-            "transformed.x += skimRipple * 0.016 * skimT;",
-            "transformed.y += (1.0 - abs(skimAcross)) * 0.003 + skimCurl * 0.0015;",
-            "transformed.z += sin(skimT * 12.0 - uGroundSkimTime * 3.6) * 0.012 * skimT;",
+            "float pressureCrest = exp(-pow((skimT - 0.13) * 17.0, 2.0));",
+            "transformed.x += (skimRipple * 0.013 + shearWave * 0.0045) * skimT;",
+            "transformed.y += (1.0 - abs(skimAcross)) * (0.003 + pressureCrest * 0.003)",
+              " + skimCurl * 0.0018 + shearWave * 0.0009;",
+            "transformed.z += (sin(skimT * 12.0 - uGroundSkimTime * 3.6) * 0.012",
+              " + cos(skimT * 34.0 - uGroundSkimTime * 6.2 + skimAcross * 4.0) * 0.004) * skimT;",
           ].join("\n"),
         );
         shader.fragmentShader = shader.fragmentShader.replace(
@@ -688,17 +692,22 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           [
             "#include <color_fragment>",
             "float skimAcross = abs(vGroundSkimUv.x * 2.0 - 1.0);",
-            "float skimEdgeFade = 1.0 - smoothstep(0.62, 1.0, skimAcross);",
+            "float skimEdgeFade = 1.0 - smoothstep(0.58, 1.0, skimAcross);",
             "float skimTailFade = 1.0 - smoothstep(0.72, 1.0, vGroundSkimUv.y);",
             "float groundRipple = 0.5 + 0.5 * sin(vGroundSkimUv.y * 38.0 - uGroundSkimTime * 8.0 + vGroundSkimUv.x * 7.0);",
-            "float pressureCrest = exp(-pow((vGroundSkimUv.y - 0.16) * 16.0, 2.0));",
-            "diffuseColor.rgb *= 0.76 + groundRipple * 0.24;",
-            "diffuseColor.rgb += vec3(0.11, 0.2, 0.16) * (pressureCrest * 0.24 + groundRipple * 0.07);",
-            "diffuseColor.a *= skimEdgeFade * skimTailFade * (0.18 + groundRipple * 0.2 + pressureCrest * 0.18);",
+            "float pressureCrest = exp(-pow((vGroundSkimUv.y - 0.13) * 17.0, 2.0));",
+            "float abrasion = pow(max(0.0, sin(vGroundSkimUv.y * 86.0 - uGroundSkimTime * 12.5",
+              " + vGroundSkimUv.x * 19.0 + sin(vGroundSkimUv.y * 21.0) * 2.0)), 7.0);",
+            "float eddyThreads = pow(max(0.0, sin(vGroundSkimUv.y * 43.0 - uGroundSkimTime * 5.2",
+              " - vGroundSkimUv.x * 9.0)), 5.0);",
+            "diffuseColor.rgb *= 0.72 + groundRipple * 0.22 + pressureCrest * 0.06;",
+            "diffuseColor.rgb += vec3(0.14, 0.3, 0.27) * (pressureCrest * 0.38 + abrasion * 0.26 + eddyThreads * 0.12);",
+            "diffuseColor.a *= skimEdgeFade * skimTailFade",
+              " * (0.16 + groundRipple * 0.18 + pressureCrest * 0.3 + abrasion * 0.22 + eddyThreads * 0.1);",
           ].join("\n"),
         );
       };
-      material.customProgramCacheKey = () => "tide-ground-skimming-pressure-v1";
+      material.customProgramCacheKey = () => "tide-ground-skimming-pressure-v2";
     };
 
     // 程序化黑霧貼圖：柔邊噪聲雲，不依賴外部圖檔，並以單一 InstancedMesh 控制效能。
