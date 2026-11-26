@@ -528,10 +528,11 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           "#include <begin_vertex>",
           `#include <begin_vertex>
           vProjectileWakeUv = uv;
-          float wakeTurbulence = sin(vProjectileWakeUv.y * 18.0 - uProjectileWakeTime * 4.8);
-          float wakeCurl = cos(vProjectileWakeUv.y * 13.0 - uProjectileWakeTime * 3.6);
-          transformed.x += wakeTurbulence * 0.018 * vProjectileWakeUv.y;
-          transformed.y += wakeCurl * 0.012 * vProjectileWakeUv.y;`,
+          float wakeTurbulence = sin(vProjectileWakeUv.y * 23.0 - uProjectileWakeTime * 6.2)
+            + cos(vProjectileWakeUv.y * 11.0 - uProjectileWakeTime * 4.1) * 0.42;
+          float wakeCurl = cos(vProjectileWakeUv.y * 17.0 - uProjectileWakeTime * 5.2);
+          transformed.x += wakeTurbulence * 0.026 * vProjectileWakeUv.y;
+          transformed.y += wakeCurl * 0.019 * vProjectileWakeUv.y;`,
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <common>",
@@ -540,13 +541,14 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <color_fragment>",
           `#include <color_fragment>
-          float wakePulse = 0.8 + 0.2 * sin(vProjectileWakeUv.y * 15.0 - uProjectileWakeTime * 7.0);
-          float wakeTaper = 1.0 - smoothstep(0.76, 1.0, vProjectileWakeUv.y);
-          diffuseColor.rgb *= wakePulse;
-          diffuseColor.a *= wakeTaper;`,
+          float wakePulse = 0.76 + 0.24 * sin(vProjectileWakeUv.y * 19.0 - uProjectileWakeTime * 8.4);
+          float wakeShear = 0.5 + 0.5 * sin(vProjectileWakeUv.y * 31.0 - uProjectileWakeTime * 10.5);
+          float wakeTaper = 1.0 - smoothstep(0.72, 1.0, vProjectileWakeUv.y);
+          diffuseColor.rgb *= wakePulse * (0.92 + wakeShear * 0.08);
+          diffuseColor.a *= wakeTaper * (0.78 + wakeShear * 0.22);`,
         );
       };
-      material.customProgramCacheKey = () => "tide-projectile-wake-flow-v1";
+      material.customProgramCacheKey = () => "tide-projectile-wake-flow-v2";
     };
     // 程序化黑霧貼圖：柔邊噪聲雲，不依賴外部圖檔，並以單一 InstancedMesh 控制效能。
     const blackMistSize = 64;
@@ -1293,7 +1295,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
     installCliffStrata(shared.cliff);
 
     // 草、花、樹冠與蘑菇共用頂點風場；每個實例只在 GPU 彎曲頂端，不逐物件跑動畫.
-    const installFoliageWind = (material: THREE.MeshStandardMaterial, cacheKey: string, slipResponse = 1) => {
+    const installFoliageWind = (material: THREE.MeshStandardMaterial, cacheKey: string, slipResponse = 1, pressResponse = 0) => {
       material.onBeforeCompile = (shader) => {
         shader.uniforms.uFoliageTime = foliageWindUniform;
         shader.uniforms.uSlipPosition = slipWindUniforms.position;
@@ -1337,16 +1339,19 @@ vFoliageGust = 0.0;
         float slipAlong = dot(slipRelative, uSlipDirection);
         vec2 slipPerpendicular = vec2(-uSlipDirection.y, uSlipDirection.x);
         float slipSide = abs(dot(slipRelative, slipPerpendicular));
-        float slipWake = smoothstep(-9.0, -7.0, slipAlong)
-          * (1.0 - smoothstep(-1.25, 0.15, slipAlong))
-          * (1.0 - smoothstep(0.55, 2.8, slipSide));
+        float slipWake = smoothstep(-10.5, -7.8, slipAlong)
+          * (1.0 - smoothstep(-1.55, 0.2, slipAlong))
+          * (1.0 - smoothstep(1.05, 3.8, slipSide));
         float slipGust = slipWake * uSlipStrength * foliageMask;
         float slipSideSign = sign(dot(slipRelative, slipPerpendicular));
         vec2 slipBend = -uSlipDirection * ${(0.16 * slipResponse).toFixed(3)}
           + slipPerpendicular * slipSideSign * ${(0.12 * slipResponse).toFixed(3)};
+        float slipVortex = sin(slipAlong * 1.42 + foliagePhase * 0.72 + uFoliageTime * 6.4);
+        vec2 slipCurl = slipPerpendicular * slipVortex * slipGust * ${(0.07 * slipResponse).toFixed(3)};
         float canopyRecoil = sin(uFoliageTime * 5.2 + foliagePhase * 2.4)
           * slipGust * ${(0.035 * slipResponse).toFixed(3)};
-        transformed.xz += slipBend * slipGust;
+        transformed.xz += slipBend * slipGust + slipCurl;
+        transformed.y -= max(position.y, 0.0) * slipGust * ${pressResponse.toFixed(3)};
         transformed.y += canopyRecoil;
         vFoliageGust = max(vFoliageGust, min(1.0, slipGust * ${slipResponse.toFixed(2)}));
 #endif`,
@@ -1359,18 +1364,18 @@ vFoliageGust = 0.0;
           "#include <color_fragment>",
           `#include <color_fragment>
           float windLightCatch = smoothstep(0.12, 0.96, vFoliageGust);
-          diffuseColor.rgb *= 1.0 + vec3(0.048, 0.072, 0.026) * windLightCatch;`,
+          diffuseColor.rgb *= 1.0 + vec3(0.068, 0.094, 0.038) * windLightCatch;`,
         );
       };
       material.customProgramCacheKey = () => cacheKey;
     };
-    installFoliageWind(shared.foliageWind, "tide-foliage-wind-v4");
-    installFoliageWind(shared.treeCanopyWind, "tide-tree-canopy-gust-v1", 2.4);
-    installFoliageWind(shared.grass, "tide-grass-stem-wind-v4");
-    installFoliageWind(shared.grassBlade, "tide-grass-blade-wind-v5");
-    installFoliageWind(shared.meadowBloom, "tide-meadow-bloom-wind-v4");
-    installFoliageWind(shared.coastGrass, "tide-coast-reed-wind-v4");
-    installFoliageWind(shared.reefCoral, "tide-reef-coral-current-v4");
+    installFoliageWind(shared.foliageWind, "tide-foliage-wind-v5");
+    installFoliageWind(shared.treeCanopyWind, "tide-tree-canopy-gust-v2", 2.4);
+    installFoliageWind(shared.grass, "tide-grass-stem-wind-v5", 1.45, 0.34);
+    installFoliageWind(shared.grassBlade, "tide-grass-blade-wind-v6", 2.15, 0.72);
+    installFoliageWind(shared.meadowBloom, "tide-meadow-bloom-wind-v5", 1.5, 0.16);
+    installFoliageWind(shared.coastGrass, "tide-coast-reed-wind-v5", 1.75, 0.3);
+    installFoliageWind(shared.reefCoral, "tide-reef-coral-current-v5");
 
     // 花粉與草籽以少量實例漂浮；GPU 風場控制輕微三維漂移，不逐粒更新矩陣。
     const installPollenDrift = (material: THREE.MeshBasicMaterial) => {
@@ -6505,13 +6510,13 @@ vFoliageGust = 0.0;
         const speedFactor = THREE.MathUtils.clamp(((shot.speed ?? 220) - 220) / 420, 0, 1);
         const wake = node.children[2];
         wake.material.color.set(shot.color);
-        wake.material.opacity = 0.14 + speedFactor * 0.5;
+        wake.material.opacity = 0.18 + speedFactor * 0.56;
         wake.scale.set(0.82 + speedFactor * 0.44, 1, 0.72 + speedFactor * 1.3);
         const skimWake = node.children[3];
         skimWake.visible = speedFactor > 0.08;
         skimWake.material.color.set(shot.color);
-        skimWake.material.opacity = speedFactor > 0.08 ? 0.06 + speedFactor * 0.3 : 0;
-        skimWake.scale.set(1.15 + speedFactor * 0.7, 1, 0.9 + speedFactor * 1.6);
+        skimWake.material.opacity = speedFactor > 0.08 ? 0.08 + speedFactor * 0.34 : 0;
+        skimWake.scale.set(1.3 + speedFactor * 0.9, 1, 1.0 + speedFactor * 1.8);
         node.children[1].scale.z = 1 + speedFactor * 1.9;
         node.children[1].position.z = -0.28 - speedFactor * 0.16;
         node.children[0].scale.setScalar(1 + speedFactor * 0.13);
