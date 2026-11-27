@@ -93,6 +93,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
     if (!host) return;
 
     let renderer: any;
+    let baseRenderPixelRatio = 1;
     let controls: any;
     let animationFrame = 0;
     let disposed = false;
@@ -3812,6 +3813,8 @@ vSlipWake = 0.0;
       } else {
         for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) addCell(c, r);
       }
+      // 所有生態細節共用同一份列表，避免 20 多次重複配置大型陣列。
+      const tileCellList = Array.from(tileCells.values());
 
       // 依目前真正已鋪設的地塊計算海域中心與尺寸；擴張時海岸同步外推，不把 200×200 空棋盤當成島嶼。
       let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
@@ -3892,6 +3895,40 @@ vSlipWake = 0.0;
         z: tower.y / CELL,
         radius: tower.sanctuary ? 4.4 : 1.18,
       }));
+      // 建築避讓檢查是地形裝飾生成中的熱點：以 16 格空間桶縮小候選範圍，
+      // 並用距離平方取代大量 Math.hypot；所有原本的安全半徑仍保持不變。
+      const PROTECTED_BUILDING_BUCKET_SIZE = 16;
+      const protectedBuildingBuckets = new Map<string, typeof protectedBuildings>();
+      let maxProtectedBuildingRadius = 0;
+      for (const building of protectedBuildings) {
+        maxProtectedBuildingRadius = Math.max(maxProtectedBuildingRadius, building.radius);
+        const bx = Math.floor(building.x / PROTECTED_BUILDING_BUCKET_SIZE);
+        const bz = Math.floor(building.z / PROTECTED_BUILDING_BUCKET_SIZE);
+        const key = bx + "," + bz;
+        const bucket = protectedBuildingBuckets.get(key);
+        if (bucket) bucket.push(building);
+        else protectedBuildingBuckets.set(key, [building]);
+      }
+      const isNearProtectedBuilding = (x: number, z: number, margin = 0) => {
+        const reach = maxProtectedBuildingRadius + Math.max(0, margin);
+        const bucketRadius = Math.ceil(reach / PROTECTED_BUILDING_BUCKET_SIZE);
+        const bx = Math.floor(x / PROTECTED_BUILDING_BUCKET_SIZE);
+        const bz = Math.floor(z / PROTECTED_BUILDING_BUCKET_SIZE);
+        for (let dz = -bucketRadius; dz <= bucketRadius; dz++) {
+          for (let dx = -bucketRadius; dx <= bucketRadius; dx++) {
+            const bucket = protectedBuildingBuckets.get((bx + dx) + "," + (bz + dz));
+            if (!bucket) continue;
+            for (const building of bucket) {
+              const limit = building.radius + margin;
+              if (limit <= 0) continue;
+              const ox = x - building.x;
+              const oz = z - building.z;
+              if (ox * ox + oz * oz < limit * limit) return true;
+            }
+          }
+        }
+        return false;
+      };
 
       // 每格岩面依區域加入微色偏：海岸偏沙金、苔地偏冷綠、石灰岩偏暖白、遺跡偏灰青。
       const regionTint: Record<string, [number, number, number]> = {
@@ -4008,10 +4045,8 @@ vSlipWake = 0.0;
           if (!selected || seed > selected.seed) selected = { rotation: direction.rotation, seed, neighbor };
         }
         if (!selected) continue;
-        const crossesStructure = protectedBuildings.some((building) =>
-          Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 0.48
-          || Math.hypot(selected!.neighbor.x - building.x, selected!.neighbor.z - building.z) < building.radius + 0.48,
-        );
+        const crossesStructure = isNearProtectedBuilding(cell.x, cell.z, 0.48)
+          || isNearProtectedBuilding(selected!.neighbor.x, selected!.neighbor.z, 0.48);
         if (crossesStructure) continue;
         const chunkX = Math.floor(gx / terrainChunkSize);
         const chunkY = Math.floor(gy / terrainChunkSize);
@@ -4079,10 +4114,8 @@ vSlipWake = 0.0;
             if (!selected || seed > selected.seed) selected = { rotation: direction.rotation, seed, neighbor };
           }
           if (!selected) continue;
-          const crossesStructure = protectedBuildings.some((building) =>
-            Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 0.48
-            || Math.hypot(selected!.neighbor.x - building.x, selected!.neighbor.z - building.z) < building.radius + 0.48,
-          );
+          const crossesStructure = isNearProtectedBuilding(cell.x, cell.z, 0.48)
+          || isNearProtectedBuilding(selected!.neighbor.x, selected!.neighbor.z, 0.48);
           if (crossesStructure) continue;
           const chunkX = Math.floor(gx / terrainChunkSize);
           const chunkY = Math.floor(gy / terrainChunkSize);
@@ -4152,9 +4185,7 @@ vSlipWake = 0.0;
         const radius = 0.2 + (seed * 7.13 % 1) * 0.17;
         const x = cell.x + Math.cos(angle) * radius;
         const z = cell.z + Math.sin(angle) * radius;
-        if (protectedBuildings.some((building) =>
-          Math.hypot(x - building.x, z - building.z) < building.radius + 0.22,
-        )) continue;
+        if (isNearProtectedBuilding(x, z, 0.22)) continue;
         const tint = region === "ancient" ? "#83d9d2" : "#b0d09b";
         ridgeCrystalSites.push({
           x, z, y: groundTop(cell.h), seed, tint,
@@ -4230,7 +4261,7 @@ vSlipWake = 0.0;
           if (nextRegion === region || nextRegion === "road") continue;
           const x = cell.x + direction.dc * 0.5;
           const z = cell.z + direction.dr * 0.5;
-          if (protectedBuildings.some((building) => Math.hypot(x - building.x, z - building.z) < building.radius + 0.38)) continue;
+          if (isNearProtectedBuilding(x, z, 0.38)) continue;
           const seed = Math.abs(Math.sin(cell.x * 81.7 + cell.z * 47.3 + direction.dc * 19.1) * 29171.7) % 1;
           if (seed < 0.52) continue;
           biomeSeamCells.push({
@@ -4353,7 +4384,7 @@ vSlipWake = 0.0;
       // 擴張地圖的道路格保持原有高度與碰撞資料，只在表面加石板鋪面。
       // 每格一片低矮石板，靠色差與細縫建立行進方向；道路外緣以窄石沿收邊。
       if (data.mapMode === "expand") {
-        const roadCells = Array.from(tileCells.values()).filter((cell) =>
+        const roadCells = tileCellList.filter((cell) =>
           !data.blocked.has(Math.floor(cell.x) + "," + Math.floor(cell.z)),
         );
         if (roadCells.length) {
@@ -4579,7 +4610,7 @@ vSlipWake = 0.0;
               // 燈座完全落在道路外側高地，避免底座侵入石板通行面。
               const x = cell.x + direction.dx * 0.68;
               const z = cell.z + direction.dz * 0.68;
-              if (protectedBuildings.some((building) => Math.hypot(x - building.x, z - building.z) < building.radius + 0.42)) continue;
+              if (isNearProtectedBuilding(x, z, 0.42)) continue;
               lampKeys.add(lampKey);
               lampCandidates.push({ x, z, y: groundTop(neighbor.h), seed });
               if (lampCandidates.length >= 48) break;
@@ -4841,9 +4872,7 @@ vSlipWake = 0.0;
         const gx = Math.floor(cell.x);
         const gy = Math.floor(cell.z);
         if (!data.blocked.has(gx + "," + gy)) continue;
-        const nearBuilding = protectedBuildings.some((building) =>
-          Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius,
-        );
+        const nearBuilding = isNearProtectedBuilding(cell.x, cell.z);
         if (nearBuilding) continue;
         for (const direction of coastDirections) {
           const neighbor = tileCells.get((gx + direction.dc) + "," + (gy + direction.dr));
@@ -5304,15 +5333,13 @@ vSlipWake = 0.0;
 
       // 高地風化石群：以不規則細分岩體取代單一低面數圓石，每簇兩枚大小不同的岩礫。
       // 頂點色由陰濕底色漸層至日照礦面，岩體底部壓平並保留自然破碎輪廓；全場仍只用一個 InstancedMesh。
-      const rockCells = Array.from(tileCells.values()).filter((cell) => {
+      const rockCells = tileCellList.filter((cell) => {
         if (cell.h <= 0) return false;
         const region = terrainRegion(cell);
         if (region === "road" || region === "coast") return false;
         const seed = Math.abs(Math.sin(cell.x * 91.7 + cell.z * 43.3) * 24634.6345) % 1;
         if (seed <= 0.78) return false;
-        return !protectedBuildings.some((building) =>
-          Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 0.72,
-        );
+        return !isNearProtectedBuilding(cell.x, cell.z, 0.72);
       }).slice(0, 620);
       if (rockCells.length) {
         const weatheredRockGeometry = new THREE.IcosahedronGeometry(1, 2);
@@ -5399,7 +5426,7 @@ vSlipWake = 0.0;
 
       // 山脊岩柱：只在 Lv.2–3 的局部高點生成不規則風蝕尖岩，形成遠距可讀的地形剪影。
       // 每個地標由兩枚共用風化岩幾何構成，最多 120 組，並避開建築周圍。
-      const summitSpineCells = Array.from(tileCells.values()).filter((cell) => {
+      const summitSpineCells = tileCellList.filter((cell) => {
         if (cell.h < 2 || terrainRegion(cell) === "coast" || terrainRegion(cell) === "road") return false;
         const gx = Math.floor(cell.x);
         const gy = Math.floor(cell.z);
@@ -5412,9 +5439,7 @@ vSlipWake = 0.0;
         const lowerShoulders = neighborHeights.filter((height) => height < cell.h).length;
         const seed = Math.abs(Math.sin(cell.x * 37.7 + cell.z * 91.3) * 32719.71) % 1;
         if (lowerShoulders < 2 || seed < 0.84) return false;
-        return !protectedBuildings.some((building) =>
-          Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 1.15,
-        );
+        return !isNearProtectedBuilding(cell.x, cell.z, 1.15);
       }).slice(0, 120);
       if (summitSpineCells.length) {
         const spines = new THREE.InstancedMesh(
@@ -5464,15 +5489,13 @@ vSlipWake = 0.0;
 
       // 岩面苔衣與地衣斑：有三瓣不規則邊緣、微隆起的中心與柔和的環狀厚度，
       // 像沿著石縫蔓延，而不是一張平面貼圖；以單批 InstancedMesh 控制成本。
-      const lichenCells = Array.from(tileCells.values()).filter((cell) => {
+      const lichenCells = tileCellList.filter((cell) => {
         if (cell.h < 1) return false;
         const region = terrainRegion(cell);
         if (region !== "moss" && region !== "limestone" && region !== "ancient") return false;
         const seed = Math.abs(Math.sin(cell.x * 103.7 + cell.z * 67.9) * 23871.37) % 1;
         if (seed < 0.925) return false;
-        return !protectedBuildings.some((building) =>
-          Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 0.82,
-        );
+        return !isNearProtectedBuilding(cell.x, cell.z, 0.82);
       }).slice(0, 360);
       if (lichenCells.length) {
         const lichenGeometry = new THREE.BufferGeometry();
@@ -5551,7 +5574,7 @@ vSlipWake = 0.0;
 
       // 草叢沿草甸與苔地的低頻生態帶聚集；海岸、石灰岩與古遺跡保留較裸露的地貌。
       // 低頻場決定草叢斑塊，高頻固定種子決定單格是否長草，避免平均撒滿棋盤。
-      const grassCells = Array.from(tileCells.values()).filter((cell) => {
+      const grassCells = tileCellList.filter((cell) => {
         if (cell.h <= 0) return false;
         const region = terrainRegion(cell);
         if (region !== "meadow" && region !== "moss") return false;
@@ -5564,14 +5587,7 @@ vSlipWake = 0.0;
         const patchDensity = THREE.MathUtils.clamp((patchField + 0.28) * 0.31, 0, 1);
         const densityThreshold = 0.916 - patchDensity * 0.158;
         if (seed < densityThreshold) return false;
-        return !data.towers.some((tower) => {
-          const tx = tower.x / CELL;
-          const tz = tower.y / CELL;
-          const clearance = tower.sanctuary ? 4.1 : 1.05;
-          return Math.hypot(cell.x - tx, cell.z - tz) < clearance;
-        }) && !protectedBuildings.some((building) =>
-          Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 0.38,
-        );
+        return !isNearProtectedBuilding(cell.x, cell.z, 0.38);
       }).slice(0, 2250);
       if (grassCells.length) {
         // 彎曲漸尖的葉片取代圓錐草刺；四片葉組成一簇，並共用樹冠風場材質。
@@ -5905,7 +5921,7 @@ vSlipWake = 0.0;
       }
 
       // 草甸與苔地加入成簇的海岸林木；樹冠以頂點風場輕晃，不逐棵建立動畫。
-      const groveCandidates = Array.from(tileCells.values()).filter((cell) => {
+      const groveCandidates = tileCellList.filter((cell) => {
         if (cell.h < 1 || cell.h > 2) return false;
         const region = terrainRegion(cell);
         if (region !== "meadow" && region !== "moss") return false;
@@ -5913,9 +5929,7 @@ vSlipWake = 0.0;
         if (coastBandKeys.has(key)) return false;
         const seed = Math.abs(Math.sin(cell.x * 37.7 + cell.z * 71.3) * 31871.9) % 1;
         if (seed < 0.986) return false;
-        return !protectedBuildings.some((building) =>
-          Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 1.75,
-        );
+        return !isNearProtectedBuilding(cell.x, cell.z, 1.75);
       });
       const groveCount = Math.min(84, groveCandidates.length);
       const groveCells = groveCount
@@ -6276,7 +6290,7 @@ vSlipWake = 0.0;
       }
 
       // 林地邊緣的低矮灌木叢：以不同葉形與尺寸打散樹木之間的空白，避免植被只剩單株模型。
-      const shrubCells = Array.from(tileCells.values()).filter((cell) => {
+      const shrubCells = tileCellList.filter((cell) => {
         if (cell.h < 1 || cell.h > 2) return false;
         const region = terrainRegion(cell);
         if (region !== "meadow" && region !== "moss") return false;
@@ -6284,9 +6298,7 @@ vSlipWake = 0.0;
         if (coastBandKeys.has(key)) return false;
         const seed = Math.abs(Math.sin(cell.x * 59.3 + cell.z * 23.7) * 21791.3) % 1;
         if (seed < 0.944) return false;
-        return !protectedBuildings.some((building) =>
-          Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 1.05,
-        );
+        return !isNearProtectedBuilding(cell.x, cell.z, 1.05);
       }).slice(0, 360);
       if (shrubCells.length) {
         const shrubs = new THREE.InstancedMesh(
@@ -6332,7 +6344,7 @@ vSlipWake = 0.0;
       // 苔地以羽狀蕨葉填補樹叢下層：單一自訂葉片幾何、多實例批次，風動沿用 GPU 材質。
       // 高地生態帶：石灰岩稜線不再只是裸露方塊，加入成簇的匍匐墊狀植物與短葉叢。
       // 依高度、岩脊斑塊與固定種子分布，避開建築；所有葉片採 InstancedMesh + GPU 風場。
-      const alpineCells = Array.from(tileCells.values()).filter((cell) => {
+      const alpineCells = tileCellList.filter((cell) => {
         if (cell.h < 2 || terrainRegion(cell) !== "limestone") return false;
         const key = Math.floor(cell.x) + "," + Math.floor(cell.z);
         if (coastBandKeys.has(key)) return false;
@@ -6341,9 +6353,7 @@ vSlipWake = 0.0;
         if (ridgePatch < -0.18) return false;
         const seed = Math.abs(Math.sin(cell.x * 91.7 + cell.z * 57.3) * 24731.9) % 1;
         if (seed < 0.755) return false;
-        return !protectedBuildings.some((building) =>
-          Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 0.62,
-        );
+        return !isNearProtectedBuilding(cell.x, cell.z, 0.62);
       }).slice(0, 156);
       if (alpineCells.length) {
         const cushionGeometry = new THREE.SphereGeometry(1, 12, 8);
@@ -6496,15 +6506,13 @@ vSlipWake = 0.0;
         terrainRoot.add(...alpineMeshes);
       }
 
-      const fernCells = Array.from(tileCells.values()).filter((cell) => {
+      const fernCells = tileCellList.filter((cell) => {
         if (cell.h < 1 || cell.h > 2 || terrainRegion(cell) !== "moss") return false;
         const key = Math.floor(cell.x) + "," + Math.floor(cell.z);
         if (coastBandKeys.has(key)) return false;
         const seed = Math.abs(Math.sin(cell.x * 73.1 + cell.z * 41.9) * 29371.7) % 1;
         if (seed < 0.966) return false;
-        return !protectedBuildings.some((building) =>
-          Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 0.92,
-        );
+        return !isNearProtectedBuilding(cell.x, cell.z, 0.92);
       }).slice(0, 72);
       if (fernCells.length) {
         const fernPositions: number[] = [];
@@ -6606,7 +6614,7 @@ vSlipWake = 0.0;
 
       // 低矮三葉草填補草叢間的裸露縫隙：每株由三片有厚度起伏的心形葉面組成，
       // 葉脈隆起、葉緣微捲；以單一 InstancedMesh 批次繪製，並繼承 GPU 陣風與彈體掠過反應。
-      const cloverCells = Array.from(tileCells.values()).filter((cell) => {
+      const cloverCells = tileCellList.filter((cell) => {
         if (cell.h < 1 || cell.h > 2) return false;
         const region = terrainRegion(cell);
         if (region !== "meadow" && region !== "moss") return false;
@@ -6614,9 +6622,7 @@ vSlipWake = 0.0;
         if (coastBandKeys.has(key)) return false;
         const seed = Math.abs(Math.sin(cell.x * 57.3 + cell.z * 117.9) * 31871.7) % 1;
         if (seed < 0.81) return false;
-        if (protectedBuildings.some((building) =>
-          Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 0.62,
-        )) return false;
+        if (isNearProtectedBuilding(cell.x, cell.z, 0.62)) return false;
         return !fernCells.some((fern) => Math.hypot(cell.x - fern.x, cell.z - fern.z) < 0.74);
       }).slice(0, 420);
       if (cloverCells.length) {
@@ -6764,11 +6770,9 @@ vSlipWake = 0.0;
 
       // 苔地蘑菇改成完整小型菌體：柔弧菌傘、菌褶環、斑點與淡色菌柄。
       // 所有部件按固定種子批次化，數量上限 64 株，不新增逐物件動畫或即時光源。
-      const mushroomCells = Array.from(tileCells.values()).filter((cell) => {
+      const mushroomCells = tileCellList.filter((cell) => {
         if (cell.h !== 1 || terrainRegion(cell) !== "moss") return false;
-        if (protectedBuildings.some((building) =>
-          Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 0.9,
-        )) return false;
+        if (isNearProtectedBuilding(cell.x, cell.z, 0.9)) return false;
         const seed = Math.abs(Math.sin(cell.x * 37.1 + cell.z * 91.7) * 21873.5) % 1;
         return seed > 0.982;
       }).slice(0, 64);
@@ -6865,15 +6869,13 @@ vSlipWake = 0.0;
       }
 
       // 苔地與古代刻紋附近漂浮少量潮光微粒；單一動態實例批次，模擬林間螢火與遺跡能量。
-      const moteCandidates = Array.from(tileCells.values()).filter((cell) => {
+      const moteCandidates = tileCellList.filter((cell) => {
         if (cell.h <= 0) return false;
         const region = terrainRegion(cell);
         if (region !== "moss" && region !== "ancient") return false;
         const seed = Math.abs(Math.sin(cell.x * 31.7 + cell.z * 73.9) * 29171.7) % 1;
         if (seed < 0.88) return false;
-        return !protectedBuildings.some((building) =>
-          Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 0.8,
-        );
+        return !isNearProtectedBuilding(cell.x, cell.z, 0.8);
       });
       const moteCount = Math.min(42, moteCandidates.length);
       if (moteCount > 0) {
@@ -6912,15 +6914,13 @@ vSlipWake = 0.0;
       }
 
       // 風會把花粉與草籽從草甸帶起來；只放在草甸、苔地，並限制數量及避開建築。
-      const pollenCells = Array.from(tileCells.values()).filter((cell) => {
+      const pollenCells = tileCellList.filter((cell) => {
         if (cell.h <= 0) return false;
         const region = terrainRegion(cell);
         if (region !== "meadow" && region !== "moss") return false;
         const seed = Math.abs(Math.sin(cell.x * 57.1 + cell.z * 23.7) * 34781.3) % 1;
         if (seed < 0.965) return false;
-        return !protectedBuildings.some((building) =>
-          Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 0.58,
-        );
+        return !isNearProtectedBuilding(cell.x, cell.z, 0.58);
       });
       const pollenCount = Math.min(144, pollenCells.length);
       if (pollenCount > 0) {
@@ -6960,15 +6960,13 @@ vSlipWake = 0.0;
       }
 
       // 草甸與苔地改為三朵一簇的野花組合；花莖與花冠都共用 GPU 風場。
-      const flowerCells = Array.from(tileCells.values()).filter((cell) => {
+      const flowerCells = tileCellList.filter((cell) => {
         if (cell.h <= 0) return false;
         const region = terrainRegion(cell);
         if (region !== "meadow" && region !== "moss") return false;
         const seed = Math.abs(Math.sin(cell.x * 47.3 + cell.z * 89.1) * 28173.7) % 1;
         if (seed < 0.987) return false;
-        return !protectedBuildings.some((building) =>
-          Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 0.72,
-        );
+        return !isNearProtectedBuilding(cell.x, cell.z, 0.72);
       }).slice(0, 180);
       if (flowerCells.length) {
         const bloomPerCell = 3;
@@ -7091,7 +7089,7 @@ vSlipWake = 0.0;
       }
 
       // 高台邊緣偶爾露出低矮的海蝕礦晶，密度刻意偏低，避免水元素搶過建築主體。
-      const mineralCells = Array.from(tileCells.values()).filter((cell) => {
+      const mineralCells = tileCellList.filter((cell) => {
         if (cell.h < 2 || terrainRegion(cell) === "coast") return false;
         const gx = Math.floor(cell.x);
         const gy = Math.floor(cell.z);
@@ -7103,9 +7101,7 @@ vSlipWake = 0.0;
         ].some((neighbor) => !neighbor || neighbor.h < cell.h);
         const seed = Math.abs(Math.sin(cell.x * 51.7 + cell.z * 97.3) * 36431.71) % 1;
         if (!edge || seed <= 0.91) return false;
-        return !protectedBuildings.some((building) =>
-          Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 0.95,
-        );
+        return !isNearProtectedBuilding(cell.x, cell.z, 0.95);
       }).slice(0, 96);
       if (mineralCells.length) {
         const minerals = new THREE.InstancedMesh(
@@ -7150,13 +7146,11 @@ vSlipWake = 0.0;
       // 高地頂面依等級加入不同材質語彙：1 級苔痕、2 級岩層線、3 級石板刻線。
       // 細節使用 InstancedMesh，並在既有塔座／聖地周圍留白，不影響建塔判定。
       const detailIsClear = (cell: { x: number; z: number }, margin = 1.25) =>
-        !protectedBuildings.some((building) =>
-          Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + margin,
-        );
+        !isNearProtectedBuilding(cell.x, cell.z, margin);
 
       // 海岸石台上形成少量天然潮池：淺水鏡面、破碎亮邊與卵石共同打散平坦岸線。
       // 只放在 coast 生態格，與塔座保持距離；三個 InstancedMesh 有明確上限且不參與路徑。
-      const tidePoolCells = Array.from(tileCells.values()).filter((cell) => {
+      const tidePoolCells = tileCellList.filter((cell) => {
         if (cell.h <= 0 || terrainRegion(cell) !== "coast" || !detailIsClear(cell, 0.72)) return false;
         const seed = Math.abs(Math.sin(cell.x * 43.7 + cell.z * 79.1) * 29317.7) % 1;
         return seed > 0.955;
@@ -7236,7 +7230,7 @@ vSlipWake = 0.0;
         }
       }
 
-      const mossCells = Array.from(tileCells.values()).filter((cell) => {
+      const mossCells = tileCellList.filter((cell) => {
         if (cell.h !== 1 || terrainRegion(cell) !== "moss" || !detailIsClear(cell)) return false;
         const seed = Math.abs(Math.sin(cell.x * 29.7 + cell.z * 81.3) * 18431.7) % 1;
         return seed > 0.76;
@@ -7277,7 +7271,7 @@ vSlipWake = 0.0;
       }
 
       // 苔地補少量扇形蕨葉，保持低矮並限制數量，不遮住塔身與角色。
-      const fernFanCells = Array.from(tileCells.values()).filter((cell) => {
+      const fernFanCells = tileCellList.filter((cell) => {
         if (cell.h !== 1 || terrainRegion(cell) !== "moss" || !detailIsClear(cell, 1.35)) return false;
         const seed = Math.abs(Math.sin(cell.x * 83.1 + cell.z * 27.9) * 31917.7) % 1;
         return seed > 0.972;
@@ -7315,7 +7309,7 @@ vSlipWake = 0.0;
         terrainRoot.add(ferns);
       }
 
-      const strataCells = Array.from(tileCells.values()).filter((cell) => {
+      const strataCells = tileCellList.filter((cell) => {
         if (cell.h !== 2 || terrainRegion(cell) !== "limestone" || !detailIsClear(cell)) return false;
         const seed = Math.abs(Math.sin(cell.x * 47.1 + cell.z * 19.7) * 29341.3) % 1;
         return seed > 0.73;
@@ -7356,7 +7350,7 @@ vSlipWake = 0.0;
       }
 
       // 石灰岩區補細長白色礦脈，貼近地表且只在高地出現，形成明確的岩脊紋理。
-      const veinCells = Array.from(tileCells.values()).filter((cell) => {
+      const veinCells = tileCellList.filter((cell) => {
         if (cell.h < 2 || terrainRegion(cell) !== "limestone" || !detailIsClear(cell, 1.4)) return false;
         const seed = Math.abs(Math.sin(cell.x * 57.3 + cell.z * 71.9) * 27391.11) % 1;
         return seed > 0.93;
@@ -7393,7 +7387,7 @@ vSlipWake = 0.0;
       }
 
       // 石灰岩山脊的尖峰露頭：只在高地與石灰岩區出現，保持低於防禦塔輪廓。
-      const peakCells = Array.from(tileCells.values()).filter((cell) => {
+      const peakCells = tileCellList.filter((cell) => {
         if (cell.h < 2 || terrainRegion(cell) !== "limestone" || !detailIsClear(cell, 1.9)) return false;
         const seed = Math.abs(Math.sin(cell.x * 87.1 + cell.z * 53.9) * 23817.3) % 1;
         return seed > 0.965;
@@ -7446,7 +7440,7 @@ vSlipWake = 0.0;
         terrainRoot.add(peaks, peakBases);
       }
 
-      const engravedCells = Array.from(tileCells.values()).filter((cell) => {
+      const engravedCells = tileCellList.filter((cell) => {
         if (cell.h !== 3 || terrainRegion(cell) !== "limestone" || !detailIsClear(cell, 1.45)) return false;
         const seed = Math.abs(Math.sin(cell.x * 73.9 + cell.z * 37.1) * 31781.9) % 1;
         return seed > 0.72;
@@ -7507,7 +7501,7 @@ vSlipWake = 0.0;
       }
 
       // 古代區的淺刻符文嵌在石面上，幾乎與地表齊平，不阻擋建塔或單位移動。
-      const etchCells = Array.from(tileCells.values()).filter((cell) => {
+      const etchCells = tileCellList.filter((cell) => {
         if (cell.h < 2 || terrainRegion(cell) !== "ancient" || !detailIsClear(cell, 1.55)) return false;
         const seed = Math.abs(Math.sin(cell.x * 67.1 + cell.z * 41.7) * 22817.9) % 1;
         return seed > 0.975;
@@ -7555,9 +7549,7 @@ vSlipWake = 0.0;
           if (!data.blocked.has(key)) continue;
           const seed = Math.abs(Math.sin(cell.x * 39.7 + cell.z * 83.1) * 31871.23) % 1;
           if (seed < 0.9915) continue;
-          const tooCloseToBuilding = protectedBuildings.some((building) =>
-            Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 2.65,
-          );
+          const tooCloseToBuilding = isNearProtectedBuilding(cell.x, cell.z, 2.65);
           if (tooCloseToBuilding) continue;
           const neighbors = ruinNeighborOffsets.map(([dc, dr]) =>
             tileCells.get((gx + dc) + "," + (gy + dr)),
@@ -7573,9 +7565,7 @@ vSlipWake = 0.0;
         for (const edge of offshoreCandidates) {
           const x = edge.x + edge.dx * 1.62 + edge.dz * (edge.seed - 0.5) * 0.28;
           const z = edge.z + edge.dz * 1.62 + edge.dx * (edge.seed - 0.5) * 0.28;
-          const tooCloseToBuilding = protectedBuildings.some((building) =>
-            Math.hypot(x - building.x, z - building.z) < building.radius + 2.2,
-          );
+          const tooCloseToBuilding = isNearProtectedBuilding(x, z, 2.2);
           if (tooCloseToBuilding) continue;
           if (ruinSites.some((site) => Math.hypot(x - site.x, z - site.z) < 5.6)) continue;
           ruinSites.push({ x, z, h: 0, baseY: -0.34, seed: edge.seed });
@@ -7605,9 +7595,7 @@ vSlipWake = 0.0;
           if (!neighbors.every(Boolean)) continue;
           const seed = Math.abs(Math.sin(cell.x * 43.7 + cell.z * 91.3) * 28931.17) % 1;
           if (seed < 0.982) continue;
-          if (protectedBuildings.some((building) =>
-            Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 6.2,
-          )) continue;
+          if (isNearProtectedBuilding(cell.x, cell.z, 6.2)) continue;
           if (ruinSites.some((site) => Math.hypot(cell.x - site.x, cell.z - site.z) < 7.5)) continue;
           if (beaconSites.some((site) => Math.hypot(cell.x - site.x, cell.z - site.z) < 15)) continue;
           beaconSites.push({ x: cell.x, z: cell.z, y: groundTop(cell.h), seed, offshore: false });
@@ -7618,9 +7606,7 @@ vSlipWake = 0.0;
           if (beaconSites.length >= 3) break;
           const x = edge.x + edge.dx * (2.75 + edge.seed * 0.3);
           const z = edge.z + edge.dz * (2.75 + edge.seed * 0.3);
-          if (protectedBuildings.some((building) =>
-            Math.hypot(x - building.x, z - building.z) < building.radius + 4.5,
-          )) continue;
+          if (isNearProtectedBuilding(x, z, 4.5)) continue;
           if (ruinSites.some((site) => Math.hypot(x - site.x, z - site.z) < 6.8)) continue;
           if (beaconSites.some((site) => Math.hypot(x - site.x, z - site.z) < 13)) continue;
           beaconSites.push({ x, z, y: -0.34, seed: edge.seed, offshore: true });
@@ -7653,11 +7639,7 @@ vSlipWake = 0.0;
                 safeCorridor = false;
                 break;
               }
-              if (protectedBuildings.some((building) => {
-                const px = x - building.x;
-                const pz = z - building.z;
-                return Math.hypot(px, pz) < building.radius + 0.65;
-              })) {
+              if (isNearProtectedBuilding(x, z, 0.65)) {
                 safeCorridor = false;
                 break;
               }
@@ -7827,7 +7809,7 @@ vSlipWake = 0.0;
             if (site.baseY === undefined && (!neighbor || !data.blocked.has(neighborKey) || neighbor.h !== site.h)) continue;
             const wallX = site.x + direction.dx * 1.16;
             const wallZ = site.z + direction.dz * 1.16;
-            if (protectedBuildings.some((building) => Math.hypot(wallX - building.x, wallZ - building.z) < building.radius + 0.32)) continue;
+            if (isNearProtectedBuilding(wallX, wallZ, 0.32)) continue;
             const wallSeed = Math.abs(Math.sin(site.x * 51.7 + site.z * 29.1 + direction.dc * 17.3 + direction.dr * 31.9) * 21481.7) % 1;
             if (wallSeed < 0.18 || wallCount >= ruinSites.length * 4) continue;
             const wallHeight = 0.2 + wallSeed * 0.18;
@@ -8148,9 +8130,7 @@ vSlipWake = 0.0;
           const gy = Math.floor(cell.z);
           const centerKey = gx + "," + gy;
           if (!data.blocked.has(centerKey) || cell.h > 1) continue;
-          const nearBuilding = protectedBuildings.some((building) =>
-            Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 2.2,
-          );
+          const nearBuilding = isNearProtectedBuilding(cell.x, cell.z, 2.2);
           if (nearBuilding) continue;
           for (const axis of bridgeAxes) {
             const aKey = (gx - axis.dc) + "," + (gy - axis.dr);
@@ -8317,9 +8297,7 @@ vSlipWake = 0.0;
           // 岩壁偶爾露出彎曲的石英／青銅礦脈，作為真正凸起的細節而非單靠貼圖。
           const veinSeed = Math.abs(Math.sin(cell.x * 101.3 + cell.z * 47.9
             + d.dc * 31.7 + d.dr * 17.3) * 31871.73) % 1;
-          const veinClear = !protectedBuildings.some((building) =>
-            Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 0.54,
-          );
+          const veinClear = !isNearProtectedBuilding(cell.x, cell.z, 0.54);
           if (cell.h >= 2 && veinSeed > 0.85 && cliffMineralVeins.length < 280 && veinClear) {
             const faceAngle = Math.atan2(d.dx, d.dz);
             const along = (veinSeed - 0.5) * 0.42;
@@ -8362,9 +8340,7 @@ vSlipWake = 0.0;
           const mossSeed = Math.abs(Math.sin(cell.x * 73.1 + cell.z * 29.7 + d.dc * 17.3 + d.dr * 31.9) * 29871.7) % 1;
           if (
             cell.h >= 1 && mossSeed > 0.765 && cliffMosses.length < 560 &&
-            !protectedBuildings.some((building) =>
-              Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 1.05,
-            )
+            !isNearProtectedBuilding(cell.x, cell.z, 1.05)
           ) {
             const alongEdge = (mossSeed - 0.5) * 0.5;
             cliffMosses.push({
@@ -8387,9 +8363,7 @@ vSlipWake = 0.0;
           if (
             cell.h >= 2 && neighbor && neighbor.h > 0 && rootVertical >= 0.78 &&
             rootSeed > 0.775 && cliffRootCurtains.length < 220 && rootHeight > 0.48 &&
-            !protectedBuildings.some((building) =>
-              Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 1.18,
-            )
+            !isNearProtectedBuilding(cell.x, cell.z, 1.18)
           ) {
             const along = (rootSeed - 0.5) * 0.62;
             cliffRootCurtains.push({
@@ -8406,9 +8380,7 @@ vSlipWake = 0.0;
           // 二、三級高地的裸露斷面偶爾加上石灰岩支撐脊柱；只貼在側壁，不佔平台可建造面。
           const ridgeVertical = high - low;
           const ridgeSeed = Math.abs(Math.sin(cell.x * 61.7 + cell.z * 37.9 + d.dc * 13.1 + d.dr * 29.3) * 24817.31) % 1;
-          const nearRidgeBuilding = protectedBuildings.some((building) =>
-            Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 1.05,
-          );
+          const nearRidgeBuilding = isNearProtectedBuilding(cell.x, cell.z, 1.05);
           if (
             cell.h >= 2 && ridgeVertical >= 0.78 && ridgeSeed > 0.905 &&
             ridgeSupports.length < 220 && !nearRidgeBuilding
@@ -8502,9 +8474,7 @@ vSlipWake = 0.0;
             verticalFace >= 0.82 &&
             caveSeed > 0.945 &&
             caveEntrances.length < 28 &&
-            !protectedBuildings.some((building) =>
-              Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 1.6,
-            )
+            !isNearProtectedBuilding(cell.x, cell.z, 1.6)
           ) {
             caveEntrances.push({
               x: cell.x + d.dx * 1.12,
@@ -8531,9 +8501,7 @@ vSlipWake = 0.0;
             if (rubbleSeed > 0.62) {
               const lowerX = cell.x + d.dc * 0.66;
               const lowerZ = cell.z + d.dr * 0.66;
-              const nearBuilding = protectedBuildings.some((building) =>
-                Math.hypot(lowerX - building.x, lowerZ - building.z) < building.radius + 0.35,
-              );
+              const nearBuilding = isNearProtectedBuilding(lowerX, lowerZ, 0.35);
               if (!nearBuilding) {
                 talusDebris.push({
                   x: lowerX + (rubbleSeed - 0.5) * 0.18,
@@ -9169,9 +9137,7 @@ vSlipWake = 0.0;
       for (const cell of tileCells.values()) {
         if (cell.h <= 0) continue;
         const gx = Math.floor(cell.x), gy = Math.floor(cell.z);
-        const nearBuilding = protectedBuildings.some((building) =>
-          Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 0.58,
-        );
+        const nearBuilding = isNearProtectedBuilding(cell.x, cell.z, 0.58);
         if (nearBuilding) continue;
         const higher = rampDirections
           .map((direction) => ({
@@ -9290,9 +9256,7 @@ vSlipWake = 0.0;
         // 部分坡面疊加三段薄石階，順著原坡度排列；只增加視覺層次，不遮住通道寬度。
         const stairRamps = rampCells.filter((ramp) => {
           const seed = Math.abs(Math.sin(ramp.x * 61.7 + ramp.z * 23.9) * 21731.19) % 1;
-          return seed > 0.48 && !protectedBuildings.some((building) =>
-            Math.hypot(ramp.x - building.x, ramp.z - building.z) < building.radius + 1.2,
-          );
+          return seed > 0.48 && !isNearProtectedBuilding(ramp.x, ramp.z, 1.2);
         });
         if (stairRamps.length) {
           const stairSteps = new THREE.InstancedMesh(
@@ -10027,11 +9991,15 @@ vSlipWake = 0.0;
 
     try {
       renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
-      // 避免高 DPI 螢幕把填色像素數放大太多；仍保留清晰度。
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.35));
+      // 限制高 DPI 的基礎像素倍率，遇到持續掉幀時再由 render loop 動態降採樣。
+      baseRenderPixelRatio = Math.min(window.devicePixelRatio || 1, 1.25);
+      renderer.setPixelRatio(baseRenderPixelRatio);
       renderer.setSize(Math.max(1, host.clientWidth), Math.max(1, host.clientHeight), false);
       renderer.shadowMap.enabled = true;
       renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      // 地形與建築大多是靜態物件；僅在批次改變時重畫陰影，避免每幀重算整張陰影貼圖。
+      renderer.shadowMap.autoUpdate = false;
+      renderer.shadowMap.needsUpdate = true;
       renderer.outputColorSpace = THREE.SRGBColorSpace;
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
       renderer.toneMappingExposure = 1.1;
@@ -10107,6 +10075,9 @@ vSlipWake = 0.0;
     let lastFrameAt = 0;
     let lastRafAt = 0;
     let renderAccumulator = 0;
+    let renderQualityScale = 1;
+    let slowFrameStreak = 0;
+    let stableFrameStreak = 0;
     const renderInterval = 1000 / 60;
     let lastSnapshotAt = -Infinity;
     let lastAmbientUpdateAt = -Infinity;
@@ -10117,6 +10088,28 @@ vSlipWake = 0.0;
       // 對齊 60Hz 螢幕更新節奏，避免 40 FPS 與 60Hz 不整除造成不均勻掉幀與閃動。
       const rafDelta = lastRafAt ? Math.min(100, time - lastRafAt) : renderInterval;
       lastRafAt = time;
+      // 連續超過 23ms 才降解析度，避免單次載入尖峰造成畫質抖動；
+      // 穩定 4 秒才逐步恢復，避免畫質在臨界效能附近反覆跳動。
+      if (rafDelta > 23) {
+        slowFrameStreak++;
+        stableFrameStreak = 0;
+        if (slowFrameStreak >= 8 && renderQualityScale > 0.78) {
+          renderQualityScale = Math.max(0.78, Math.round((renderQualityScale - 0.07) * 100) / 100);
+          renderer.setPixelRatio(baseRenderPixelRatio * renderQualityScale);
+          slowFrameStreak = 0;
+        }
+      } else if (rafDelta < 18.5) {
+        slowFrameStreak = 0;
+        stableFrameStreak++;
+        if (stableFrameStreak >= 240 && renderQualityScale < 1) {
+          renderQualityScale = Math.min(1, Math.round((renderQualityScale + 0.05) * 100) / 100);
+          renderer.setPixelRatio(baseRenderPixelRatio * renderQualityScale);
+          stableFrameStreak = 0;
+        }
+      } else {
+        slowFrameStreak = 0;
+        stableFrameStreak = 0;
+      }
       renderAccumulator += rafDelta;
       if (renderAccumulator < renderInterval) return;
       renderAccumulator = Math.min(renderAccumulator - renderInterval, renderInterval * 0.75);
@@ -10153,6 +10146,7 @@ vSlipWake = 0.0;
           const terrainKey = data.mapMode + "|" + placedKey + "|" + heightHash + "|" + blockedHash;
           if (terrainKey !== lastTerrainKey) {
             rebuildTerrain(terrainBlocked === data.blocked ? data : { ...data, blocked: terrainBlocked });
+            renderer.shadowMap.needsUpdate = true;
             lastTerrainKey = terrainKey;
           }
           lastTerrainHeightsRef = data.heights;
@@ -10169,6 +10163,7 @@ vSlipWake = 0.0;
           const animateTurrets = lastHqFireLevel !== null && lastHqFireLevel < 1 && fireLevel >= 1;
           const animateMainUpgrade = lastHqFireLevel !== null && lastHqFireLevel < 2 && fireLevel >= 2;
           rebuildBuildings(data, animateTurrets, animateMainUpgrade);
+          renderer.shadowMap.needsUpdate = true;
           lastHqFireLevel = fireLevel;
           lastBuildingKey = buildingKey;
         }
