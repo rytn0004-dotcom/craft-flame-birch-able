@@ -1466,6 +1466,13 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             + terrainWorld.y * 9.7 + ridgeMacro * 4.0)), 13.0);
           float windPolish = pow(max(0.0, 1.0 - abs(sin(terrainWorld.x * 3.7
             - terrainWorld.y * 2.9 + ridgeMacro * 2.0))), 8.0) * exposedCrest;
+          // 沿方塊外緣堆積薄土與根鬚污痕，並在高地岩面刻出細窄的解理裂紋。
+          float edgeRootStain = (1.0 - smoothstep(0.018, 0.16, tileEdgeDistance))
+            * smoothstep(-0.4, 0.75, edgeChipNoise) * (0.35 + lichenField * 0.65);
+          float graniteCleavage = pow(max(0.0, 1.0 - abs(sin(terrainWorld.x * 2.1
+            + terrainWorld.y * 1.7 + middleGrain * 2.4))), 20.0) * highlandStrength;
+          float frostGranule = pow(max(0.0, sin(terrainWorld.x * 22.7
+            + terrainWorld.y * 18.3 + ridgeMacro * 5.0)), 14.0) * frostDrift * highlandStrength;
           diffuseColor.rgb *= mix(vec3(0.78, 0.84, 0.92), vec3(1.05, 1.02, 0.94),
             ridgeContour * highlandStrength * 0.24);
           diffuseColor.rgb += vec3(0.045, 0.073, 0.11)
@@ -1484,6 +1491,11 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           diffuseColor.rgb += vec3(0.13, 0.17, 0.19) * ridgeQuartzDust * highlandStrength * 0.12;
           diffuseColor.rgb = mix(diffuseColor.rgb,
             diffuseColor.rgb * vec3(1.14, 1.12, 1.06), windPolish * highlandStrength * 0.12);
+          diffuseColor.rgb = mix(diffuseColor.rgb,
+            diffuseColor.rgb * vec3(0.74, 0.79, 0.72), edgeRootStain * 0.17);
+          diffuseColor.rgb *= 1.0 - graniteCleavage * 0.19;
+          diffuseColor.rgb += vec3(0.15, 0.19, 0.22) * frostGranule * 0.16;
+          diffuseColor.rgb += vec3(0.045, 0.052, 0.058) * graniteCleavage * 0.12;
           // 高層地形的冷色晶脈更明顯，低地則保留柔暖草土色。
           float ridgeGlint = pow(max(0.0,
             sin(terrainWorld.x * 0.29 + terrainWorld.y * 0.21 + middleGrain)
@@ -1501,10 +1513,11 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             * cos(vTerrainWorldPosition.z * 6.2 - vTerrainWorldPosition.x * 2.9);
           roughnessFactor = clamp(roughnessFactor + terrainRoughnessGrain * 0.024
             + microEtch * 0.012 + gritPore * 0.028 + tileEdgeWear * 0.075
-            - exposedMineral * 0.045, 0.0, 1.0);`,
+            + edgeRootStain * 0.055 + graniteCleavage * 0.085
+            - exposedMineral * 0.045 - frostGranule * 0.018, 0.0, 1.0);`,
         );
       };
-      material.customProgramCacheKey = () => "tide-terrain-ridgeline-scree-alpine-v8-frost-lichen-" + height;
+      material.customProgramCacheKey = () => "tide-terrain-ridgeline-scree-alpine-v9-cleavage-edge-roots-" + height;
     };
     const installBlackMistVeil = (material: THREE.MeshBasicMaterial) => {
       material.onBeforeCompile = (shader) => {
