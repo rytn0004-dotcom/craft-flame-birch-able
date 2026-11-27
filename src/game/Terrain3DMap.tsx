@@ -1239,6 +1239,12 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             * smoothstep(0.04, 0.96, abyssCurrentB * 0.5 + 0.5);
           // 深淵視線：多層環狀暗流向視覺焦點收束，像霧下有巨大深洞在緩慢凝視。
           vec2 abyssUv = vMistFieldUv - vec2(0.5);
+          // 觀察者轉動時，眼球周圍的霧流也被引力扯動；中心透鏡比外圈更明顯。
+          vec2 abyssGaze = clamp(uMistGaze, vec2(-1.0), vec2(1.0));
+          float abyssGazeStrength = clamp(length(abyssGaze), 0.0, 1.0);
+          float abyssLensWeight = 1.0 - smoothstep(0.02, 0.46, length(abyssUv));
+          abyssUv += abyssGaze * (0.006 + abyssLensWeight * 0.016) * abyssGazeStrength;
+          abyssUv *= 1.0 + abyssLensWeight * 0.012;
           float abyssAngle = atan(abyssUv.y, abyssUv.x);
           float abyssRadius = length(abyssUv);
           float abyssEyeBreath = 0.5 + 0.5 * sin(uMistTime * 0.31);
@@ -1258,7 +1264,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           float abyssDepth = 1.0 - smoothstep(0.02, 0.72, abyssRadius);
           // 瞳孔會隨呼吸緩慢張合，視線像正在聚焦；只改變顏色遮罩，不觸碰開拓狀態。
           // 瞳孔依觀察方向微幅偏移，保留虹膜位置與地塊揭露遮罩不變。
-          vec2 abyssGaze = clamp(uMistGaze, vec2(-1.0), vec2(1.0));
+          // 與上方視線折射共用同一個 gaze 向量，瞳孔偏移不再和霧流脫節。
           float abyssPupilX = sin(uMistTime * 0.19) * 0.009 + abyssGaze.x * 0.018;
           float abyssPupilY = cos(uMistTime * 0.14) * 0.004 + abyssGaze.y * 0.014;
           float abyssBlink = pow(max(0.0, sin(uMistTime * 0.11 + 0.7)), 30.0);
@@ -1513,7 +1519,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           // Only the upward-facing tile top receives a subtle, broad relief. Side faces
           // and the actual logical tile height stay untouched; the subdivided shared mesh
           // lets the silhouette catch light without creating CPU-side per-tile animation.
-          float terrainTopMask = smoothstep(0.86, 0.98, normal.y);
+          float terrainTopMask = smoothstep(0.72, 0.96, normal.y);
           float terrainSideMask = 1.0 - smoothstep(0.12, 0.82, abs(normal.y));
           vTerrainTopFacing = terrainTopMask;
           vTerrainSideFacing = terrainSideMask;
@@ -1855,7 +1861,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             + terrainSlipBody * 0.075 - terrainSlipPressure * 0.055, 0.0, 1.0);`,
         );
       };
-      material.customProgramCacheKey = () => "tide-terrain-ridgeline-scree-alpine-v15-surface-slip-pressure-" + height;
+      material.customProgramCacheKey = () => "tide-terrain-ridgeline-scree-alpine-v16-shoulder-ramps-slip-pressure-" + height;
     };
     const installBlackMistVeil = (material: THREE.MeshBasicMaterial) => {
       material.onBeforeCompile = (shader) => {
@@ -3892,6 +3898,117 @@ vWindRibbon = 0.0;
           }));
           terrainPickMeshes.push(mesh);
           terrainRoot.add(mesh);
+        }
+      }
+
+      // 不同高度的相鄰格之間鋪設岩肩斜坡：將垂直階梯轉成可讀的山坡輪廓。
+      // 每格最多選一個上坡方向，避免十字交會處的坡面互相穿插；高度判定與選格射線保持原樣。
+      const transitionGeometry = (() => {
+        const positions: number[] = [];
+        const indices: number[] = [];
+        const alongSegments = 12;
+        const acrossSegments = 6;
+        for (let row = 0; row <= acrossSegments; row++) {
+          const v = row / acrossSegments;
+          const z = (v - 0.5) * 0.96;
+          for (let column = 0; column <= alongSegments; column++) {
+            const t = column / alongSegments;
+            const x = -0.39 + t * 0.90;
+            const centerRidge = Math.sin(t * Math.PI) * Math.sin(v * Math.PI * 2.0) * 0.0028;
+            const chippedGrain = (
+              Math.sin(t * 31.0 + v * 17.0) + Math.sin(t * 17.0 - v * 23.0)
+            ) * 0.0009 * Math.sin(t * Math.PI);
+            positions.push(x, t * HEIGHT_STEP + centerRidge + chippedGrain, z);
+          }
+        }
+        for (let row = 0; row < acrossSegments; row++) {
+          for (let column = 0; column < alongSegments; column++) {
+            const a = row * (alongSegments + 1) + column;
+            const b = a + 1;
+            const c = a + alongSegments + 1;
+            const d = c + 1;
+            // 反向繞序令坡面法線朝上。
+            indices.push(a, c, b, b, c, d);
+          }
+        }
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+        geometry.setIndex(indices);
+        geometry.computeVertexNormals();
+        geometry.computeBoundingSphere();
+        return geometry;
+      })();
+      const transitionDirections = [
+        { dc: 1, dr: 0, rotation: 0 },
+        { dc: -1, dr: 0, rotation: Math.PI },
+        { dc: 0, dr: 1, rotation: -Math.PI / 2 },
+        { dc: 0, dr: -1, rotation: Math.PI / 2 },
+      ];
+      const transitionChunks = new Map<string, { byLowHeight: { x: number; z: number; rotation: number; seed: number; region: string }[][] }>();
+      for (const cell of tileCells.values()) {
+        if (cell.h > 2 || (cell.h === 0 && data.mapMode === "expand")) continue;
+        const gx = Math.floor(cell.x);
+        const gy = Math.floor(cell.z);
+        let selected: { rotation: number; seed: number; neighbor: { x: number; z: number; h: number } } | null = null;
+        for (const direction of transitionDirections) {
+          const neighbor = tileCells.get((gx + direction.dc) + "," + (gy + direction.dr));
+          if (!neighbor || neighbor.h !== cell.h + 1) continue;
+          const seed = Math.abs(Math.sin(gx * 71.7 + gy * 39.1 + direction.dc * 17.3 + direction.dr * 29.9) * 31831.7) % 1;
+          if (!selected || seed > selected.seed) selected = { rotation: direction.rotation, seed, neighbor };
+        }
+        if (!selected) continue;
+        const crossesStructure = protectedBuildings.some((building) =>
+          Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 0.48
+          || Math.hypot(selected!.neighbor.x - building.x, selected!.neighbor.z - building.z) < building.radius + 0.48,
+        );
+        if (crossesStructure) continue;
+        const chunkX = Math.floor(gx / terrainChunkSize);
+        const chunkY = Math.floor(gy / terrainChunkSize);
+        const chunkKey = chunkX + "," + chunkY;
+        let chunk = transitionChunks.get(chunkKey);
+        if (!chunk) {
+          chunk = { byLowHeight: [[], [], []] };
+          transitionChunks.set(chunkKey, chunk);
+        }
+        chunk.byLowHeight[cell.h].push({
+          x: cell.x,
+          z: cell.z,
+          rotation: selected.rotation,
+          seed: selected.seed,
+          region: terrainRegion(selected.neighbor),
+        });
+      }
+      for (const chunk of transitionChunks.values()) {
+        for (let lowHeight = 0; lowHeight <= 2; lowHeight++) {
+          const sites = chunk.byLowHeight[lowHeight];
+          if (!sites.length) continue;
+          const ramps = new THREE.InstancedMesh(
+            transitionGeometry,
+            shared.terrain[lowHeight + 1],
+            sites.length,
+          );
+          const dummy = new THREE.Object3D();
+          const tint = new THREE.Color();
+          for (let i = 0; i < sites.length; i++) {
+            const site = sites[i];
+            dummy.position.set(site.x, groundTop(lowHeight) + 0.0015, site.z);
+            dummy.rotation.set(0, site.rotation, 0);
+            dummy.scale.set(1, 1, 1);
+            dummy.updateMatrix();
+            ramps.setMatrixAt(i, dummy.matrix);
+            const palette = regionTint[site.region] ?? regionTint.meadow;
+            const shade = 0.94 + site.seed * 0.08;
+            tint.setRGB(shade * palette[0], shade * palette[1], shade * palette[2]);
+            ramps.setColorAt(i, tint);
+          }
+          ramps.instanceMatrix.needsUpdate = true;
+          if (ramps.instanceColor) ramps.instanceColor.needsUpdate = true;
+          ramps.castShadow = false;
+          ramps.receiveShadow = true;
+          ramps.renderOrder = 0;
+          ramps.computeBoundingSphere();
+          ramps.frustumCulled = true;
+          terrainRoot.add(ramps);
         }
       }
 
