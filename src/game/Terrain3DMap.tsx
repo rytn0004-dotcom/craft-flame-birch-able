@@ -2141,9 +2141,18 @@ vFoliageAltitude = 0.0;
           * slipGust * ${(0.075 * slipResponse).toFixed(3)};
         float canopyRecoil = sin(uFoliageTime * 5.2 + foliagePhase * 2.4)
           * slipGust * ${(0.035 * slipResponse).toFixed(3)};
-        transformed.xz += slipFrontPush + slipBend * slipGust + slipCurl;
+        // 尾流兩側形成短暫環狀壓力帶，外圈草葉先被撥開，再被主尾流壓低。
+        float slipPressureHalo = exp(-pow((slipAlong + 3.1) * 0.34, 2.0))
+          * exp(-pow((slipSide - 1.9) * 0.68, 2.0)) * uSlipStrength * foliageMask;
+        float slipPressureWave = sin(slipAlong * 1.6 + slipSide * 1.9
+          + foliagePhase * 0.8 + uFoliageTime * 7.2);
+        vec2 slipPressurePush = slipPerpendicular * slipSideSign
+          * slipPressureHalo * (0.035 + slipPressureWave * 0.014)
+          - uSlipDirection * slipPressureHalo * 0.018;
+        transformed.xz += slipFrontPush + slipBend * slipGust + slipCurl + slipPressurePush;
         transformed.y -= max(position.y, 0.0)
-          * (slipGust * ${pressResponse.toFixed(3)} + slipFront * 0.12);
+          * (slipGust * ${pressResponse.toFixed(3)} + slipFront * 0.12
+            + slipPressureHalo * (0.052 + max(0.0, slipPressureWave) * 0.032));
         transformed.y += canopyRecoil;
         vFoliageGust = max(vFoliageGust, min(1.0,
           slipGust * ${slipResponse.toFixed(2)} + slipFront * 0.74));
@@ -2167,16 +2176,16 @@ vFoliageAltitude = 0.0;
       };
       material.customProgramCacheKey = () => cacheKey;
     };
-    installFoliageWind(shared.foliageWind, "tide-foliage-wind-v7");
-    installFoliageWind(shared.treeCanopyWind, "tide-tree-canopy-gust-v3", 2.4);
-    installFoliageWind(shared.grass, "tide-grass-stem-wind-v6", 1.45, 0.34);
-    installFoliageWind(shared.grassBlade, "tide-grass-blade-wind-v9", 2.35, 0.88);
+    installFoliageWind(shared.foliageWind, "tide-foliage-wind-v8-pressure-sweep");
+    installFoliageWind(shared.treeCanopyWind, "tide-tree-canopy-gust-v4-pressure-sweep", 2.4);
+    installFoliageWind(shared.grass, "tide-grass-stem-wind-v7-pressure-sweep", 1.45, 0.34);
+    installFoliageWind(shared.grassBlade, "tide-grass-blade-wind-v10-pressure-sweep", 2.35, 0.88);
     // 高地矮生草具有較硬的根部與較短的葉身：受高速尾流時側偏較小，但仍會有可見的壓低與回彈。
-    installFoliageWind(shared.alpineBlade, "tide-alpine-rosette-wind-v1", 0.82, 0.48);
-    installFoliageWind(shared.alpineBloom, "tide-alpine-frost-bloom-wind-v1", 1.12, 0.12);
-    installFoliageWind(shared.meadowBloom, "tide-meadow-bloom-wind-v6", 1.5, 0.16);
-    installFoliageWind(shared.coastGrass, "tide-coast-reed-wind-v6", 1.75, 0.3);
-    installFoliageWind(shared.reefCoral, "tide-reef-coral-current-v6");
+    installFoliageWind(shared.alpineBlade, "tide-alpine-rosette-wind-v2-pressure-sweep", 0.82, 0.48);
+    installFoliageWind(shared.alpineBloom, "tide-alpine-frost-bloom-wind-v2-pressure-sweep", 1.12, 0.12);
+    installFoliageWind(shared.meadowBloom, "tide-meadow-bloom-wind-v7-pressure-sweep", 1.5, 0.16);
+    installFoliageWind(shared.coastGrass, "tide-coast-reed-wind-v7-pressure-sweep", 1.75, 0.3);
+    installFoliageWind(shared.reefCoral, "tide-reef-coral-current-v7-pressure-sweep");
 
     // 花粉與草籽以少量實例漂浮；GPU 風場控制輕微三維漂移，不逐粒更新矩陣。
     const installPollenDrift = (material: THREE.MeshBasicMaterial) => {
