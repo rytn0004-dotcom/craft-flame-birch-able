@@ -524,6 +524,21 @@ export function buildHeights(board: TileBoard): number[] {
       8.1,
     );
     const crossRidge = 1.0 - Math.abs(crossSource * 2.0 - 1.0);
+    // 斜切支脊在山脈兩側分岔，增加不對稱山肩，避免高地總是長成平行長條。
+    const spurSource = valueNoise(
+      wx * 0.91 + wy * 0.28 + 137,
+      wy * 0.62 - wx * 0.37 - 89,
+      worldSalt ^ 0x27d4eb2f,
+      6.6,
+    );
+    const ridgeSpur = Math.pow(Math.max(0, 1.0 - Math.abs(spurSource * 2.0 - 1.0)), 1.65);
+    const shoulderSource = valueNoise(
+      wx * 0.58 - wy * 0.52 + 53,
+      wy * 0.73 + wx * 0.29 - 117,
+      worldSalt ^ 0x9e3779b9,
+      10.6,
+    );
+    const glacialShoulder = Math.pow(Math.max(0, 1.0 - Math.abs(shoulderSource * 2.0 - 1.0)), 2.1);
     // 逆風側的次級脊線與兩條尺度不同的集水槽，補出山肩、鞍部與支流蝕谷。
     const windwardSource = valueNoise(
       wx * 0.44 - wy * 0.31 + 29,
@@ -551,9 +566,10 @@ export function buildHeights(board: TileBoard): number[] {
     const plateauSource = broad * 0.64 + middle * 0.36;
     const plateau = Math.pow(Math.max(0, (plateauSource - 0.52) * 2.0), 1.35);
     return Math.max(0, Math.min(1,
-      broad * 0.265 + middle * 0.235 + fine * 0.075
-        + ridged * 0.15 + spineRidge * 0.085 + crossRidge * 0.07
-        + windwardRidge * 0.035 + basin * 0.05 + continental * 0.05 + plateau * 0.055
+      broad * 0.255 + middle * 0.23 + fine * 0.075
+        + ridged * 0.15 + spineRidge * 0.085 + crossRidge * 0.065
+        + ridgeSpur * 0.025 + glacialShoulder * 0.02
+        + windwardRidge * 0.035 + basin * 0.05 + continental * 0.045 + plateau * 0.05
         - windCut * 0.05 - tributaryCut * 0.018 - saddleBasin * 0.01,
     ));
   };
