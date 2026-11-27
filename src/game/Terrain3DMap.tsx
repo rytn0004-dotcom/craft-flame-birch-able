@@ -692,6 +692,11 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             * (0.62 + 0.38 * sin(wakeT * 22.0 - uProjectileWakeTime * 8.0));
           float wakeCavitation = pow(max(0.0, sin(wakeT * 37.0 - uProjectileWakeTime * 11.0
             + coneAcross * 12.0)), 8.0) * wakeMachShear * wakeTail;
+          // 第二道偏移音爆弧與離子細絲，讓高速尾流有前後兩次壓縮而不是單一光帶。
+          float wakeSonicCorona = exp(-pow((wakeT - (0.17 + coneAcross * 0.055)) * 72.0, 2.0))
+            * smoothstep(0.12, 0.42, coneAcross) * (1.0 - smoothstep(0.86, 1.0, coneAcross));
+          float wakeIonFilament = pow(max(0.0, sin(wakeT * 57.0
+            - uProjectileWakeTime * 13.0 + sin(wakeAcross * 9.0) * 2.2)), 13.0) * wakeTail;
           float wakeEnergy = wakePulse * (0.82 + wakeShear * 0.18);
           diffuseColor.rgb *= wakeEnergy;
           diffuseColor.rgb += vec3(0.28, 0.44, 0.58) * (shockFront * 0.42 + vortexThread * 0.12);
@@ -701,15 +706,18 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             + vec3(0.24, 0.36, 0.43) * wakeCompressionArc * 0.2;
           diffuseColor.rgb += vec3(0.15, 0.26, 0.34) * wakeAftershock * 0.2
             + vec3(0.16, 0.24, 0.3) * wakeIonCore * 0.12;
-          diffuseColor.rgb += vec3(0.075, 0.15, 0.19) * wakeCavitation * 0.18;
+          diffuseColor.rgb += vec3(0.075, 0.15, 0.19) * wakeCavitation * 0.18
+            + vec3(0.24, 0.39, 0.5) * wakeSonicCorona * 0.22
+            + vec3(0.19, 0.32, 0.48) * wakeIonFilament * 0.12;
           diffuseColor.a *= wakeEdge * wakeTail
             * (0.58 + wakeShear * 0.16 + shockFront * 0.18 + wakeTwinVortex * 0.11
               + wakeMachShear * 0.07 + wakeMachCone * 0.12
               + wakeCompressionArc * 0.14 + wakeCavitation * 0.06
-              + wakeAftershock * 0.1 + wakeIonCore * 0.045);`,
+              + wakeAftershock * 0.1 + wakeIonCore * 0.045
+              + wakeSonicCorona * 0.075 + wakeIonFilament * 0.035);`,
         );
       };
-      material.customProgramCacheKey = () => "tide-projectile-wake-flow-v6-aftershock-ion-core";
+      material.customProgramCacheKey = () => "tide-projectile-wake-flow-v7-sonic-corona-ion-filaments";
     };
     const installGroundSkimFlow = (material: THREE.MeshBasicMaterial) => {
       material.onBeforeCompile = (shader) => {
@@ -1499,6 +1507,12 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             + sin(terrainWorldPosition.z * 5.1) * 1.8)
             * cos(terrainWorldPosition.z * 8.3 - terrainWorldPosition.x * 4.7);
           float terrainEdgeScallop = terrainEdgeWeather * terrainEdgeSignal;
+          // 邊角細缺與磨圓缺口分成不同尺度，讓相鄰方塊的輪廓不再完全複製。
+          float terrainEdgeFracture = pow(max(0.0, sin(terrainWorldPosition.x * 16.7
+            + sin(terrainWorldPosition.z * 10.9) * 2.1)), 7.0) * terrainEdgeWeather;
+          float terrainEdgeRoll = sin(terrainWorldPosition.x * 6.3
+            + terrainWorldPosition.z * 8.1) * cos(terrainWorldPosition.z * 5.7
+            - terrainWorldPosition.x * 3.9);
           // 高地山脊脊線與侵蝕凹地直接形成微幅幾何輪廓；只作用於頂面，不改邏輯高度。
           transformed.y += terrainTopMask * (terrainCrest * 0.0075 + terrainFineLift * 0.0025
             + terrainFold * ${height >= 2 ? "0.012" : height === 1 ? "0.005" : "0.0015"}
@@ -1507,7 +1521,9 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             + terrainRidgeSplit * ${height >= 2 ? "0.0028" : height === 1 ? "0.0009" : "0.0002"}
             - terrainErosionPocket * ${height >= 2 ? "0.0038" : "0.0008"}
             - terrainMicroCove * ${height >= 2 ? "0.0019" : "0.00025"}
-            + terrainEdgeScallop * ${height >= 2 ? "0.0048" : height === 1 ? "0.0022" : "0.00045"});
+            + terrainEdgeScallop * ${height >= 2 ? "0.0048" : height === 1 ? "0.0022" : "0.00045"}
+            + terrainEdgeFracture * ${height >= 2 ? "0.0017" : height === 1 ? "0.0007" : "0.00012"}
+            - abs(terrainEdgeRoll) * terrainEdgeWeather * ${height >= 2 ? "0.0009" : height === 1 ? "0.00035" : "0.00008"});
           vTerrainWorldPosition = terrainWorldPosition.xyz;`,
         );
         shader.fragmentShader = shader.fragmentShader.replace(
@@ -1541,6 +1557,18 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           float gritPore = pow(max(0.0, sin(terrainWorld.x * 31.7 + terrainWorld.y * 27.3)
             * cos(terrainWorld.y * 29.1 - terrainWorld.x * 23.7)), 12.0);
           float lichenField = smoothstep(0.12, 0.78, broadMottle * 0.5 + 0.5 + middleGrain * 0.045);
+          // 細小地表沉積、露水薄膜與風化層理補足近景材質的尺度層次。
+          float terrainSoilWash = smoothstep(0.61, 0.96,
+            sin(terrainWorld.x * 0.39 - terrainWorld.y * 0.27 + broadMottle * 1.8) * 0.5 + 0.5)
+            * (0.62 + lichenField * 0.38);
+          float terrainDewFilm = pow(max(0.0, sin(terrainWorld.x * 12.7
+            + terrainWorld.y * 9.3 + middleGrain * 2.2)
+            * cos(terrainWorld.y * 10.9 - terrainWorld.x * 7.1)), 13.0);
+          float terrainMicroStrata = pow(max(0.0,
+            1.0 - abs(sin(terrainWorld.x * 2.9 + terrainWorld.y * 2.1 + broadMottle * 2.5))), 16.0);
+          float terrainRootThread = pow(max(0.0, sin(terrainWorld.x * 20.1
+            - terrainWorld.y * 16.7 + middleGrain * 3.1)), 12.0)
+            * (1.0 - sunlitMeadow * 0.42);
           float mineralSpeck = pow(max(0.0, sin(terrainWorld.x * 0.73 + terrainWorld.y * 0.51 + ${height.toFixed(1)})
             * cos(terrainWorld.y * 0.67 - terrainWorld.x * 0.39)), 10.0);
           float terrainColorNoise = broadMottle * 0.5 + 0.5 + middleGrain * 0.08;
@@ -1560,6 +1588,12 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.12, 1.045, 0.88),
             sunlitMeadow * ${height === 0 ? "0.08" : "0.2"});
           diffuseColor.rgb += vec3(0.035, 0.042, 0.032) * mineralLode;
+          diffuseColor.rgb = mix(diffuseColor.rgb,
+            diffuseColor.rgb * vec3(1.105, 0.925, 0.79),
+            terrainSoilWash * ${height >= 1 ? "0.105" : "0.035"});
+          diffuseColor.rgb += vec3(0.035, 0.078, 0.091) * terrainDewFilm * 0.12
+            + vec3(0.045, 0.056, 0.063) * terrainMicroStrata * 0.075;
+          diffuseColor.rgb *= 1.0 - terrainRootThread * 0.035;
           diffuseColor.rgb *= 1.0 - chippedLip * 0.075;
           diffuseColor.rgb += vec3(0.12, 0.105, 0.073) * exposedMineral * 0.16;
           // 草甸暖金花粉色、潮濕青綠與高地石英色脈，沿世界座標自然延續。
@@ -1670,10 +1704,11 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           roughnessFactor = clamp(roughnessFactor + terrainRoughnessGrain * 0.024
             + microEtch * 0.012 + gritPore * 0.028 + tileEdgeWear * 0.075
             + edgeRootStain * 0.055 + graniteCleavage * 0.085
-            - exposedMineral * 0.045 - frostGranule * 0.018, 0.0, 1.0);`,
+            + terrainMicroStrata * 0.035 + terrainRootThread * 0.026
+            - terrainDewFilm * 0.018 - exposedMineral * 0.045 - frostGranule * 0.018, 0.0, 1.0);`,
         );
       };
-      material.customProgramCacheKey = () => "tide-terrain-ridgeline-scree-alpine-v11-edge-scallop-" + height;
+      material.customProgramCacheKey = () => "tide-terrain-ridgeline-scree-alpine-v12-moraine-wet-seams-edge-fracture-" + height;
     };
     const installBlackMistVeil = (material: THREE.MeshBasicMaterial) => {
       material.onBeforeCompile = (shader) => {
@@ -1735,10 +1770,23 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             - uMistVeilTime * 0.23)), 11.0);
           float veilDepthPocket = (1.0 - smoothstep(0.12, 0.9, vMistVeilUv.y))
             * (0.45 + 0.55 * veilGravitySpiral);
+          // 事件視界暗核與窄吸積環讓霧幕有更深的視覺落差，而非只增加整體不透明度。
+          float veilEventHorizon = 1.0 - smoothstep(0.035, 0.43, veilEyeRadius);
+          float veilAccretionBand = exp(-pow((veilEyeRadius
+            - (0.19 + 0.012 * sin(veilEyeAngle * 3.0 - uMistVeilTime * 0.12))) * 24.0, 2.0))
+            * (0.62 + 0.38 * sin(veilEyeAngle * 7.0 + uMistVeilTime * 0.16));
+          float veilLensingFilament = pow(max(0.0, sin(veilEyeAngle * 11.0
+            - log(veilEyeRadius + 0.035) * 9.0 - uMistVeilTime * 0.22)), 12.0)
+            * (1.0 - smoothstep(0.22, 0.58, veilEyeRadius));
+          float veilVoidShadow = veilEventHorizon * (0.68 + veilGravitySpiral * 0.32);
           diffuseColor.a *= veilBaseFade * veilTopFade * veilStrand
             * (0.72 + veilTendril * 0.34 + veilFilament * 0.12
               + veilTearRib * 0.075 + veilGravitySpiral * 0.055)
-            * (0.9 + veilUndertow * 0.1);
+            * (0.9 + veilUndertow * 0.1)
+            * (1.0 + veilAccretionBand * 0.1 + veilLensingFilament * 0.035);
+          diffuseColor.rgb *= 1.0 - veilVoidShadow * 0.28 - veilAccretionBand * 0.055;
+          diffuseColor.rgb += vec3(0.035, 0.055, 0.105) * veilAccretionBand * 0.42
+            + vec3(0.018, 0.042, 0.082) * veilLensingFilament * 0.32;
           diffuseColor.rgb *= mix(vec3(0.42, 0.5, 0.72), vec3(0.92, 0.98, 1.12),
             vMistVeilUv.y * 0.72 + veilDepthFold * 0.16);
           diffuseColor.rgb *= 0.86 + veilPressurePulse * 0.14;
@@ -1751,7 +1799,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             + vec3(0.009, 0.019, 0.047) * veilPressureFold * 0.12;`,
         );
       };
-      material.customProgramCacheKey = () => "tide-black-mist-torn-depth-veil-v4-gravity-folds";
+      material.customProgramCacheKey = () => "tide-black-mist-torn-depth-veil-v5-event-horizon-accretion";
     };
     installSanctuarySigil(shared.sanctuarySigil);
     installRoadFlow(shared.roadGuide);
@@ -2283,6 +2331,11 @@ vWindRibbon = 0.0;
         float ridgeUpdraft = smoothstep(0.2, 0.92,
           0.5 + 0.5 * sin(windTravel * 0.073 + sin(crossCoordinate * 0.09) * 1.7
             - uFoliageTime * 0.52)) * vFoliageAltitude;
+        // 山脊背風側會形成緩慢旋渦，讓風浪越過高地後有迴捲而非只做平移。
+        float gustWhorl = pow(max(0.0, 0.5 + 0.5 * sin(
+          windTravel * 0.091 + crossCoordinate * 0.067
+          + sin(crossCoordinate * 0.13 - uFoliageTime * 0.3) * 2.1
+          - uFoliageTime * 0.68)), 2.6) * vFoliageAltitude;
         // 斜向主風場與側向渦流疊合成有方向的風帶，前緣依座標推進，不讓全場同時擺動。
         float crossTravel = sin(crossCoordinate * 0.083 - uFoliageTime * 0.74);
         float crossFront = smoothstep(-0.62, 0.9, crossTravel);
@@ -2292,13 +2345,13 @@ vWindRibbon = 0.0;
         float gustStrength = min(1.34, (0.3 + 0.23 * smoothstep(-0.65, 0.88, broadGust)
           + 0.18 * smoothstep(-0.56, 0.78, travelingGust)
           + 0.12 * crossFront + 0.16 * shearFront
-          + 0.1 * gustLobe + 0.12 * ridgeUpdraft) * ridgeExposure);
+          + 0.1 * gustLobe + 0.12 * ridgeUpdraft + 0.075 * gustWhorl) * ridgeExposure);
         vFoliageGust = max(gustStrength * smoothstep(-0.5, 0.72, travelingGust),
           max(crossFront * 0.2, shearFront * 0.28));
         // 一道細窄的亮風脊沿世界座標斜向推進，讓整片草地呈現連續傳遞的風浪。
         float windRibbonPhase = windTravel * 0.32 - uFoliageTime * 2.35
           + sin(crossCoordinate * 0.12 - uFoliageTime * 0.55) * 0.9
-          + gustCell * 0.42 + position.y * 1.25;
+          + gustCell * 0.42 + gustWhorl * 0.38 + position.y * 1.25;
         vWindRibbon = pow(max(0.0, 0.5 + 0.5 * sin(windRibbonPhase)), 9.0)
           * (0.34 + gustStrength * 0.66);
         float bladeGrainPhase = sin(position.x * 18.0 + position.z * 23.0 + foliagePhase * 2.1);
@@ -2314,7 +2367,8 @@ vWindRibbon = 0.0;
         float shearFlutter = sin(shearBand * 3.2 + foliagePhase * 1.6 + position.y * 7.4
           + bladeEdgeFlutter * 2.0) * 0.2;
         float foliageSway = (foliageWave + foliageFlutter + leafRipple + shearFlutter
-          + (gustLobe - 0.42) * 0.34 + ridgeUpdraft * 0.28) * gustStrength;
+          + (gustLobe - 0.42) * 0.34 + ridgeUpdraft * 0.28
+          + (gustWhorl - 0.3) * 0.19) * gustStrength;
         float gustLean = smoothstep(-0.18, 0.78, travelingGust) * foliageMask;
         float shearLean = (shearFront - 0.32) * foliageMask;
         transformed.x += (foliageSway * 0.098 + gustLean * 0.032
@@ -2384,7 +2438,7 @@ vWindRibbon = 0.0;
             + vec3(0.018, 0.038, 0.052), vFoliageAltitude * 0.34);`,
         );
       };
-      material.customProgramCacheKey = () => `${cacheKey}-traveling-wind-ribbon-v2-turbulent-updraft`;
+      material.customProgramCacheKey = () => `${cacheKey}-traveling-wind-ribbon-v3-ridge-whorl-turbulence`;
     };
     installFoliageWind(shared.foliageWind, "tide-foliage-wind-v8-pressure-sweep");
     installFoliageWind(shared.treeCanopyWind, "tide-tree-canopy-gust-v4-pressure-sweep", 2.4);
