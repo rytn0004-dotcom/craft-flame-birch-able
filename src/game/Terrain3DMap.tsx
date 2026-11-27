@@ -560,16 +560,19 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
         float rockSeed = dot(instanceMatrix[3].xyz, vec3(17.17, 31.71, 9.23));
         float rockRandom = fract(sin(rockSeed * 12.9898) * 43758.5453);
         float rockAge = clamp(uRockDebrisAge / 0.82, 0.0, 1.0);
-        float rockAngle = rockSeed * 2.4 + rockAge * (2.2 + rockRandom * 3.8);
-        float rockTravel = rockAge * (0.18 + rockRandom * 0.42);
-        transformed.x += cos(rockSeed * 4.1) * rockTravel;
-        transformed.z += sin(rockSeed * 4.1) * rockTravel;
-        transformed.y += rockAge * (0.18 + rockRandom * 0.2)
-          - rockAge * rockAge * (0.22 + rockRandom * 0.28);
+        float rockAngle = rockSeed * 2.4 + rockAge * (4.4 + rockRandom * 7.2);
+        // 碎片先被震起，再沿崖面外側拋散，最後帶著重力落回坡腳。
+        float rockTravel = pow(rockAge, 0.82) * (0.32 + rockRandom * 0.78);
+        float rockArc = sin(rockAge * 3.14159265) * (0.22 + rockRandom * 0.38)
+          - rockAge * rockAge * (0.13 + rockRandom * 0.18);
+        float rockSideKick = sin(rockSeed * 6.7) * rockTravel * 0.28;
+        transformed.x += cos(rockSeed * 4.1) * rockTravel + sin(rockSeed * 8.3) * rockSideKick;
+        transformed.z += sin(rockSeed * 4.1) * rockTravel + cos(rockSeed * 7.1) * rockSideKick;
+        transformed.y += rockArc + sin(rockAge * 9.0 + rockSeed) * rockAge * 0.026;
         vec2 rockSpin = transformed.xz;
         transformed.x = rockSpin.x * cos(rockAngle) - rockSpin.y * sin(rockAngle);
         transformed.z = rockSpin.x * sin(rockAngle) + rockSpin.y * cos(rockAngle);
-        vRockDebrisFade = 1.0 - smoothstep(0.58, 1.0, rockAge);`,
+        vRockDebrisFade = 1.0 - smoothstep(0.48, 0.98, rockAge);`,
       );
       shader.fragmentShader = shader.fragmentShader.replace(
         "#include <common>",
@@ -581,7 +584,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
         diffuseColor.a *= vRockDebrisFade;`,
       );
     };
-    rockDebrisMaterial.customProgramCacheKey = () => "tide-cliff-slip-debris-v2-four-layer-shards";
+    rockDebrisMaterial.customProgramCacheKey = () => "tide-cliff-slip-debris-v3-ballistic-shards";
     const rockDebrisCount = 18;
     const rockDebrisGeometry = new THREE.DodecahedronGeometry(0.062, 1);
     const rockDebrisPositions = rockDebrisGeometry.getAttribute("position");
