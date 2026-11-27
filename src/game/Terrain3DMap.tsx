@@ -2487,7 +2487,6 @@ uniform float uSlipStrength;
 varying float vFoliageGust;
 varying float vFoliageAltitude;
 varying float vWindRibbon;
-varying float vSlipWake;
 varying float vSlipWake;`,
         );
         shader.vertexShader = shader.vertexShader.replace(
@@ -2562,6 +2561,7 @@ vSlipWake = 0.0;
         transformed.z += (cos(uFoliageTime * 0.91 + foliagePhase * 1.27 + position.y * 1.8)
           + foliageFlutter * 0.52 + gustLean * 0.39 + crossFront * 0.12
           + shearFlutter * 0.22 + bladeEdgeFlutter * 1.12) * 0.06 * foliageMask;
+        if (uSlipStrength > 0.001) {
         vec2 slipRelative = instanceMatrix[3].xz - uSlipPosition;
         float slipAlong = dot(slipRelative, uSlipDirection);
         vec2 slipPerpendicular = vec2(-uSlipDirection.y, uSlipDirection.x);
@@ -2612,6 +2612,7 @@ vSlipWake = 0.0;
         // 將高速尾流獨立輸出到片元階段：葉片不只彎腰，還會短暫接住壓力環的冷色高光。
         vSlipWake = clamp(slipGust * 0.72 + slipFront * 0.84
           + slipPressureHalo * 0.38, 0.0, 1.0);
+        }
 #endif`,
         );
         shader.fragmentShader = shader.fragmentShader.replace(
@@ -2685,6 +2686,7 @@ vSlipWake = 0.0;
           transformed.y += cos(uPollenTime * 0.86 + pollenPhase * 1.37) * 0.065;
           transformed.z += sin(uPollenTime * 0.51 + pollenPhase * 0.83) * 0.074;
           #ifdef USE_INSTANCING
+            if (uSlipStrength > 0.001) {
             vec2 pollenSlipRelative = instanceMatrix[3].xz - uSlipPosition;
             float pollenSlipAlong = dot(pollenSlipRelative, uSlipDirection);
             vec2 pollenSlipSide = vec2(-uSlipDirection.y, uSlipDirection.x);
@@ -2703,6 +2705,7 @@ vSlipWake = 0.0;
             transformed.xz += pollenCurl;
             transformed.y += pollenSlipWake * (0.18 + 0.06 * sin(uPollenTime * 9.0 + pollenPhase))
               + pollenVortex * (0.11 + 0.07 * sin(pollenOrbit));
+            }
           #endif`,
         );
         shader.fragmentShader = shader.fragmentShader.replace(
@@ -3788,7 +3791,12 @@ vSlipWake = 0.0;
       const terrainChunkSize = TILE * 2;
       const terrainChunks = new Map<string, { byHeight: { x: number; z: number; h: number }[][] }>();
       const tileCells = new Map<string, { x: number; z: number; h: number }>();
+      const tileCellList: { x: number; z: number; h: number }[] = [];
       const terrainCellsByHeight: { x: number; z: number; h: number }[][] = [[], [], [], []];
+      const highlandCells: { x: number; z: number; h: number }[] = [];
+      const upperHighlandCells: { x: number; z: number; h: number }[] = [];
+      const lowerTerrainCells: { x: number; z: number; h: number }[] = [];
+      const lowHeightTransitionCells: { x: number; z: number; h: number }[] = [];
 
       const addCell = (gx: number, gy: number) => {
         const key = gx + "," + gy;
@@ -3801,7 +3809,12 @@ vSlipWake = 0.0;
         h = Math.max(0, Math.min(3, h | 0));
         const cell = { x: gx + 0.5, z: gy + 0.5, h };
         tileCells.set(key, cell);
+        tileCellList.push(cell);
         terrainCellsByHeight[h].push(cell);
+        if (h > 0) highlandCells.push(cell);
+        if (h >= 2) upperHighlandCells.push(cell);
+        if (h <= 1) lowerTerrainCells.push(cell);
+        if (h <= 2) lowHeightTransitionCells.push(cell);
         terrainCellHeights.set(key, h);
         const chunkX = Math.floor(gx / terrainChunkSize);
         const chunkY = Math.floor(gy / terrainChunkSize);
@@ -3840,12 +3853,7 @@ vSlipWake = 0.0;
       }
       if (!(await yieldTerrainBuild(buildVersion))) return;
       // 所有生態細節共用同一份列表，避免 20 多次重複配置大型陣列。
-      const tileCellList = Array.from(tileCells.values());
       const cellsByHeight = terrainCellsByHeight;
-      const highlandCells = cellsByHeight[1].concat(cellsByHeight[2], cellsByHeight[3]);
-      const upperHighlandCells = cellsByHeight[2].concat(cellsByHeight[3]);
-      const lowerTerrainCells = cellsByHeight[0].concat(cellsByHeight[1]);
-      const lowHeightTransitionCells = cellsByHeight[0].concat(cellsByHeight[1], cellsByHeight[2]);
 
       // 依目前真正已鋪設的地塊計算海域中心與尺寸；擴張時海岸同步外推，不把 200×200 空棋盤當成島嶼。
       let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
@@ -3884,11 +3892,16 @@ vSlipWake = 0.0;
         }
       }
       if (!(await yieldTerrainBuild(buildVersion))) return;
+      let coastBandBatchCount = 0;
       for (const key of edgeCellKeys) {
         const [gx, gy] = key.split(",").map(Number);
         for (const [dc, dr] of biomeDirections) {
           const neighborKey = (gx + dc) + "," + (gy + dr);
           if (tileCells.has(neighborKey)) coastBandKeys.add(neighborKey);
+        }
+        if (++coastBandBatchCount >= 8192) {
+          coastBandBatchCount = 0;
+          if (!(await yieldTerrainBuild(buildVersion))) return;
         }
       }
       const terrainRegionCache = new Map<string, string>();
@@ -4310,7 +4323,7 @@ vSlipWake = 0.0;
         if (regions.includes("ancient")) return "#9da99b";
         return "#9aab9b";
       };
-      for (const cell of tileCells.values()) {
+      for (const cell of tileCellList) {
         if (biomeSeamCells.length >= 520) break;
         if (++seamBatchCount >= 4096) {
           seamBatchCount = 0;
@@ -4945,7 +4958,7 @@ vSlipWake = 0.0;
       ];
       const coastEdges: { x: number; z: number; h: number; dx: number; dz: number; rot: number; seed: number }[] = [];
       let coastEdgeBatchCount = 0;
-      for (const cell of tileCells.values()) {
+      for (const cell of tileCellList) {
         if (++coastEdgeBatchCount >= 4096) {
           coastEdgeBatchCount = 0;
           if (!(await yieldTerrainBuild(buildVersion))) return;
@@ -5415,35 +5428,30 @@ vSlipWake = 0.0;
       if (!(await yieldTerrainBuild(buildVersion))) return;
 
       const cellsByHeight = terrainCellsByHeight;
-      const cellsByRegion: Record<string, { x: number; z: number; h: number }[]> = {
-        road: [], coast: [], moss: [], limestone: [], ancient: [], meadow: [],
-      };
+      const meadowMossCells: { x: number; z: number; h: number }[] = [];
+      const lichenCandidateCells: { x: number; z: number; h: number }[] = [];
+      const mossAncientCells: { x: number; z: number; h: number }[] = [];
+      const midMossCells: { x: number; z: number; h: number }[] = [];
+      const meadowMossMidCells: { x: number; z: number; h: number }[] = [];
+      const limestoneHighlandCells: { x: number; z: number; h: number }[] = [];
+      const levelOneMossCells: { x: number; z: number; h: number }[] = [];
+      const coastCells: { x: number; z: number; h: number }[] = [];
       let ecologyIndexCount = 0;
       for (const cell of tileCellList) {
         const region = terrainRegion(cell);
-        (cellsByRegion[region] ?? cellsByRegion.meadow).push(cell);
+        if (region === "meadow" || region === "moss") meadowMossCells.push(cell);
+        if (region === "moss" || region === "limestone" || region === "ancient") lichenCandidateCells.push(cell);
+        if (region === "moss" || region === "ancient") mossAncientCells.push(cell);
+        if (region === "coast") coastCells.push(cell);
+        if (cell.h === 1 && region === "moss") levelOneMossCells.push(cell);
+        if (cell.h >= 2 && region === "limestone") limestoneHighlandCells.push(cell);
+        if ((cell.h === 1 || cell.h === 2) && region === "moss") midMossCells.push(cell);
+        if ((cell.h === 1 || cell.h === 2) && (region === "meadow" || region === "moss")) meadowMossMidCells.push(cell);
         if (++ecologyIndexCount >= 8192) {
           ecologyIndexCount = 0;
           if (!(await yieldTerrainBuild(buildVersion))) return;
         }
       }
-      const highlandCells = cellsByHeight[1].concat(cellsByHeight[2], cellsByHeight[3]);
-      const upperHighlandCells = cellsByHeight[2].concat(cellsByHeight[3]);
-      const meadowMossCells = cellsByRegion.meadow.concat(cellsByRegion.moss);
-      const lichenCandidateCells = cellsByRegion.moss.concat(cellsByRegion.limestone, cellsByRegion.ancient);
-      const mossAncientCells = cellsByRegion.moss.concat(cellsByRegion.ancient);
-      const midMossCells = cellsByHeight[1].filter((cell) => terrainRegion(cell) === "moss")
-        .concat(cellsByHeight[2].filter((cell) => terrainRegion(cell) === "moss"));
-      const meadowMossMidCells = cellsByHeight[1].filter((cell) => {
-        const region = terrainRegion(cell);
-        return region === "meadow" || region === "moss";
-      }).concat(cellsByHeight[2].filter((cell) => {
-        const region = terrainRegion(cell);
-        return region === "meadow" || region === "moss";
-      }));
-      const limestoneHighlandCells = cellsByRegion.limestone.filter((cell) => cell.h >= 2);
-      const levelOneMossCells = cellsByHeight[1].filter((cell) => terrainRegion(cell) === "moss");
-      const coastCells = cellsByRegion.coast;
 
       // 高地風化石群：以不規則細分岩體取代單一低面數圓石，每簇兩枚大小不同的岩礫。
       // 頂點色由陰濕底色漸層至日照礦面，岩體底部壓平並保留自然破碎輪廓；全場仍只用一個 InstancedMesh。
@@ -10229,13 +10237,13 @@ vSlipWake = 0.0;
       // 對齊 60Hz 螢幕更新節奏，避免 40 FPS 與 60Hz 不整除造成不均勻掉幀與閃動。
       const rafDelta = lastRafAt ? Math.min(100, time - lastRafAt) : renderInterval;
       lastRafAt = time;
-      // 連續超過 23ms 才降解析度，避免單次載入尖峰造成畫質抖動；
+      // 連續超過 19.5ms 才降解析度，避免單次載入尖峰造成畫質抖動；
       // 穩定 4 秒才逐步恢復，避免畫質在臨界效能附近反覆跳動。
-      if (rafDelta > 23) {
+      if (rafDelta > 19.5) {
         slowFrameStreak++;
         stableFrameStreak = 0;
-        if (slowFrameStreak >= 8 && renderQualityScale > 0.78) {
-          renderQualityScale = Math.max(0.78, Math.round((renderQualityScale - 0.07) * 100) / 100);
+        if (slowFrameStreak >= 8 && renderQualityScale > 0.72) {
+          renderQualityScale = Math.max(0.72, Math.round((renderQualityScale - 0.07) * 100) / 100);
           renderer.setPixelRatio(baseRenderPixelRatio * renderQualityScale);
           slowFrameStreak = 0;
         }
@@ -10256,9 +10264,11 @@ vSlipWake = 0.0;
       renderAccumulator = Math.min(renderAccumulator - renderInterval, renderInterval * 0.75);
       const dt = lastFrameAt ? Math.min(0.05, (time - lastFrameAt) / 1000) : 0;
       lastFrameAt = time;
+      let snapshotUpdated = false;
       if (!cachedSnapshot || time - lastSnapshotAt >= 1000 / 30) {
         cachedSnapshot = snapshotRef.current();
         lastSnapshotAt = time;
+        snapshotUpdated = true;
       }
       const data = cachedSnapshot;
 
@@ -10312,8 +10322,10 @@ vSlipWake = 0.0;
         }
       }
 
-      updateActors(data, time);
-      updateEffects(data, time);
+      if (snapshotUpdated) {
+        updateActors(data, time);
+        updateEffects(data, time);
+      }
       // 水面、燈光與黑霧提高至 30 FPS 更新，減少低頻矩陣跳動造成的閃爍感。
       if (time - lastAmbientUpdateAt >= 1000 / 30) {
         lastAmbientUpdateAt = time;
