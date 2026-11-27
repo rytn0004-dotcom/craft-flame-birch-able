@@ -6750,7 +6750,8 @@ vSlipWake = 0.0;
         }
       }
 
-      // 苔地零星長出成簇蘑菇，提供近景尺度變化；數量固定上限，不加入逐物件動畫。
+      // 苔地蘑菇改成完整小型菌體：柔弧菌傘、菌褶環、斑點與淡色菌柄。
+      // 所有部件按固定種子批次化，數量上限 64 株，不新增逐物件動畫或即時光源。
       const mushroomCells = Array.from(tileCells.values()).filter((cell) => {
         if (cell.h !== 1 || terrainRegion(cell) !== "moss") return false;
         if (protectedBuildings.some((building) =>
@@ -6761,43 +6762,94 @@ vSlipWake = 0.0;
       }).slice(0, 64);
       if (mushroomCells.length) {
         const mushroomStems = new THREE.InstancedMesh(
-          new THREE.CylinderGeometry(0.018, 0.028, 0.11, 9),
+          new THREE.CylinderGeometry(0.018, 0.028, 0.11, 10),
           shared.ivory,
           mushroomCells.length,
         );
         const mushroomCaps = new THREE.InstancedMesh(
-          new THREE.IcosahedronGeometry(0.075, 1),
+          new THREE.SphereGeometry(0.075, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2),
           shared.meadowBloom,
           mushroomCells.length,
         );
+        const mushroomGills = new THREE.InstancedMesh(
+          new THREE.TorusGeometry(0.052, 0.0045, 5, 22),
+          shared.ivory,
+          mushroomCells.length,
+        );
+        const mushroomSpots = new THREE.InstancedMesh(
+          new THREE.SphereGeometry(0.0055, 7, 5),
+          shared.ivory,
+          mushroomCells.length * 3,
+        );
         const mushroomDummy = new THREE.Object3D();
         const mushroomTint = new THREE.Color();
+        const gillTint = new THREE.Color();
+        const spotTint = new THREE.Color();
+        const capPalette = ["#d989a2", "#c3b4df", "#dfc58e", "#9bcbb7", "#d6a78a"];
+        const capRadius = 0.075;
         for (let i = 0; i < mushroomCells.length; i++) {
           const cell = mushroomCells[i];
           const seed = Math.abs(Math.sin(cell.x * 127.1 + cell.z * 311.7) * 43758.5453) % 1;
           const angle = seed * Math.PI * 2;
           const x = cell.x + Math.cos(angle) * 0.18;
           const z = cell.z + Math.sin(angle) * 0.18;
-          mushroomDummy.position.set(x, groundTop(cell.h) + 0.055, z);
-          mushroomDummy.rotation.set(0, angle, (seed - 0.5) * 0.16);
-          mushroomDummy.scale.setScalar(0.78 + seed * 0.32);
+          const groundY = groundTop(cell.h);
+          const capScale = 0.88 + seed * 0.28;
+          const tiltX = (seed - 0.5) * 0.13;
+          const tiltZ = (0.5 - seed) * 0.15;
+
+          mushroomDummy.position.set(x, groundY + 0.055, z);
+          mushroomDummy.rotation.set(0, angle, (seed - 0.5) * 0.12);
+          mushroomDummy.scale.set(0.92 + seed * 0.18, 0.9 + seed * 0.16, 0.92 + seed * 0.18);
           mushroomDummy.updateMatrix();
           mushroomStems.setMatrixAt(i, mushroomDummy.matrix);
-          mushroomDummy.position.y = groundTop(cell.h) + 0.135;
-          mushroomDummy.scale.set(0.9 + seed * 0.32, 0.65 + seed * 0.2, 0.9 + seed * 0.32);
+
+          // 菌褶環略露在菌傘下緣，從斜角看也能辨認出菌傘厚度。
+          mushroomDummy.position.set(x, groundY + 0.119, z);
+          mushroomDummy.rotation.set(-Math.PI / 2 + tiltX, angle, tiltZ);
+          mushroomDummy.scale.setScalar(0.94 + seed * 0.12);
+          mushroomDummy.updateMatrix();
+          mushroomGills.setMatrixAt(i, mushroomDummy.matrix);
+          gillTint.set(seed > 0.52 ? "#e3d5bd" : "#c7bda9");
+          mushroomGills.setColorAt(i, gillTint);
+
+          mushroomDummy.position.set(x, groundY + 0.122, z);
+          mushroomDummy.rotation.set(tiltX, angle, tiltZ);
+          mushroomDummy.scale.set(capScale, capScale, capScale);
           mushroomDummy.updateMatrix();
           mushroomCaps.setMatrixAt(i, mushroomDummy.matrix);
-          mushroomTint.set(seed > 0.66 ? "#e8d3a6" : seed > 0.33 ? "#c9b98f" : "#b3d4b8");
+          mushroomTint.set(capPalette[Math.floor(seed * capPalette.length)]);
+          mushroomTint.offsetHSL((seed - 0.5) * 0.025, 0.04, (seed - 0.5) * 0.055);
           mushroomCaps.setColorAt(i, mushroomTint);
+
+          // 三枚不對稱小斑點沿菌傘弧面分布，位置依半球曲率計算，不會浮在空中。
+          for (let spot = 0; spot < 3; spot++) {
+            const spotSeed = Math.abs(Math.sin(seed * 91.7 + spot * 17.3) * 21871.3) % 1;
+            const spotAngle = angle + spot * 2.25 + spotSeed * 0.34;
+            const localRadius = 0.026 + spotSeed * 0.028;
+            const localHeight = Math.sqrt(Math.max(0, capRadius * capRadius - localRadius * localRadius));
+            const spotIndex = i * 3 + spot;
+            mushroomDummy.position.set(
+              x + Math.cos(spotAngle) * localRadius * capScale,
+              groundY + 0.122 + localHeight * capScale + 0.002,
+              z + Math.sin(spotAngle) * localRadius * capScale,
+            );
+            mushroomDummy.rotation.set(0, spotAngle, 0);
+            mushroomDummy.scale.setScalar(0.72 + spotSeed * 0.42);
+            mushroomDummy.updateMatrix();
+            mushroomSpots.setMatrixAt(spotIndex, mushroomDummy.matrix);
+            spotTint.set(spot === 1 ? "#fff0d2" : "#e6ddc9");
+            mushroomSpots.setColorAt(spotIndex, spotTint);
+          }
         }
-        mushroomStems.instanceMatrix.needsUpdate = true;
-        mushroomCaps.instanceMatrix.needsUpdate = true;
-        if (mushroomCaps.instanceColor) mushroomCaps.instanceColor.needsUpdate = true;
-        mushroomStems.castShadow = false;
-        mushroomCaps.castShadow = false;
-        mushroomStems.receiveShadow = false;
-        mushroomCaps.receiveShadow = false;
-        terrainRoot.add(mushroomStems, mushroomCaps);
+        for (const mesh of [mushroomStems, mushroomCaps, mushroomGills, mushroomSpots]) {
+          mesh.instanceMatrix.needsUpdate = true;
+          if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+          mesh.computeBoundingSphere();
+          mesh.castShadow = false;
+          mesh.receiveShadow = false;
+          terrainRoot.add(mesh);
+        }
       }
 
       // 苔地與古代刻紋附近漂浮少量潮光微粒；單一動態實例批次，模擬林間螢火與遺跡能量。
@@ -7089,6 +7141,89 @@ vSlipWake = 0.0;
         !protectedBuildings.some((building) =>
           Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + margin,
         );
+
+      // 海岸石台上形成少量天然潮池：淺水鏡面、破碎亮邊與卵石共同打散平坦岸線。
+      // 只放在 coast 生態格，與塔座保持距離；三個 InstancedMesh 有明確上限且不參與路徑。
+      const tidePoolCells = Array.from(tileCells.values()).filter((cell) => {
+        if (cell.h <= 0 || terrainRegion(cell) !== "coast" || !detailIsClear(cell, 0.72)) return false;
+        const seed = Math.abs(Math.sin(cell.x * 43.7 + cell.z * 79.1) * 29317.7) % 1;
+        return seed > 0.955;
+      }).slice(0, 72);
+      if (tidePoolCells.length) {
+        const pools = new THREE.InstancedMesh(
+          new THREE.CircleGeometry(0.17, 24),
+          shared.waterRipple,
+          tidePoolCells.length,
+        );
+        const poolRims = new THREE.InstancedMesh(
+          new THREE.TorusGeometry(0.15, 0.008, 5, 28),
+          shared.waterGlint,
+          tidePoolCells.length,
+        );
+        const poolPebbles = new THREE.InstancedMesh(
+          new THREE.DodecahedronGeometry(0.035, 1),
+          shared.beachPebble,
+          tidePoolCells.length * 2,
+        );
+        const poolDummy = new THREE.Object3D();
+        const poolTint = new THREE.Color();
+        const rimTint = new THREE.Color();
+        const pebbleTint = new THREE.Color();
+        const poolPalette = ["#9bd6d0", "#b4ded2", "#8fc3cb", "#c5d8c1"];
+        const pebblePalette = ["#c9b99a", "#869c91", "#b4c5ba", "#d0c5ab"];
+        for (let i = 0; i < tidePoolCells.length; i++) {
+          const cell = tidePoolCells[i];
+          const seed = Math.abs(Math.sin(cell.x * 127.1 + cell.z * 311.7) * 43758.5453) % 1;
+          const angle = seed * Math.PI * 2;
+          const groundY = groundTop(cell.h);
+          const poolX = cell.x + Math.cos(angle) * 0.12;
+          const poolZ = cell.z + Math.sin(angle) * 0.12;
+          const poolScale = 0.72 + seed * 0.36;
+
+          poolDummy.position.set(poolX, groundY + 0.022, poolZ);
+          poolDummy.rotation.set(-Math.PI / 2, angle, 0);
+          poolDummy.scale.set(poolScale, 0.76 + seed * 0.28, 1);
+          poolDummy.updateMatrix();
+          pools.setMatrixAt(i, poolDummy.matrix);
+          poolTint.set(poolPalette[Math.floor(seed * poolPalette.length)]);
+          pools.setColorAt(i, poolTint);
+
+          poolDummy.position.set(poolX, groundY + 0.024, poolZ);
+          poolDummy.rotation.set(-Math.PI / 2, angle + (seed - 0.5) * 0.22, 0);
+          poolDummy.scale.set(poolScale, 0.76 + seed * 0.28, 1);
+          poolDummy.updateMatrix();
+          poolRims.setMatrixAt(i, poolDummy.matrix);
+          rimTint.set(seed > 0.68 ? "#e0f0df" : "#a9d9d0");
+          poolRims.setColorAt(i, rimTint);
+
+          for (let pebble = 0; pebble < 2; pebble++) {
+            const pebbleAngle = angle + pebble * 2.3 + (seed - 0.5) * 0.55;
+            const radius = 0.16 + seed * 0.055;
+            const index = i * 2 + pebble;
+            poolDummy.position.set(
+              poolX + Math.cos(pebbleAngle) * radius,
+              groundY + 0.022,
+              poolZ + Math.sin(pebbleAngle) * radius,
+            );
+            poolDummy.rotation.set(seed * 0.35, pebbleAngle, (seed - 0.5) * 0.32);
+            const size = 0.62 + ((seed * 3.7 + pebble * 0.41) % 1) * 0.38;
+            poolDummy.scale.set(size, 0.54 + seed * 0.22, size * 0.82);
+            poolDummy.updateMatrix();
+            poolPebbles.setMatrixAt(index, poolDummy.matrix);
+            pebbleTint.set(pebblePalette[(Math.floor(seed * 13) + pebble) % pebblePalette.length]);
+            poolPebbles.setColorAt(index, pebbleTint);
+          }
+        }
+        for (const mesh of [pools, poolRims, poolPebbles]) {
+          mesh.instanceMatrix.needsUpdate = true;
+          if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+          mesh.computeBoundingSphere();
+          mesh.castShadow = false;
+          mesh.receiveShadow = false;
+          terrainRoot.add(mesh);
+        }
+      }
+
       const mossCells = Array.from(tileCells.values()).filter((cell) => {
         if (cell.h !== 1 || terrainRegion(cell) !== "moss" || !detailIsClear(cell)) return false;
         const seed = Math.abs(Math.sin(cell.x * 29.7 + cell.z * 81.3) * 18431.7) % 1;
