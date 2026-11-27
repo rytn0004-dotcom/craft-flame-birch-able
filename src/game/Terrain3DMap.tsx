@@ -1562,7 +1562,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <common>",
-          "#include <common>\nvarying vec3 vTerrainWorldPosition;\nvarying float vTerrainSideFacing;",
+          "#include <common>\nvarying vec3 vTerrainWorldPosition;\nvarying float vTerrainSideFacing;\nvarying float vTerrainTopFacing;",
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <color_fragment>",
