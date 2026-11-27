@@ -1275,6 +1275,15 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             * (1.0 - smoothstep(0.095, abyssEyeOpen, abs(abyssUv.y - abyssPupilY)))
             * (0.58 + abyssEyeBreath * 0.42);
           float abyssVortex = sin(abyssAngle * 9.0 + abyssRadius * 31.0 - uMistTime * 0.24);
+          // 視線方向形成一條不完整的重力扇區：正對玩家的一側更暗，虹膜細絲則沿扇區邊緣閃現。
+          vec2 abyssGazeAxis = abyssGaze / max(0.001, abyssGazeStrength);
+          float abyssGazeAlignment = max(0.0,
+            dot(vec2(cos(abyssAngle), sin(abyssAngle)), abyssGazeAxis));
+          float abyssGazeCompression = pow(abyssGazeAlignment, 6.0)
+            * abyssGazeStrength * (1.0 - smoothstep(0.34, 0.56, abyssRadius));
+          float abyssGazeFilament = pow(max(0.0, sin(abyssAngle * 37.0
+            + abyssRadius * 29.0 - uMistTime * 0.22)), 16.0)
+            * abyssGazeCompression;
           // 外圍重力暗環把視線往中心拖曳；不規則蝕環與螺旋細絲提供額外景深。
           float abyssGravityWell = 1.0 - smoothstep(0.24, 0.53, abyssRadius);
           float abyssEclipseRadius = 0.392 + 0.014 * sin(abyssAngle * 4.0 - uMistTime * 0.075)
@@ -1316,7 +1325,9 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           diffuseColor.rgb += vec3(0.008, 0.018, 0.052)
             * (abyssFlow * 0.32 + abyssDepth * 0.5 + max(0.0, abyssVortex) * 0.08);
           diffuseColor.rgb *= 1.0 - abyssGravityWell * 0.085 - abyssEclipse * 0.21;
+          diffuseColor.rgb *= 1.0 - abyssGazeCompression * 0.18;
           diffuseColor.rgb += vec3(0.018, 0.045, 0.09) * abyssSpiralThread * (0.24 + uMistPower * 0.18);
+          diffuseColor.rgb += vec3(0.022, 0.056, 0.108) * abyssGazeFilament * 0.44;
           diffuseColor.rgb += vec3(0.045, 0.082, 0.12) * abyssShardGlint * (0.2 + abyssEyeBreath * 0.2);
           diffuseColor.rgb += vec3(0.035, 0.082, 0.13) * abyssLidArc * (0.16 + abyssEyeBreath * 0.12);
           diffuseColor.rgb += vec3(0.035, 0.095, 0.15) * abyssRadialRay * 0.28;
@@ -1338,7 +1349,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             vMistFieldUv.x * 31.0 + vMistFieldUv.y * 19.0 - uMistTime * 0.16));`,
         );
       };
-      material.customProgramCacheKey = () => "tide-black-mist-abyss-gaze-v11-event-horizon-pressure";
+      material.customProgramCacheKey = () => "tide-black-mist-abyss-gaze-v12-directional-gravity-pressure";
     };
     installBlackMistFront(shared.blackMistField);
 
