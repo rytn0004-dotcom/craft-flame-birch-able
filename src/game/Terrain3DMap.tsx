@@ -100,6 +100,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
     let altDown = false;
     let lastBuildAt = 0;
     let terrainBuildVersion = 0;
+    let terrainBaseReady = false;
     const yieldTerrainBuild = async (version: number) => {
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       return !disposed && version === terrainBuildVersion;
@@ -3765,6 +3766,7 @@ vSlipWake = 0.0;
 
     const rebuildTerrain = async (data: Terrain3DSnapshot) => {
       const buildVersion = ++terrainBuildVersion;
+      terrainBaseReady = false;
       refreshBlackMistRevealMask(data.placed, data.mapMode === "expand");
       clearGroup(terrainRoot);
       terrainCellHeights.clear();
@@ -4027,7 +4029,7 @@ vSlipWake = 0.0;
           if (!(await yieldTerrainBuild(buildVersion))) return;
         }
       }
-
+      terrainBaseReady = true;
       if (!(await yieldTerrainBuild(buildVersion))) return;
 
       // 不同高度的相鄰格之間鋪設岩肩斜坡：將垂直階梯轉成可讀的山坡輪廓。
@@ -4295,6 +4297,7 @@ vSlipWake = 0.0;
 
       // 生態區交界以少量貼地石縫與植被色階銜接，避免地貌像硬切換色塊。
       const biomeSeamCells: { x: number; z: number; y: number; rot: number; tint: string; scale: number }[] = [];
+      let seamBatchCount = 0;
       const seamDirections = [
         { dc: 1, dr: 0, rot: Math.PI / 2 },
         { dc: 0, dr: 1, rot: 0 },
@@ -4309,6 +4312,10 @@ vSlipWake = 0.0;
       };
       for (const cell of tileCells.values()) {
         if (biomeSeamCells.length >= 520) break;
+        if (++seamBatchCount >= 4096) {
+          seamBatchCount = 0;
+          if (!(await yieldTerrainBuild(buildVersion))) return;
+        }
         const gx = Math.floor(cell.x);
         const gy = Math.floor(cell.z);
         const region = terrainRegion(cell);
@@ -4443,9 +4450,15 @@ vSlipWake = 0.0;
       // 擴張地圖的道路格保持原有高度與碰撞資料，只在表面加石板鋪面。
       // 每格一片低矮石板，靠色差與細縫建立行進方向；道路外緣以窄石沿收邊。
       if (data.mapMode === "expand") {
-        const roadCells = cellsByHeight[0].filter((cell) =>
-          !data.blocked.has(Math.floor(cell.x) + "," + Math.floor(cell.z)),
-        );
+        const roadCells: { x: number; z: number; h: number }[] = [];
+        let roadCellBatchCount = 0;
+        for (const cell of cellsByHeight[0]) {
+          if (!data.blocked.has(Math.floor(cell.x) + "," + Math.floor(cell.z))) roadCells.push(cell);
+          if (++roadCellBatchCount >= 8192) {
+            roadCellBatchCount = 0;
+            if (!(await yieldTerrainBuild(buildVersion))) return;
+          }
+        }
         if (roadCells.length) {
           const pavers = new THREE.InstancedMesh(
             new THREE.BoxGeometry(0.92, 0.026, 0.92),
@@ -4931,7 +4944,12 @@ vSlipWake = 0.0;
         { dc: -1, dr: 0, dx: -1, dz: 0, rot: Math.PI / 2 },
       ];
       const coastEdges: { x: number; z: number; h: number; dx: number; dz: number; rot: number; seed: number }[] = [];
+      let coastEdgeBatchCount = 0;
       for (const cell of tileCells.values()) {
+        if (++coastEdgeBatchCount >= 4096) {
+          coastEdgeBatchCount = 0;
+          if (!(await yieldTerrainBuild(buildVersion))) return;
+        }
         const gx = Math.floor(cell.x);
         const gy = Math.floor(cell.z);
         if (!data.blocked.has(gx + "," + gy)) continue;
@@ -10057,7 +10075,7 @@ vSlipWake = 0.0;
     };
 
     const screenToWorld = (clientX: number, clientY: number) => {
-      if (!setPointerRay(clientX, clientY)) return null;
+      if (!terrainBaseReady || !setPointerRay(clientX, clientY)) return null;
       const point = new THREE.Vector3();
       // 由高至低測試四個頂面平面。只有交點所在格子的實際高度吻合才接受，
       // 這樣裝飾物、岩壁側面、海面與基地模型都不會把放置座標拉偏。
@@ -10076,7 +10094,7 @@ vSlipWake = 0.0;
     };
 
     const screenToCellPrecise = (clientX: number, clientY: number): Terrain3DCellHit | null => {
-      if (!setPointerRay(clientX, clientY)) return null;
+      if (!terrainBaseReady || !setPointerRay(clientX, clientY)) return null;
       // 地表格子由分塊 InstancedMesh 建立；先同步地形世界矩陣，
       // 確保所有放置模式都取得相同的 gx／gy／height，不再從世界座標反算。
       terrainRoot.updateMatrixWorld(true);
