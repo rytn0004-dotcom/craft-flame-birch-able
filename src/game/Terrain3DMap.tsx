@@ -4070,7 +4070,8 @@ vWindRibbon = 0.0;
               const site = sites[i];
               dummy.position.set(site.x, groundTop(0) + 0.0015, site.z);
               dummy.rotation.set(0, site.rotation, 0);
-              dummy.scale.set(1, 1, 1);
+              // 高度差可能是 1～3 級，垂直尺度必須精確對齊道路與高地頂面。
+              dummy.scale.set(1, highHeight, 1);
               dummy.updateMatrix();
               ramps.setMatrixAt(i, dummy.matrix);
               const palette = regionTint[site.region] ?? regionTint.meadow;
