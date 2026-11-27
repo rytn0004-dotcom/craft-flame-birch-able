@@ -1781,7 +1781,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           diffuseColor.rgb += vec3(0.008, 0.045, 0.085) * oceanWakeCurrent;`,
         );
       };
-      material.customProgramCacheKey = () => cacheKey;
+      material.customProgramCacheKey = () => `${cacheKey}-traveling-wind-ribbon-v1`;
     };
     installOceanSurface(shared.floor, "tide-ocean-floor-caustics-wake-v2");
     installOceanSurface(shared.seaShelf, "tide-ocean-shelf-caustics-wake-v3", true);
@@ -2177,13 +2177,15 @@ uniform vec2 uSlipPosition;
 uniform vec2 uSlipDirection;
 uniform float uSlipStrength;
 varying float vFoliageGust;
-varying float vFoliageAltitude;`,
+varying float vFoliageAltitude;
+varying float vWindRibbon;`,
         );
         shader.vertexShader = shader.vertexShader.replace(
           "#include <begin_vertex>",
           `#include <begin_vertex>
 vFoliageGust = 0.0;
 vFoliageAltitude = 0.0;
+vWindRibbon = 0.0;
 #ifdef USE_INSTANCING
         float foliagePhase = dot(instanceMatrix[3].xz, vec2(0.17, 0.13));
         // Higher terraces receive cleaner, stronger ridge gusts while low meadow plants stay sheltered.
@@ -2207,6 +2209,12 @@ vFoliageAltitude = 0.0;
           + 0.13 * crossFront + 0.18 * shearFront) * ridgeExposure);
         vFoliageGust = max(gustStrength * smoothstep(-0.5, 0.72, travelingGust),
           max(crossFront * 0.2, shearFront * 0.28));
+        // 一道細窄的亮風脊沿世界座標斜向推進，讓整片草地呈現連續傳遞的風浪。
+        float windRibbonPhase = windTravel * 0.32 - uFoliageTime * 2.35
+          + sin(crossCoordinate * 0.12 - uFoliageTime * 0.55) * 0.9
+          + position.y * 1.25;
+        vWindRibbon = pow(max(0.0, 0.5 + 0.5 * sin(windRibbonPhase)), 9.0)
+          * (0.34 + gustStrength * 0.66);
         float bladeGrainPhase = sin(position.x * 18.0 + position.z * 23.0 + foliagePhase * 2.1);
         float bladeTipFlicker = sin(uFoliageTime * 4.1 + foliagePhase * 2.6
           + bladeGrainPhase * 1.7 + position.y * 9.0);
@@ -2271,7 +2279,7 @@ vFoliageAltitude = 0.0;
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <common>",
-          "#include <common>\nvarying float vFoliageGust;\nvarying float vFoliageAltitude;",
+          "#include <common>\nvarying float vFoliageGust;\nvarying float vFoliageAltitude;\nvarying float vWindRibbon;",
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <color_fragment>",
@@ -2281,6 +2289,10 @@ vFoliageAltitude = 0.0;
           diffuseColor.rgb *= 1.0 + vec3(0.054, 0.082, 0.034) * windLightCatch;
           diffuseColor.rgb += vec3(0.024, 0.068, 0.056) * windLightCatch
             + vec3(0.034, 0.025, 0.008) * windTipFlash;
+          float windRibbonLight = smoothstep(0.12, 0.9, vWindRibbon);
+          vec3 windRibbonTint = mix(vec3(0.038, 0.072, 0.026),
+            vec3(0.028, 0.064, 0.092), vFoliageAltitude);
+          diffuseColor.rgb += windRibbonTint * windRibbonLight * 0.62;
           diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.88, 0.98, 1.08)
             + vec3(0.018, 0.038, 0.052), vFoliageAltitude * 0.34);`,
         );
@@ -7663,9 +7675,10 @@ vFoliageAltitude = 0.0;
           // 根鬚是一個共享彎曲帶狀幾何的實例批次，沿用 GPU 微風，不逐根建立動畫 Mesh。
           const rootSeed = Math.abs(Math.sin(cell.x * 89.3 + cell.z * 53.7
             + d.dc * 27.1 + d.dr * 41.9) * 27491.73) % 1;
-          const rootHeight = Math.min(ridgeVertical * 0.86, 0.92 + rootSeed * 0.22);
+          const rootVertical = high - low;
+          const rootHeight = Math.min(rootVertical * 0.86, 0.92 + rootSeed * 0.22);
           if (
-            cell.h >= 2 && neighbor && neighbor.h > 0 && ridgeVertical >= 0.78 &&
+            cell.h >= 2 && neighbor && neighbor.h > 0 && rootVertical >= 0.78 &&
             rootSeed > 0.79 && cliffRootCurtains.length < 190 && rootHeight > 0.48 &&
             !protectedBuildings.some((building) =>
               Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 1.18,
