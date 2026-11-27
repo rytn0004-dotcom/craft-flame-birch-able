@@ -504,6 +504,9 @@ export function buildHeights(board: TileBoard): number[] {
     const broad = valueNoise(wx, wy, worldSalt ^ 0x9e3779b9, 13.5);
     const middle = valueNoise(wx * 0.98 + 31, wy * 0.98 - 19, worldSalt, 6.2);
     const fine = valueNoise(c + 47, r - 13, worldSalt ^ 0x85ebca6b, 2.9);
+    // 由同一個高頻場分出碎岩脊與小型冰斗凹口；不增加額外噪聲採樣，保持生成成本穩定。
+    const screeRidge = Math.pow(Math.max(0, 1.0 - Math.abs(fine * 2.0 - 1.0)), 2.7);
+    const screeHollow = Math.pow(Math.max(0, 1.0 - Math.abs(fine * 2.0 - 0.28)), 5.0);
     const ridgeSource = valueNoise(wx * 0.82 - 7, wy * 0.82 + 11, worldSalt ^ 0xc2b2ae35, 9.2);
     const ridged = 1.0 - Math.abs(ridgeSource * 2.0 - 1.0);
     // 斜向脊線場把高地核心沿地形主軸拉長，避免山頂只形成零碎棋盤塊。
@@ -570,6 +573,7 @@ export function buildHeights(board: TileBoard): number[] {
         + ridged * 0.15 + spineRidge * 0.085 + crossRidge * 0.065
         + ridgeSpur * 0.025 + glacialShoulder * 0.02
         + windwardRidge * 0.035 + basin * 0.05 + continental * 0.045 + plateau * 0.05
+        + screeRidge * 0.018 - screeHollow * 0.011
         - windCut * 0.05 - tributaryCut * 0.018 - saddleBasin * 0.01,
     ));
   };
