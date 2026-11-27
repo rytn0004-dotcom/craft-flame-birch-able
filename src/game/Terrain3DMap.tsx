@@ -1700,6 +1700,13 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             * vTerrainSideFacing * highlandStrength;
           float highlandLipCatch = pow(max(0.0, 1.0 - abs(edgeChipNoise)), 7.0)
             * tileEdgeWear * highlandStrength;
+          // 高地頂緣的石英風化層：以窄而破碎的反光取代每格一致的亮框。
+          float topEdgeQuartz = exp(-pow((tileEdgeDistance - 0.064) * 23.0, 2.0))
+            * tileEdgeWear * highlandStrength
+            * smoothstep(-0.35, 0.72, edgeChipNoise);
+          float edgeRootShadow = exp(-pow((tileEdgeDistance - 0.13) * 15.0, 2.0))
+            * tileEdgeWear * highlandStrength
+            * (0.55 + 0.45 * lichenField);
           float highlandTopPigment = ${height === 3 ? "0.16" : height === 2 ? "0.105" : height === 1 ? "0.035" : "0.0"};
           float ridgeSpineField = sin(terrainWorld.x * 0.57
             + sin(terrainWorld.y * 0.34) * 1.9)
@@ -1748,7 +1755,9 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           diffuseColor.rgb += vec3(0.045, 0.073, 0.11)
             * ridgeContour * highlandStrength * 0.12
             + vec3(0.11, 0.15, 0.16) * highlandSideBand * 0.18
-            + vec3(0.16, 0.19, 0.17) * highlandLipCatch * 0.22;
+            + vec3(0.16, 0.19, 0.17) * highlandLipCatch * 0.22
+            + vec3(0.14, 0.2, 0.22) * topEdgeQuartz * 0.2;
+          diffuseColor.rgb *= 1.0 - edgeRootShadow * 0.085;
           diffuseColor.rgb *= 1.0 - windCarve * highlandStrength * 0.055;
           diffuseColor.rgb = mix(diffuseColor.rgb,
             diffuseColor.rgb * vec3(1.13, 1.08, 0.96), exposedCrest * highlandStrength * 0.11);
@@ -1856,7 +1865,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             + terrainMicroStrata * 0.035 + terrainRootThread * 0.026
             + sideFractureDust * vTerrainSideFacing * 0.055
             + sideRunoffStain * vTerrainSideFacing * 0.035
-            + highlandSideBand * 0.028
+            + highlandSideBand * 0.028 + topEdgeQuartz * 0.045
             - terrainDewFilm * 0.018 - exposedMineral * 0.045 - frostGranule * 0.018
             + terrainSlipBody * 0.075 - terrainSlipPressure * 0.055, 0.0, 1.0);`,
         );
@@ -2459,7 +2468,9 @@ uniform vec2 uSlipDirection;
 uniform float uSlipStrength;
 varying float vFoliageGust;
 varying float vFoliageAltitude;
-varying float vWindRibbon;`,
+varying float vWindRibbon;
+varying float vSlipWake;
+varying float vSlipWake;`,
         );
         shader.vertexShader = shader.vertexShader.replace(
           "#include <begin_vertex>",
@@ -2467,6 +2478,7 @@ varying float vWindRibbon;`,
 vFoliageGust = 0.0;
 vFoliageAltitude = 0.0;
 vWindRibbon = 0.0;
+vSlipWake = 0.0;
 #ifdef USE_INSTANCING
         float foliagePhase = dot(instanceMatrix[3].xz, vec2(0.17, 0.13));
         // Higher terraces receive cleaner, stronger ridge gusts while low meadow plants stay sheltered.
@@ -2579,6 +2591,9 @@ vWindRibbon = 0.0;
         transformed.y += canopyRecoil;
         vFoliageGust = max(vFoliageGust, min(1.0,
           slipGust * ${slipResponse.toFixed(2)} + slipFront * 0.74));
+        // 將高速尾流獨立輸出到片元階段：葉片不只彎腰，還會短暫接住壓力環的冷色高光。
+        vSlipWake = clamp(slipGust * 0.72 + slipFront * 0.84
+          + slipPressureHalo * 0.38, 0.0, 1.0);
 #endif`,
         );
         shader.fragmentShader = shader.fragmentShader.replace(
@@ -2604,11 +2619,18 @@ vWindRibbon = 0.0;
             + vWindRibbon * 5.4 + vFoliageAltitude * 2.0)), 13.0) * smoothstep(0.42, 0.96, vFoliageGust);
           diffuseColor.rgb += vec3(0.035, 0.082, 0.09) * leafVeinGleam * 0.28
             + vec3(0.08, 0.105, 0.095) * leafEdgePearl * 0.16;
+          // 高速彈體的壓力前緣會沿葉脈掠出冷青反光，尾流過後迅速消退。
+          float slipWakeGleam = pow(max(0.0, sin(uFoliageTime * 8.4
+            + vWindRibbon * 8.0 + vSlipWake * 5.0)), 5.0) * vSlipWake;
+          diffuseColor.rgb = mix(diffuseColor.rgb,
+            diffuseColor.rgb * vec3(0.78, 1.08, 1.2) + vec3(0.012, 0.042, 0.052),
+            vSlipWake * 0.32);
+          diffuseColor.rgb += vec3(0.045, 0.13, 0.16) * slipWakeGleam * 0.34;
           diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.88, 0.98, 1.08)
             + vec3(0.018, 0.038, 0.052), vFoliageAltitude * 0.34);`,
         );
       };
-      material.customProgramCacheKey = () => `${cacheKey}-traveling-wind-ribbon-v4-tip-recoil-wake-shear`;
+      material.customProgramCacheKey = () => `${cacheKey}-traveling-wind-ribbon-v5-slipwake-chromatic-recoil`;
     };
     installFoliageWind(shared.foliageWind, "tide-foliage-wind-v8-pressure-sweep");
     installFoliageWind(shared.treeCanopyWind, "tide-tree-canopy-gust-v4-pressure-sweep", 2.4);
@@ -5637,6 +5659,9 @@ vWindRibbon = 0.0;
             const bladePalette = mossPatch ? mossBladePalette : meadowBladePalette;
             const paletteIndex = Math.floor(seed * bladePalette.length + blade * 1.7) % bladePalette.length;
             tint.set(bladePalette[paletteIndex]);
+            // 固定種子再加入細微色相與明度漂移，讓同一草叢也有嫩葉、成熟葉與帶金葉尖。
+            tint.offsetHSL((seed - 0.5) * 0.028 + (blade - 1.5) * 0.003,
+              0.025 + seed * 0.025, (seed - 0.5) * 0.065 + (blade - 1.5) * 0.008);
             grass.setColorAt(index, tint);
           }
         }
