@@ -1759,6 +1759,12 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             "float ironOxide = pow(max(0.0, sin(cliffWorldXZ.x * 0.72 + cliffWorldXZ.y * 0.41 + cliffFlow * 2.0) * 0.5 + 0.5), 8.0) * (0.5 + 0.5 * sin(vCliffWorldPosition.y * 3.8));",
             "float dampLichen = smoothstep(0.12, 0.84, sin(cliffWorldXZ.x * 0.19 - cliffWorldXZ.y * 0.26 + cliffFlow) * 0.5 + 0.5) * (1.0 - smoothstep(0.32, 0.72, vCliffWorldPosition.y - floor(vCliffWorldPosition.y)));",
             "float saltBloom = pow(max(0.0, sin(cliffWorldXZ.x * 1.7 - cliffWorldXZ.y * 1.1 + vCliffWorldPosition.y * 0.7)), 11.0);",
+            // 微型風蝕孔、沿重力方向的水痕與碎屑沉積，讓大面積岩壁不再只有重複水平條紋。
+            "float cliffPoreNoise = sin(cliffWorldXZ.x * 23.7 + sin(cliffWorldXZ.y * 17.3) * 1.8) * cos(cliffWorldXZ.y * 21.1 - cliffWorldXZ.x * 13.7);",
+            "float cliffPitting = pow(max(0.0, cliffPoreNoise * 0.5 + 0.5), 9.0) * (0.35 + weatheredPocket * 0.65);",
+            "float runoffPath = sin(cliffWorldXZ.x * 4.7 + sin(vCliffWorldPosition.y * 2.1) * 1.4);",
+            "float runoffStreak = pow(max(0.0, 1.0 - abs(runoffPath)), 12.0) * (0.35 + dampLichen * 0.65);",
+            "float screeDeposit = smoothstep(0.52, 0.94, sin(cliffWorldXZ.x * 2.3 + cliffWorldXZ.y * 1.9 + cliffFlow * 2.6) * 0.5 + 0.5) * (1.0 - smoothstep(0.12, 0.88, vCliffWorldPosition.y - floor(vCliffWorldPosition.y)));",
             "diffuseColor.rgb *= 0.94 + strataLine * strataBreak * 0.09;",
             "diffuseColor.rgb *= 1.0 - fractureMask * 0.28;",
             "diffuseColor.rgb += vec3(0.11, 0.14, 0.16) * fractureMask * 0.12;",
@@ -1770,7 +1776,11 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             "diffuseColor.rgb += vec3(0.095, 0.073, 0.041) * edgePatina * 0.12;",
             "diffuseColor.rgb += vec3(0.16, 0.19, 0.2) * mineralDust * 0.045;",
             "diffuseColor.rgb *= 1.0 - weatheredPocket * 0.075;",
+            "diffuseColor.rgb *= 1.0 - cliffPitting * 0.12;",
+            "diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.68, 0.78, 0.74), runoffStreak * 0.16);",
+            "diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.12, 0.94, 0.74), screeDeposit * 0.12);",
             "diffuseColor.rgb += vec3(0.24, 0.29, 0.3) * cleavageLine * 0.038;",
+            "diffuseColor.rgb += vec3(0.12, 0.105, 0.082) * cliffPitting * 0.035;",
             "diffuseColor.rgb += vec3(0.12, 0.2, 0.19) * quartzBranch * mineralVein * 0.22;",
           ].join("\n"),
         );
@@ -1779,11 +1789,11 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           [
             "#include <roughnessmap_fragment>",
             "float cliffGrain = sin(vCliffWorldPosition.x * 7.3 + vCliffWorldPosition.z * 5.7) * cos(vCliffWorldPosition.z * 8.1 - vCliffWorldPosition.x * 3.2);",
-            "roughnessFactor = clamp(roughnessFactor + cliffGrain * 0.035 + fractureMask * 0.11 - mineralVein * 0.08 - dampLichen * 0.035 + weatheredPocket * 0.06 - cleavageLine * 0.025, 0.0, 1.0);",
+            "roughnessFactor = clamp(roughnessFactor + cliffGrain * 0.035 + fractureMask * 0.11 - mineralVein * 0.08 - dampLichen * 0.035 + weatheredPocket * 0.06 - cleavageLine * 0.025 + cliffPitting * 0.09 + runoffStreak * 0.035, 0.0, 1.0);",
           ].join("\\n"),
         );
       };
-      material.customProgramCacheKey = () => "tide-cliff-strata-world-weathering-v4-cleavage";
+      material.customProgramCacheKey = () => "tide-cliff-strata-world-weathering-v5-runoff-pitting";
     };
     installCliffStrata(shared.cliff);
 
