@@ -3903,8 +3903,9 @@ vWindRibbon = 0.0;
 
       // 不同高度的相鄰格之間鋪設岩肩斜坡：將垂直階梯轉成可讀的山坡輪廓。
       // 每格最多選一個上坡方向，避免十字交會處的坡面互相穿插；高度判定與選格射線保持原樣。
-      const transitionGeometry = (() => {
+      const makeTransitionGeometry = (descending: boolean) => {
         const positions: number[] = [];
+        const uvs: number[] = [];
         const indices: number[] = [];
         const alongSegments = 12;
         const acrossSegments = 6;
@@ -3918,7 +3919,9 @@ vWindRibbon = 0.0;
             const chippedGrain = (
               Math.sin(t * 31.0 + v * 17.0) + Math.sin(t * 17.0 - v * 23.0)
             ) * 0.0009 * Math.sin(t * Math.PI);
-            positions.push(x, t * HEIGHT_STEP + centerRidge + chippedGrain, z);
+            const rampHeight = (descending ? 1.0 - t : t) * HEIGHT_STEP;
+            positions.push(x, rampHeight + centerRidge + chippedGrain, z);
+            uvs.push(t, v);
           }
         }
         for (let row = 0; row < acrossSegments; row++) {
@@ -3933,11 +3936,14 @@ vWindRibbon = 0.0;
         }
         const geometry = new THREE.BufferGeometry();
         geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+        geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
         geometry.setIndex(indices);
         geometry.computeVertexNormals();
         geometry.computeBoundingSphere();
         return geometry;
-      })();
+      };
+      const transitionGeometry = makeTransitionGeometry(false);
+      const descendingTransitionGeometry = makeTransitionGeometry(true);
       const transitionDirections = [
         { dc: 1, dr: 0, rotation: 0 },
         { dc: -1, dr: 0, rotation: Math.PI },
@@ -4009,6 +4015,78 @@ vWindRibbon = 0.0;
           ramps.computeBoundingSphere();
           ramps.frustumCulled = true;
           terrainRoot.add(ramps);
+        }
+      }
+
+      // 擴張模式的 0 級格可能是怪物道路：坡面只鋪在高地本身，下降到道路邊緣即停止。
+      // 這樣能柔化 Lv.1→道路的高差，同時不覆蓋道路石板、不改道路碰撞與通行寬度。
+      if (data.mapMode === "expand") {
+        const descendingChunks = new Map<string, { byHighHeight: { x: number; z: number; rotation: number; seed: number; region: string }[][] }>();
+        for (const cell of tileCells.values()) {
+          if (cell.h < 1 || cell.h > 3) continue;
+          const gx = Math.floor(cell.x);
+          const gy = Math.floor(cell.z);
+          let selected: { rotation: number; seed: number; neighbor: { x: number; z: number; h: number } } | null = null;
+          for (const direction of transitionDirections) {
+            const neighbor = tileCells.get((gx + direction.dc) + "," + (gy + direction.dr));
+            if (!neighbor || neighbor.h !== 0) continue;
+            const seed = Math.abs(Math.sin(gx * 53.9 + gy * 97.1 + direction.dc * 23.7 + direction.dr * 11.3) * 21971.3) % 1;
+            if (!selected || seed > selected.seed) selected = { rotation: direction.rotation, seed, neighbor };
+          }
+          if (!selected) continue;
+          const crossesStructure = protectedBuildings.some((building) =>
+            Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 0.48
+            || Math.hypot(selected!.neighbor.x - building.x, selected!.neighbor.z - building.z) < building.radius + 0.48,
+          );
+          if (crossesStructure) continue;
+          const chunkX = Math.floor(gx / terrainChunkSize);
+          const chunkY = Math.floor(gy / terrainChunkSize);
+          const chunkKey = chunkX + "," + chunkY;
+          let chunk = descendingChunks.get(chunkKey);
+          if (!chunk) {
+            chunk = { byHighHeight: [[], [], [], []] };
+            descendingChunks.set(chunkKey, chunk);
+          }
+          chunk.byHighHeight[cell.h].push({
+            x: cell.x,
+            z: cell.z,
+            rotation: selected.rotation,
+            seed: selected.seed,
+            region: terrainRegion(cell),
+          });
+        }
+        for (const chunk of descendingChunks.values()) {
+          for (let highHeight = 1; highHeight <= 3; highHeight++) {
+            const sites = chunk.byHighHeight[highHeight];
+            if (!sites.length) continue;
+            const ramps = new THREE.InstancedMesh(
+              descendingTransitionGeometry,
+              shared.terrain[highHeight],
+              sites.length,
+            );
+            const dummy = new THREE.Object3D();
+            const tint = new THREE.Color();
+            for (let i = 0; i < sites.length; i++) {
+              const site = sites[i];
+              dummy.position.set(site.x, groundTop(0) + 0.0015, site.z);
+              dummy.rotation.set(0, site.rotation, 0);
+              dummy.scale.set(1, 1, 1);
+              dummy.updateMatrix();
+              ramps.setMatrixAt(i, dummy.matrix);
+              const palette = regionTint[site.region] ?? regionTint.meadow;
+              const shade = 0.94 + site.seed * 0.08;
+              tint.setRGB(shade * palette[0], shade * palette[1], shade * palette[2]);
+              ramps.setColorAt(i, tint);
+            }
+            ramps.instanceMatrix.needsUpdate = true;
+            if (ramps.instanceColor) ramps.instanceColor.needsUpdate = true;
+            ramps.castShadow = false;
+            ramps.receiveShadow = true;
+            ramps.renderOrder = 0;
+            ramps.computeBoundingSphere();
+            ramps.frustumCulled = true;
+            terrainRoot.add(ramps);
+          }
         }
       }
 
