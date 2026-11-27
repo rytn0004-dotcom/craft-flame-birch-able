@@ -1055,10 +1055,10 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       chargeCrystal: new THREE.MeshPhysicalMaterial({ color: "#8af4e8", metalness: 0.22, roughness: 0.13, clearcoat: 0.9, clearcoatRoughness: 0.06, envMapIntensity: 1.35, emissive: "#00a89c", emissiveIntensity: 0.8 }),
       glass: new THREE.MeshPhysicalMaterial({ color: "#0e3945", roughness: 0.2, metalness: 0.12, clearcoat: 0.92, clearcoatRoughness: 0.08, envMapIntensity: 1.05, emissive: "#0a6070", emissiveIntensity: 0.42 }),
       terrain: [
-        new THREE.MeshStandardMaterial({ color: MATERIALS.road, roughness: 0.96, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.012 }),
-        new THREE.MeshStandardMaterial({ color: MATERIALS.low, roughness: 0.95, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.018 }),
-        new THREE.MeshStandardMaterial({ color: MATERIALS.mid, roughness: 0.93, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.021 }),
-        new THREE.MeshStandardMaterial({ color: MATERIALS.high, roughness: 0.91, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.024 }),
+        new THREE.MeshStandardMaterial({ color: MATERIALS.road, roughness: 0.96, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.012, transparent: false, opacity: 1, depthTest: true, depthWrite: true, colorWrite: true, side: THREE.DoubleSide }),
+        new THREE.MeshStandardMaterial({ color: MATERIALS.low, roughness: 0.95, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.018, transparent: false, opacity: 1, depthTest: true, depthWrite: true, colorWrite: true, side: THREE.DoubleSide }),
+        new THREE.MeshStandardMaterial({ color: MATERIALS.mid, roughness: 0.93, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.021, transparent: false, opacity: 1, depthTest: true, depthWrite: true, colorWrite: true, side: THREE.DoubleSide }),
+        new THREE.MeshStandardMaterial({ color: MATERIALS.high, roughness: 0.91, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.024, transparent: false, opacity: 1, depthTest: true, depthWrite: true, colorWrite: true, side: THREE.DoubleSide }),
       ],
       cliff: new THREE.MeshStandardMaterial({ color: "#344c4c", roughness: 0.98, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.034 }),
       cliffBand: new THREE.MeshStandardMaterial({ color: "#637c6b", roughness: 0.94, roughnessMap: surfaceRoughnessMap, bumpMap: surfaceReliefMap, bumpScale: 0.022 }),
@@ -1572,7 +1572,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <common>",
-          "#include <common>\nvarying vec3 vTerrainWorldPosition;\nvarying float vTerrainSideFacing;\nvarying float vTerrainTopFacing;",
+          "#include <common>\nvarying vec3 vTerrainWorldPosition;\nvarying vec3 vTerrainLocalPosition;\nvarying float vTerrainSideFacing;\nvarying float vTerrainTopFacing;",
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <color_fragment>",
