@@ -2480,10 +2480,18 @@ vWindRibbon = 0.0;
         vec2 slipPressurePush = slipPerpendicular * slipSideSign
           * slipPressureHalo * (0.035 + slipPressureWave * 0.014)
           - uSlipDirection * slipPressureHalo * 0.018;
-        transformed.xz += slipFrontPush + slipBend * slipGust + slipCurl + slipPressurePush;
+        // 尾流經過後，草尖會有細小的高頻抖動與延遲回彈；根部保持穩定，避免整株像漂浮物平移。
+        float slipTipMask = pow(smoothstep(0.08, 0.72, position.y), 1.65);
+        float slipTipFlutter = sin(slipAlong * 1.85 + slipSide * 1.6
+          + foliagePhase * 2.1 + uFoliageTime * 10.2) * slipGust * 0.026 * slipTipMask;
+        vec2 slipTipShear = slipPerpendicular * slipSideSign * slipTipFlutter
+          + uSlipDirection * slipTipFlutter * 0.34;
+        transformed.xz += slipFrontPush + slipBend * slipGust + slipCurl
+          + slipPressurePush + slipTipShear;
         transformed.y -= max(position.y, 0.0)
           * (slipGust * ${pressResponse.toFixed(3)} + slipFront * 0.12
             + slipPressureHalo * (0.052 + max(0.0, slipPressureWave) * 0.032));
+        transformed.y += slipTipFlutter * 0.38;
         transformed.y += canopyRecoil;
         vFoliageGust = max(vFoliageGust, min(1.0,
           slipGust * ${slipResponse.toFixed(2)} + slipFront * 0.74));
@@ -2516,7 +2524,7 @@ vWindRibbon = 0.0;
             + vec3(0.018, 0.038, 0.052), vFoliageAltitude * 0.34);`,
         );
       };
-      material.customProgramCacheKey = () => `${cacheKey}-traveling-wind-ribbon-v3-ridge-whorl-turbulence`;
+      material.customProgramCacheKey = () => `${cacheKey}-traveling-wind-ribbon-v4-tip-recoil-wake-shear`;
     };
     installFoliageWind(shared.foliageWind, "tide-foliage-wind-v8-pressure-sweep");
     installFoliageWind(shared.treeCanopyWind, "tide-tree-canopy-gust-v4-pressure-sweep", 2.4);
@@ -2538,7 +2546,7 @@ vWindRibbon = 0.0;
         shader.uniforms.uSlipStrength = slipWindUniforms.strength;
         shader.vertexShader = shader.vertexShader.replace(
           "#include <common>",
-          "#include <common>\nuniform float uPollenTime;\nuniform vec2 uSlipPosition;\nuniform vec2 uSlipDirection;\nuniform float uSlipStrength;\nvarying float vPollenPhase;",
+          "#include <common>\nuniform float uPollenTime;\nuniform vec2 uSlipPosition;\nuniform vec2 uSlipDirection;\nuniform float uSlipStrength;\nvarying float vPollenPhase;\nvarying float vPollenWake;",
         );
         shader.vertexShader = shader.vertexShader.replace(
           "#include <begin_vertex>",
@@ -2548,6 +2556,7 @@ vWindRibbon = 0.0;
             pollenPhase = dot(instanceMatrix[3].xz, vec2(0.13, 0.19));
           #endif
           vPollenPhase = pollenPhase;
+          vPollenWake = 0.0;
           transformed.x += sin(uPollenTime * 0.62 + pollenPhase) * 0.082;
           transformed.y += cos(uPollenTime * 0.86 + pollenPhase * 1.37) * 0.065;
           transformed.z += sin(uPollenTime * 0.51 + pollenPhase * 0.83) * 0.074;
@@ -2559,24 +2568,35 @@ vWindRibbon = 0.0;
             float pollenSlipWake = smoothstep(-9.0, -7.0, pollenSlipAlong)
               * (1.0 - smoothstep(-1.25, 0.15, pollenSlipAlong))
               * (1.0 - smoothstep(0.5, 3.1, pollenSlipWidth)) * uSlipStrength;
-            transformed.x -= uSlipDirection.x * pollenSlipWake * 0.18;
-            transformed.y += pollenSlipWake * (0.18 + 0.06 * sin(uPollenTime * 9.0 + pollenPhase));
-            transformed.z -= uSlipDirection.y * pollenSlipWake * 0.18;
+            float pollenVortex = exp(-pow((pollenSlipAlong + 3.15) * 0.34, 2.0))
+              * exp(-pow((pollenSlipWidth - 1.05) * 0.68, 2.0)) * uSlipStrength;
+            float pollenOrbit = pollenPhase * 2.3 + pollenSlipAlong * 0.62
+              + uPollenTime * 4.6;
+            vec2 pollenCurl = pollenSlipSide * sin(pollenOrbit) * pollenVortex * 0.24
+              + uSlipDirection * cos(pollenOrbit * 0.78) * pollenVortex * 0.12;
+            vPollenWake = clamp(pollenSlipWake + pollenVortex * 0.72, 0.0, 1.0);
+            transformed.xz -= uSlipDirection * pollenSlipWake * 0.18;
+            transformed.xz += pollenCurl;
+            transformed.y += pollenSlipWake * (0.18 + 0.06 * sin(uPollenTime * 9.0 + pollenPhase))
+              + pollenVortex * (0.11 + 0.07 * sin(pollenOrbit));
           #endif`,
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <common>",
-          "#include <common>\nuniform float uPollenTime;\nvarying float vPollenPhase;",
+          "#include <common>\nuniform float uPollenTime;\nvarying float vPollenPhase;\nvarying float vPollenWake;",
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <color_fragment>",
           `#include <color_fragment>
           float pollenTwinkle = 0.76 + 0.24 * (0.5 + 0.5 * sin(uPollenTime * 2.1 + vPollenPhase));
+          float pollenWakeSpark = pow(max(0.0, sin(uPollenTime * 8.2
+            + vPollenPhase * 3.1)), 9.0) * vPollenWake;
           diffuseColor.rgb *= 0.82 + pollenTwinkle * 0.36;
-          diffuseColor.a *= pollenTwinkle;`,
+          diffuseColor.rgb += vec3(0.11, 0.17, 0.19) * pollenWakeSpark * 0.34;
+          diffuseColor.a *= pollenTwinkle * (0.86 + vPollenWake * 0.14);`,
         );
       };
-      material.customProgramCacheKey = () => "tide-pollen-drift-twinkle-v2";
+      material.customProgramCacheKey = () => "tide-pollen-drift-twinkle-v3-slip-vortex-orbit";
     };
     installPollenDrift(shared.pollen);
 
@@ -7867,14 +7887,17 @@ vWindRibbon = 0.0;
                 : cell.h === 2
                   ? (layer === 0 ? "#d1bd91" : "#788d79")
                   : (layer === 0 ? "#ead6a9" : layer === 1 ? "#b39f79" : "#627d70");
-            const offset = 0.445 + layer * 0.032;
+            const rimSeed = Math.abs(Math.sin(cell.x * 61.7 + cell.z * 37.9
+              + d.dc * 19.3 + d.dr * 43.1 + layer * 11.7) * 23171.9) % 1;
+            const alongEdge = (rimSeed - 0.5) * 0.045;
+            const offset = 0.445 + layer * 0.032 + (rimSeed - 0.5) * 0.006;
             heightRims.push({
-              x: cell.x + Math.sign(d.dx) * offset,
-              y: high - 0.028 - layer * 0.115,
-              z: cell.z + Math.sign(d.dz) * offset,
-              rot: rimRot,
-              width: 0.94 - layer * 0.035,
-              depth: 0.13 + layer * 0.018,
+              x: cell.x + Math.sign(d.dx) * offset + (d.dc === 0 ? alongEdge : 0),
+              y: high - 0.028 - layer * 0.115 + (rimSeed - 0.5) * 0.004,
+              z: cell.z + Math.sign(d.dz) * offset + (d.dr === 0 ? alongEdge : 0),
+              rot: rimRot + (rimSeed - 0.5) * 0.025,
+              width: 0.89 - layer * 0.035 + rimSeed * 0.075,
+              depth: 0.112 + layer * 0.018 + rimSeed * 0.025,
               tint: levelTint,
             });
           }
