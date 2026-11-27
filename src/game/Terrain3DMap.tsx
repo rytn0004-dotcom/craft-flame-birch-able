@@ -5086,6 +5086,104 @@ vFoliageAltitude = 0.0;
         grass.receiveShadow = false;
         terrainRoot.add(grass);
 
+        // 風梳莎草：以五片不同高度、不同弧度的狹葉組成獨立草簇，打破單一闊葉草的重複輪廓。
+        // 一份細分葉片幾何由 InstancedMesh 重複使用，仍沿用同一套 GPU 風場與高速尾流彎折。
+        const sedgeCells = grassCells.filter((cell) => {
+          const region = terrainRegion(cell);
+          if (region !== "meadow" && region !== "moss") return false;
+          const seed = Math.abs(Math.sin(cell.x * 61.7 + cell.z * 137.3) * 31871.9) % 1;
+          return seed > 0.87;
+        }).slice(0, 220);
+        if (sedgeCells.length) {
+          const sedgePositions: number[] = [];
+          const sedgeColors: number[] = [];
+          const sedgeIndices: number[] = [];
+          const sedgeRows = 10;
+          const sedgeRails = [-1, -0.5, 0, 0.5, 1];
+          for (let leaf = 0; leaf < 5; leaf++) {
+            const angle = leaf * (Math.PI * 2 / 5) + 0.21;
+            const dirX = Math.cos(angle);
+            const dirZ = Math.sin(angle);
+            const sideX = -dirZ;
+            const sideZ = dirX;
+            const leafHeight = 0.36 + ((leaf * 0.173 + 0.31) % 1) * 0.19;
+            const leafReach = 0.095 + (leaf % 2) * 0.035;
+            const leafWidth = 0.021 + (leaf % 3) * 0.002;
+            const base = sedgePositions.length / 3;
+            for (let row = 0; row < sedgeRows; row++) {
+              const t = row / (sedgeRows - 1);
+              const taper = Math.pow(Math.max(0, 1 - t), 0.72)
+                * (0.22 + Math.sin(Math.PI * t) * 0.78);
+              const width = leafWidth * taper;
+              const outward = leafReach * t + Math.sin(Math.PI * t) * 0.018;
+              const centerX = dirX * outward + Math.sin(t * 4.1 + leaf) * 0.008 * t;
+              const centerZ = dirZ * outward + Math.cos(t * 3.4 + leaf * 0.7) * 0.007 * t;
+              const centerY = leafHeight * t - Math.max(0, t - 0.72) * (leaf % 2 ? 0.045 : 0.018);
+              for (let rail = 0; rail < sedgeRails.length; rail++) {
+                const across = sedgeRails[rail];
+                const edge = Math.abs(across);
+                const cup = (1 - edge) * Math.sin(Math.PI * t) * 0.0048;
+                const vein = rail === 2 ? 0.0038 * (1 - t * 0.6) : 0;
+                const edgeRoll = edge * edge * Math.sin(Math.PI * t) * 0.0018;
+                sedgePositions.push(
+                  centerX + sideX * across * width,
+                  centerY + cup + vein + edgeRoll,
+                  centerZ + sideZ * across * width,
+                );
+                const tip = Math.pow(t, 1.7);
+                const center = 1 - edge * 0.18;
+                sedgeColors.push(
+                  (0.22 + tip * 0.34) * center + (rail === 2 ? 0.045 : 0),
+                  (0.39 + tip * 0.42) * center + (rail === 2 ? 0.055 : 0),
+                  (0.19 + tip * 0.22) * center + (leaf % 2 ? 0.035 : 0),
+                );
+              }
+            }
+            for (let row = 0; row < sedgeRows - 1; row++) {
+              for (let rail = 0; rail < sedgeRails.length - 1; rail++) {
+                const a = base + row * sedgeRails.length + rail;
+                const b = a + sedgeRails.length;
+                sedgeIndices.push(a, b, a + 1, a + 1, b, b + 1);
+              }
+            }
+          }
+          const sedgeGeometry = new THREE.BufferGeometry();
+          sedgeGeometry.setAttribute("position", new THREE.Float32BufferAttribute(sedgePositions, 3));
+          sedgeGeometry.setAttribute("color", new THREE.Float32BufferAttribute(sedgeColors, 3));
+          sedgeGeometry.setIndex(sedgeIndices);
+          sedgeGeometry.computeVertexNormals();
+          sedgeGeometry.computeBoundingSphere();
+          const sedges = new THREE.InstancedMesh(sedgeGeometry, shared.grassBlade, sedgeCells.length);
+          const sedgeDummy = new THREE.Object3D();
+          const sedgeTint = new THREE.Color();
+          const sedgeMeadowPalette = ["#5c8e59", "#82a965", "#b4b879", "#9db18a"];
+          const sedgeMossPalette = ["#4d7c77", "#729b87", "#a4b99a", "#8aabb0"];
+          for (let i = 0; i < sedgeCells.length; i++) {
+            const cell = sedgeCells[i];
+            const seed = Math.abs(Math.sin(cell.x * 127.1 + cell.z * 311.7) * 43758.5453) % 1;
+            const angle = seed * Math.PI * 2;
+            sedgeDummy.position.set(
+              cell.x + Math.cos(angle) * 0.13,
+              groundTop(cell.h) + 0.014,
+              cell.z + Math.sin(angle) * 0.13,
+            );
+            sedgeDummy.rotation.set((seed - 0.5) * 0.08, angle, (0.5 - seed) * 0.1);
+            const size = 0.78 + seed * 0.42;
+            sedgeDummy.scale.set(size, size * (0.88 + seed * 0.2), size);
+            sedgeDummy.updateMatrix();
+            sedges.setMatrixAt(i, sedgeDummy.matrix);
+            const palette = terrainRegion(cell) === "moss" ? sedgeMossPalette : sedgeMeadowPalette;
+            sedgeTint.set(palette[Math.floor(seed * palette.length)]);
+            sedges.setColorAt(i, sedgeTint);
+          }
+          sedges.instanceMatrix.needsUpdate = true;
+          if (sedges.instanceColor) sedges.instanceColor.needsUpdate = true;
+          sedges.computeBoundingSphere();
+          sedges.castShadow = false;
+          sedges.receiveShadow = false;
+          terrainRoot.add(sedges);
+        }
+
         // Sparse meadow seed heads add a second vegetation height layer. Their stalks and
         // kernels share one curved mesh and one instanced draw call, and inherit the same GPU gust.
         const seedHeadCells = grassCells.filter((cell) => {
