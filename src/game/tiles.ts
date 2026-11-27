@@ -524,6 +524,20 @@ export function buildHeights(board: TileBoard): number[] {
       8.1,
     );
     const crossRidge = 1.0 - Math.abs(crossSource * 2.0 - 1.0);
+    // 逆風側的次級脊線與兩條尺度不同的集水槽，補出山肩、鞍部與支流蝕谷。
+    const windwardSource = valueNoise(
+      wx * 0.44 - wy * 0.31 + 29,
+      wy * 0.84 + wx * 0.22 - 43,
+      worldSalt ^ 0x165667b1,
+      7.4,
+    );
+    const windwardRidge = 1.0 - Math.abs(windwardSource * 2.0 - 1.0);
+    const saddleSource = valueNoise(wx * 0.63 + wy * 0.48 + 101,
+      wy * 0.91 - wx * 0.19 - 73, worldSalt ^ 0x27d4eb2f, 12.8);
+    const saddleBasin = Math.pow(Math.max(0, 1.0 - Math.abs(saddleSource * 2.0 - 1.0)), 2.35);
+    const tributarySource = valueNoise(wx * 1.07 + 13, wy * 1.07 - 31,
+      worldSalt ^ 0x85ebca6b, 4.6);
+    const tributaryCut = Math.pow(Math.max(0, 1.0 - Math.abs(tributarySource * 2.0 - 1.0)), 3.6);
     // 大尺度地勢控制山群聚落；高頻風切形成斷續沖蝕槽與自然鞍部。
     const continental = valueNoise(wx - 97, wy + 61, worldSalt ^ 0x27d4eb2f, 25.0);
     const windCutSource = valueNoise(
@@ -537,9 +551,10 @@ export function buildHeights(board: TileBoard): number[] {
     const plateauSource = broad * 0.64 + middle * 0.36;
     const plateau = Math.pow(Math.max(0, (plateauSource - 0.52) * 2.0), 1.35);
     return Math.max(0, Math.min(1,
-      broad * 0.27 + middle * 0.24 + fine * 0.08
-        + ridged * 0.15 + spineRidge * 0.09 + crossRidge * 0.07
-        + basin * 0.05 + continental * 0.05 + plateau * 0.05 - windCut * 0.05,
+      broad * 0.265 + middle * 0.235 + fine * 0.075
+        + ridged * 0.15 + spineRidge * 0.085 + crossRidge * 0.07
+        + windwardRidge * 0.035 + basin * 0.05 + continental * 0.05 + plateau * 0.055
+        - windCut * 0.05 - tributaryCut * 0.018 - saddleBasin * 0.01,
     ));
   };
 
@@ -658,7 +673,39 @@ export function buildHeights(board: TileBoard): number[] {
       }
     }
   }
-  // 模板核心／特殊台地高度為設計錨點，最後覆寫一次，確保隨機平滑不會抹掉它們。
+  // 跨地塊接縫再做一次窄範圍肩部融合，避免每張 20×20 模板邊界出現硬折線。
+  // 只處理非道路格，且不觸碰高度 0；相鄰模板的地形仍由世界座標噪聲保持連續。
+  const seamBlend = smoothed.slice();
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const onTileSeam = c % TILE === 0 || c % TILE === TILE - 1
+        || r % TILE === 0 || r % TILE === TILE - 1;
+      if (!onTileSeam) continue;
+      const index = r * COLS + c;
+      if (heights[index] === 0) continue;
+      let sum = smoothed[index] * 4.2;
+      let weight = 4.2;
+      for (const [dc, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+        const nc = c + dc, nr = r + dr;
+        if (nc < 0 || nr < 0 || nc >= COLS || nr >= ROWS) continue;
+        const neighborIndex = nr * COLS + nc;
+        if (heights[neighborIndex] === 0) continue;
+        sum += smoothed[neighborIndex] * 0.72;
+        weight += 0.72;
+      }
+      for (const [dc, dr] of [[1, 1], [1, -1], [-1, 1], [-1, -1]] as const) {
+        const nc = c + dc, nr = r + dr;
+        if (nc < 0 || nr < 0 || nc >= COLS || nr >= ROWS) continue;
+        const neighborIndex = nr * COLS + nc;
+        if (heights[neighborIndex] === 0) continue;
+        sum += smoothed[neighborIndex] * 0.32;
+        weight += 0.32;
+      }
+      seamBlend[index] = Math.max(1, Math.min(3, Math.round(sum / weight)));
+    }
+  }
+  for (let i = 0; i < smoothed.length; i++) smoothed[i] = seamBlend[i];
+  // 模板核心／特殊台地高度為設計錨點，最後覆寫一次，確保隨機平滑不會抹掉它們.
   for (const [index, fixedHeight] of fixedHeightOverrides) smoothed[index] = fixedHeight;
   return smoothed;
 }
