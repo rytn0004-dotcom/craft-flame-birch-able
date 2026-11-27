@@ -1251,12 +1251,29 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
         float cloudEye = pow(max(0.0, cloudCurrentA * 0.5 + 0.5), 3.0)
           * pow(max(0.0, cloudCurrentB * 0.5 + 0.5), 2.0);
         float cloudRim = pow(max(0.0, 1.0 - abs(cloudCurrentA * 0.55 + cloudCurrentB * 0.45)), 5.0);
+        // 每團霧雲內部都有獨立偏移的回旋暗流，像深淵氣團彼此牽引而非同步飄動。
+        vec2 cloudEyeUv = vAbyssCloudUv - vec2(0.5);
+        float cloudRadius = length(cloudEyeUv);
+        float cloudAngle = atan(cloudEyeUv.y, cloudEyeUv.x);
+        float cloudAnnulus = smoothstep(0.075, 0.16, cloudRadius)
+          * (1.0 - smoothstep(0.34, 0.46, cloudRadius));
+        float cloudVortexWave = sin(cloudAngle * 6.0 - cloudRadius * 32.0
+          - uAbyssCloudTime * 0.22 + vAbyssCloudPhase * 1.8);
+        float cloudVortexFilament = pow(max(0.0, cloudVortexWave * 0.5 + 0.5), 9.0)
+          * cloudAnnulus;
+        float cloudGravityWell = 1.0 - smoothstep(0.08, 0.58, cloudRadius);
+        float cloudUndertow = 0.5 + 0.5 * sin(cloudFlowUv.x * 13.0
+          - cloudFlowUv.y * 9.0 - uAbyssCloudTime * 0.17 + vAbyssCloudPhase * 2.3);
         diffuseColor.rgb *= mix(vec3(0.36, 0.43, 0.66), vec3(0.78, 0.86, 1.08), cloudEye * 0.42);
+        diffuseColor.rgb *= 1.0 - cloudGravityWell * 0.12;
         diffuseColor.rgb += vec3(0.018, 0.044, 0.11) * cloudRim * 0.38;
-        diffuseColor.a *= 0.76 + cloudEye * 0.15 + cloudRim * 0.09;`,
+        diffuseColor.rgb += vec3(0.026, 0.064, 0.12) * cloudVortexFilament * 0.32;
+        diffuseColor.rgb += vec3(0.012, 0.035, 0.068) * cloudUndertow * cloudAnnulus * 0.18;
+        diffuseColor.a *= 0.72 + cloudEye * 0.15 + cloudRim * 0.09
+          + cloudVortexFilament * 0.04 + cloudUndertow * cloudGravityWell * 0.025;`,
       );
     };
-    shared.blackMistCloud.customProgramCacheKey = () => "tide-abyss-cloud-maelstrom-v2";
+    shared.blackMistCloud.customProgramCacheKey = () => "tide-abyss-cloud-maelstrom-v3-gravity-braid";
 
     // 聖地地面符印與道路導光使用材質內動畫；不額外建立逐顆動畫物件。
     const installSanctuarySigil = (material: THREE.MeshBasicMaterial) => {
