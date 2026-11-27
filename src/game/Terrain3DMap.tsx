@@ -3470,6 +3470,9 @@ vFoliageAltitude = 0.0;
       const ridgeCrystalSites: { x: number; z: number; y: number; seed: number; tint: string }[] = [];
       for (const cell of tileCells.values()) {
         if (cell.h < 2 || ridgeCrystalSites.length >= 112) continue;
+        const region = terrainRegion(cell);
+        // 石灰岩已經有尖峰露頭；晶簇專屬古遺跡與苔脊，避免同一山頂堆滿相似尖錐。
+        if (region !== "ancient" && region !== "moss") continue;
         const gx = Math.floor(cell.x);
         const gy = Math.floor(cell.z);
         const seed = Math.abs(Math.sin((gx + 19.1) * 127.1
@@ -3482,10 +3485,7 @@ vFoliageAltitude = 0.0;
         if (protectedBuildings.some((building) =>
           Math.hypot(x - building.x, z - building.z) < building.radius + 0.22,
         )) continue;
-        const region = terrainRegion(cell);
-        const tint = region === "ancient" ? "#83d9d2"
-          : region === "limestone" ? "#d9e4e8"
-            : region === "moss" ? "#b0d09b" : "#b9c9df";
+        const tint = region === "ancient" ? "#83d9d2" : "#b0d09b";
         ridgeCrystalSites.push({
           x, z, y: groundTop(cell.h), seed, tint,
         });
