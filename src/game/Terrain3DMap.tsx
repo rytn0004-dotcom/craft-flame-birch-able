@@ -706,7 +706,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
               + wakeAftershock * 0.1 + wakeIonCore * 0.045);`,
         );
       };
-      material.customProgramCacheKey = () => "tide-projectile-wake-flow-v5-mach-compression-arc";
+      material.customProgramCacheKey = () => "tide-projectile-wake-flow-v6-aftershock-ion-core";
     };
     const installGroundSkimFlow = (material: THREE.MeshBasicMaterial) => {
       material.onBeforeCompile = (shader) => {
@@ -1670,7 +1670,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             - exposedMineral * 0.045 - frostGranule * 0.018, 0.0, 1.0);`,
         );
       };
-      material.customProgramCacheKey = () => "tide-terrain-ridgeline-scree-alpine-v10-dense-microrelief-" + height;
+      material.customProgramCacheKey = () => "tide-terrain-ridgeline-scree-alpine-v11-edge-scallop-" + height;
     };
     const installBlackMistVeil = (material: THREE.MeshBasicMaterial) => {
       material.onBeforeCompile = (shader) => {
