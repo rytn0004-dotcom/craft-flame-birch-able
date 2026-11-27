@@ -488,7 +488,14 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
         float dustPhase = dot(instanceMatrix[3].xz, vec2(1.71, 2.37));
         vTerrainDustPhase = dustPhase;
         transformed.y += sin(uTerrainDustTime * 2.6 + dustPhase) * 0.026;
-        transformed.x += cos(uTerrainDustTime * 1.8 + dustPhase * 1.31) * 0.018;`,
+        transformed.x += cos(uTerrainDustTime * 1.8 + dustPhase * 1.31) * 0.018;
+        transformed.z += sin(uTerrainDustTime * 1.45 + dustPhase * 0.87) * 0.022;
+        // 碎塵顆粒會隨尾流翻滾，細顆粒旋得快、大顆粒旋得慢，避免同方向漂移。
+        float dustSpin = uTerrainDustTime * (0.62 + fract(abs(dustPhase) * 0.37) * 0.78)
+          + dustPhase * 0.31;
+        vec2 dustSpinPosition = transformed.xz;
+        transformed.x = dustSpinPosition.x * cos(dustSpin) - dustSpinPosition.y * sin(dustSpin);
+        transformed.z = dustSpinPosition.x * sin(dustSpin) + dustSpinPosition.y * cos(dustSpin);`,
       );
       shader.fragmentShader = shader.fragmentShader.replace(
         "#include <common>",
@@ -498,13 +505,16 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
         "#include <color_fragment>",
         `#include <color_fragment>
         float dustPulse = 0.72 + 0.28 * (0.5 + 0.5 * sin(uTerrainDustTime * 3.2 + vTerrainDustPhase));
+        float dustEdgeGlint = pow(max(0.0, sin(uTerrainDustTime * 5.4
+          + vTerrainDustPhase * 2.7)), 8.0);
         diffuseColor.rgb *= 0.82 + dustPulse * 0.28;
-        diffuseColor.a *= dustPulse;`,
+        diffuseColor.rgb += vec3(0.055, 0.071, 0.064) * dustEdgeGlint * 0.18;
+        diffuseColor.a *= dustPulse * (0.9 + dustEdgeGlint * 0.1);`,
       );
     };
-    terrainDustMaterial.customProgramCacheKey = () => "tide-highland-slip-dust-v1";
+    terrainDustMaterial.customProgramCacheKey = () => "tide-highland-slip-dust-v2-tumble-microgrit";
     const terrainDustMesh = new THREE.InstancedMesh(
-      new THREE.IcosahedronGeometry(0.032, 0),
+      new THREE.IcosahedronGeometry(0.032, 1),
       terrainDustMaterial,
       28,
     );
