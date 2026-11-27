@@ -1178,9 +1178,11 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           float abyssIrisThreads = pow(max(0.0, sin(abyssAngle * 19.0
             + cos(abyssRadius * 42.0 - uMistTime * 0.16) * 1.6)), 9.0) * abyssIrisBand;
           float abyssDepth = 1.0 - smoothstep(0.02, 0.72, abyssRadius);
-          // 瞳孔像一道極細的直縫緩慢游移，呼吸時略微收縮；不改變地塊遮罩或實際開拓判定。
+          // 瞳孔會隨呼吸緩慢張合，視線像正在聚焦；只改變顏色遮罩，不觸碰開拓狀態。
           float abyssPupilX = sin(uMistTime * 0.19) * 0.009;
-          float abyssPupil = (1.0 - smoothstep(0.012, 0.034, abs(abyssUv.x - abyssPupilX)))
+          float abyssPupilAperture = 0.72 + abyssEyeBreath * 0.56;
+          float abyssPupil = (1.0 - smoothstep(0.012 * abyssPupilAperture,
+            0.034 * abyssPupilAperture, abs(abyssUv.x - abyssPupilX)))
             * (1.0 - smoothstep(0.095, 0.205, abs(abyssUv.y)))
             * (0.58 + abyssEyeBreath * 0.42);
           float abyssVortex = sin(abyssAngle * 9.0 + abyssRadius * 31.0 - uMistTime * 0.24);
@@ -1224,11 +1226,21 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           diffuseColor.rgb += vec3(0.035, 0.082, 0.13) * abyssLidArc * (0.16 + abyssEyeBreath * 0.12);
           diffuseColor.rgb += vec3(0.035, 0.095, 0.15) * abyssRadialRay * 0.28;
           diffuseColor.rgb += vec3(0.07, 0.15, 0.19) * abyssPupilGlint * 0.24;
+          // 開拓邊界的霧幕會伸出細長暗爪，沿實際遮罩邊緣來回牽扯，不擴張或改寫迷霧遮罩。
+          float mistClawFlow = sin(vMistFieldUv.x * 47.0
+            + sin(vMistFieldUv.y * 21.0 - uMistTime * 0.18) * 2.6 - uMistTime * 0.14);
+          float mistClaw = pow(max(0.0, mistClawFlow * 0.5 + 0.5), 11.0)
+            * revealEdge * (0.42 + 0.58 * abyssFlow);
+          float mistUndercut = pow(max(0.0, sin(vMistFieldUv.x * 19.0
+            - vMistFieldUv.y * 13.0 + uMistTime * 0.09)), 7.0) * revealEdge;
+          diffuseColor.rgb *= 1.0 - mistClaw * 0.16;
+          diffuseColor.rgb += vec3(0.012, 0.036, 0.088) * mistClaw * 0.78
+            + vec3(0.028, 0.065, 0.105) * mistUndercut * 0.42;
           diffuseColor.a *= 0.91 + 0.09 * (0.5 + 0.5 * sin(
             vMistFieldUv.x * 31.0 + vMistFieldUv.y * 19.0 - uMistTime * 0.16));`,
         );
       };
-      material.customProgramCacheKey = () => "tide-black-mist-abyss-gaze-v7-lid-rays-pupil-glint";
+      material.customProgramCacheKey = () => "tide-black-mist-abyss-gaze-v8-breathing-claw-edge";
     };
     installBlackMistFront(shared.blackMistField);
 
