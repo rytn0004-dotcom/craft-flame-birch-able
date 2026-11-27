@@ -1181,6 +1181,18 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           float abyssShardGlint = pow(max(0.0, sin(abyssAngle * 29.0
             + sin(abyssRadius * 34.0 - uMistTime * 0.22) * 1.4)), 18.0)
             * smoothstep(0.29, 0.34, abyssRadius) * (1.0 - smoothstep(0.405, 0.46, abyssRadius));
+          // 虹膜外緣形成不完整眼瞼弧，內圈放射細芒隨深淵呼吸微微改變方向。
+          float abyssLidArc = exp(-pow((abs(abyssUv.y)
+            - (0.145 + 0.008 * sin(abyssAngle * 2.0 - uMistTime * 0.14))) * 38.0, 2.0))
+            * smoothstep(0.075, 0.18, abs(abyssUv.x))
+            * (1.0 - smoothstep(0.32, 0.46, abyssRadius));
+          float abyssRadialRay = pow(max(0.0, 0.5 + 0.5 * sin(abyssAngle * 41.0
+            + log(abyssRadius + 0.022) * 22.0 - uMistTime * 0.28)), 15.0)
+            * smoothstep(0.205, 0.255, abyssRadius)
+            * (1.0 - smoothstep(0.37, 0.425, abyssRadius));
+          float abyssPupilGlint = exp(-pow((abyssUv.x - abyssPupilX - 0.014) * 112.0, 2.0))
+            * (1.0 - smoothstep(0.025, 0.19, abs(abyssUv.y)))
+            * (0.55 + abyssEyeBreath * 0.45);
           diffuseColor.rgb = mix(diffuseColor.rgb,
             diffuseColor.rgb * vec3(0.54, 0.66, 0.94), abyssFlow * 0.28);
           diffuseColor.rgb *= 1.0 - abyssDepth * 0.34;
@@ -1195,11 +1207,14 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           diffuseColor.rgb *= 1.0 - abyssGravityWell * 0.065 - abyssEclipse * 0.17;
           diffuseColor.rgb += vec3(0.018, 0.045, 0.09) * abyssSpiralThread * (0.24 + uMistPower * 0.18);
           diffuseColor.rgb += vec3(0.045, 0.082, 0.12) * abyssShardGlint * (0.2 + abyssEyeBreath * 0.2);
+          diffuseColor.rgb += vec3(0.035, 0.082, 0.13) * abyssLidArc * (0.16 + abyssEyeBreath * 0.12);
+          diffuseColor.rgb += vec3(0.035, 0.095, 0.15) * abyssRadialRay * 0.28;
+          diffuseColor.rgb += vec3(0.07, 0.15, 0.19) * abyssPupilGlint * 0.24;
           diffuseColor.a *= 0.91 + 0.09 * (0.5 + 0.5 * sin(
             vMistFieldUv.x * 31.0 + vMistFieldUv.y * 19.0 - uMistTime * 0.16));`,
         );
       };
-      material.customProgramCacheKey = () => "tide-black-mist-abyss-gaze-v6-eclipse-spiral";
+      material.customProgramCacheKey = () => "tide-black-mist-abyss-gaze-v7-lid-rays-pupil-glint";
     };
     installBlackMistFront(shared.blackMistField);
 
