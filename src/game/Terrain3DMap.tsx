@@ -2617,7 +2617,7 @@ vSlipWake = 0.0;
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <common>",
-          "#include <common>\nuniform float uFoliageTime;\nvarying float vFoliageGust;\nvarying float vFoliageAltitude;\nvarying float vWindRibbon;",
+          "#include <common>\nuniform float uFoliageTime;\nvarying float vFoliageGust;\nvarying float vFoliageAltitude;\nvarying float vWindRibbon;\nvarying float vSlipWake;",
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <color_fragment>",
@@ -2753,6 +2753,7 @@ vSlipWake = 0.0;
           transformed.y += sin(uWindLeafTime * 1.6 + leafSeed * 1.31) * 0.045;
           transformed.z += cos(uWindLeafTime * 0.63 + leafSeed * 0.9) * 0.11 + leafFlap * position.y * 0.12;
           #ifdef USE_INSTANCING
+            if (uLeafSlipStrength > 0.001) {
             vec2 leafSlipRelative = leafOrigin - uLeafSlipPosition;
             float leafSlipAlong = dot(leafSlipRelative, uLeafSlipDirection);
             vec2 leafSlipSide = vec2(-uLeafSlipDirection.y, uLeafSlipDirection.x);
@@ -2763,6 +2764,7 @@ vSlipWake = 0.0;
             transformed.x -= uLeafSlipDirection.x * leafSlipWake * 0.24;
             transformed.y += leafSlipWake * (0.1 + 0.04 * sin(uWindLeafTime * 7.0 + leafSeed));
             transformed.z -= uLeafSlipDirection.y * leafSlipWake * 0.24;
+            }
           #endif`,
         );
         shader.fragmentShader = shader.fragmentShader.replace(
@@ -10336,8 +10338,10 @@ vSlipWake = 0.0;
       }
       // 鏡頭拉遠時霧層更柔和、遠景更自然；拉近時保留地表紋理與建築邊緣。
       const viewDistance = camera.position.distanceTo(controls.target);
-      atmosphericFog.near = THREE.MathUtils.clamp(viewDistance * 1.08, 82, 185);
-      atmosphericFog.far = THREE.MathUtils.clamp(viewDistance * 3.7, 320, 860);
+      const fogNear = THREE.MathUtils.clamp(viewDistance * 1.08, 82, 185);
+      const fogFar = THREE.MathUtils.clamp(viewDistance * 3.7, 320, 860);
+      if (Math.abs(atmosphericFog.near - fogNear) > 0.35) atmosphericFog.near = fogNear;
+      if (Math.abs(atmosphericFog.far - fogFar) > 0.75) atmosphericFog.far = fogFar;
       for (const ring of rings) ring.rotation.y += dt * 0.42;
       for (let i = installationAnimations.length - 1; i >= 0; i--) {
         const animation = installationAnimations[i];
