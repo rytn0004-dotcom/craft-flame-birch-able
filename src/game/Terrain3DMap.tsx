@@ -3786,6 +3786,7 @@ vSlipWake = 0.0;
       const terrainChunkSize = TILE * 2;
       const terrainChunks = new Map<string, { byHeight: { x: number; z: number; h: number }[][] }>();
       const tileCells = new Map<string, { x: number; z: number; h: number }>();
+      const terrainCellsByHeight: { x: number; z: number; h: number }[][] = [[], [], [], []];
 
       const addCell = (gx: number, gy: number) => {
         const key = gx + "," + gy;
@@ -3798,6 +3799,7 @@ vSlipWake = 0.0;
         h = Math.max(0, Math.min(3, h | 0));
         const cell = { x: gx + 0.5, z: gy + 0.5, h };
         tileCells.set(key, cell);
+        terrainCellsByHeight[h].push(cell);
         terrainCellHeights.set(key, h);
         const chunkX = Math.floor(gx / terrainChunkSize);
         const chunkY = Math.floor(gy / terrainChunkSize);
@@ -3837,6 +3839,11 @@ vSlipWake = 0.0;
       if (!(await yieldTerrainBuild(buildVersion))) return;
       // 所有生態細節共用同一份列表，避免 20 多次重複配置大型陣列。
       const tileCellList = Array.from(tileCells.values());
+      const cellsByHeight = terrainCellsByHeight;
+      const highlandCells = cellsByHeight[1].concat(cellsByHeight[2], cellsByHeight[3]);
+      const upperHighlandCells = cellsByHeight[2].concat(cellsByHeight[3]);
+      const lowerTerrainCells = cellsByHeight[0].concat(cellsByHeight[1]);
+      const lowHeightTransitionCells = cellsByHeight[0].concat(cellsByHeight[1], cellsByHeight[2]);
 
       // 依目前真正已鋪設的地塊計算海域中心與尺寸；擴張時海岸同步外推，不把 200×200 空棋盤當成島嶼。
       let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
@@ -3974,6 +3981,7 @@ vSlipWake = 0.0;
       };
 
       // 每格岩面保留些微色差，讓平台不再像單色網格。
+      let terrainChunksBuilt = 0;
       for (const chunk of terrainChunks.values()) {
         for (let h = 0; h <= 3; h++) {
           const list = chunk.byHeight[h];
@@ -4013,6 +4021,10 @@ vSlipWake = 0.0;
           }));
           terrainPickMeshes.push(mesh);
           terrainRoot.add(mesh);
+        }
+        if (++terrainChunksBuilt >= 3) {
+          terrainChunksBuilt = 0;
+          if (!(await yieldTerrainBuild(buildVersion))) return;
         }
       }
 
@@ -4068,7 +4080,12 @@ vSlipWake = 0.0;
         { dc: 0, dr: -1, rotation: Math.PI / 2 },
       ];
       const transitionChunks = new Map<string, { byLowHeight: { x: number; z: number; rotation: number; seed: number; region: string }[][] }>();
-      for (const cell of tileCells.values()) {
+      let transitionBatchCount = 0;
+      for (const cell of lowHeightTransitionCells) {
+        if (++transitionBatchCount >= 4096) {
+          transitionBatchCount = 0;
+          if (!(await yieldTerrainBuild(buildVersion))) return;
+        }
         if (cell.h > 2 || (cell.h === 0 && data.mapMode === "expand")) continue;
         const gx = Math.floor(cell.x);
         const gy = Math.floor(cell.z);
@@ -4137,7 +4154,12 @@ vSlipWake = 0.0;
       // 這樣能柔化 Lv.1→道路的高差，同時不覆蓋道路石板、不改道路碰撞與通行寬度。
       if (data.mapMode === "expand") {
         const descendingChunks = new Map<string, { byHighHeight: { x: number; z: number; rotation: number; seed: number; region: string }[][] }>();
-        for (const cell of tileCells.values()) {
+        let descendingBatchCount = 0;
+        for (const cell of highlandCells) {
+          if (++descendingBatchCount >= 4096) {
+            descendingBatchCount = 0;
+            if (!(await yieldTerrainBuild(buildVersion))) return;
+          }
           if (cell.h < 1 || cell.h > 3) continue;
           const gx = Math.floor(cell.x);
           const gy = Math.floor(cell.z);
@@ -4206,8 +4228,8 @@ vSlipWake = 0.0;
 
       // 高地稀疏長出風蝕石英晶柱，按世界格座標固定抽樣；不遮擋塔位且整批只用一個 InstancedMesh。
       const ridgeCrystalSites: { x: number; z: number; y: number; seed: number; tint: string }[] = [];
-      for (const cell of tileCells.values()) {
-        if (cell.h < 2 || ridgeCrystalSites.length >= 136) continue;
+      for (const cell of upperHighlandCells) {
+        if (ridgeCrystalSites.length >= 136) break;
         const region = terrainRegion(cell);
         // 石灰岩已經有尖峰露頭；晶簇專屬古遺跡與苔脊，避免同一山頂堆滿相似尖錐。
         if (region !== "ancient" && region !== "moss") continue;
@@ -4421,7 +4443,7 @@ vSlipWake = 0.0;
       // 擴張地圖的道路格保持原有高度與碰撞資料，只在表面加石板鋪面。
       // 每格一片低矮石板，靠色差與細縫建立行進方向；道路外緣以窄石沿收邊。
       if (data.mapMode === "expand") {
-        const roadCells = tileCellList.filter((cell) =>
+        const roadCells = cellsByHeight[0].filter((cell) =>
           !data.blocked.has(Math.floor(cell.x) + "," + Math.floor(cell.z)),
         );
         if (roadCells.length) {
@@ -5374,13 +5396,12 @@ vSlipWake = 0.0;
 
       if (!(await yieldTerrainBuild(buildVersion))) return;
 
-      const cellsByHeight: { x: number; z: number; h: number }[][] = [[], [], [], []];
+      const cellsByHeight = terrainCellsByHeight;
       const cellsByRegion: Record<string, { x: number; z: number; h: number }[]> = {
         road: [], coast: [], moss: [], limestone: [], ancient: [], meadow: [],
       };
       let ecologyIndexCount = 0;
       for (const cell of tileCellList) {
-        cellsByHeight[cell.h].push(cell);
         const region = terrainRegion(cell);
         (cellsByRegion[region] ?? cellsByRegion.meadow).push(cell);
         if (++ecologyIndexCount >= 8192) {
@@ -7628,8 +7649,7 @@ vSlipWake = 0.0;
 
       if (data.mapMode === "layout") {
         // 自訂／完整關卡只把遺跡放在 blocked 障礙格，保留所有可建造平台的空間。
-        for (const cell of tileCells.values()) {
-          if (cell.h < 2) continue;
+        for (const cell of upperHighlandCells) {
           const gx = Math.floor(cell.x);
           const gy = Math.floor(cell.z);
           const key = gx + "," + gy;
@@ -7667,8 +7687,8 @@ vSlipWake = 0.0;
       // 陸上燈塔周圍八格必須全為同高度 blocked 障礙面，確保基座不侵入可建造平台。
       const beaconSites: { x: number; z: number; y: number; seed: number; offshore: boolean }[] = [];
       if (data.mapMode === "layout") {
-        for (const cell of tileCells.values()) {
-          if (cell.h < 2 || beaconSites.length >= 3) continue;
+        for (const cell of upperHighlandCells) {
+          if (beaconSites.length >= 3) break;
           const gx = Math.floor(cell.x);
           const gy = Math.floor(cell.z);
           const key = gx + "," + gy;
@@ -8212,7 +8232,7 @@ vSlipWake = 0.0;
           { dc: 1, dr: 0, rot: 0 },
           { dc: 0, dr: 1, rot: Math.PI / 2 },
         ];
-        for (const cell of tileCells.values()) {
+        for (const cell of lowerTerrainCells) {
           const gx = Math.floor(cell.x);
           const gy = Math.floor(cell.z);
           const centerKey = gx + "," + gy;
@@ -8363,7 +8383,12 @@ vSlipWake = 0.0;
       }[] = [];
       const ridgeSupports: { x: number; y: number; z: number; rot: number; height: number; tint: string }[] = [];
       const talusDebris: { x: number; y: number; z: number; scale: number; rot: number; tint: string }[] = [];
-      for (const cell of tileCells.values()) {
+      let cliffBatchCount = 0;
+      for (const cell of highlandCells) {
+        if (++cliffBatchCount >= 4096) {
+          cliffBatchCount = 0;
+          if (!(await yieldTerrainBuild(buildVersion))) return;
+        }
         if (cell.h <= 0) continue;
         const gx = Math.floor(cell.x), gy = Math.floor(cell.z);
         for (const d of cliffDirections) {
@@ -9225,7 +9250,12 @@ vSlipWake = 0.0;
         return geometry;
       })();
       const rampCells: { x: number; y: number; z: number; rot: number; level: number; rise: number }[] = [];
-      for (const cell of tileCells.values()) {
+      let rampCellBatchCount = 0;
+      for (const cell of highlandCells) {
+        if (++rampCellBatchCount >= 4096) {
+          rampCellBatchCount = 0;
+          if (!(await yieldTerrainBuild(buildVersion))) return;
+        }
         if (cell.h <= 0) continue;
         const gx = Math.floor(cell.x), gy = Math.floor(cell.z);
         const nearBuilding = isNearProtectedBuilding(cell.x, cell.z, 0.58);
