@@ -7420,9 +7420,9 @@ vFoliageAltitude = 0.0;
             const along = (veinSeed - 0.5) * 0.42;
             const isAncient = terrainRegion(cell) === "ancient";
             cliffMineralVeins.push({
-              x: cell.x + d.dx * 0.51 + Math.cos(faceAngle) * along,
+              x: cell.x + Math.sign(d.dx) * (d.dx === 0 ? 0 : 0.51) + Math.cos(faceAngle) * along,
               y: low + (high - low) * (0.48 + (veinSeed - 0.5) * 0.16),
-              z: cell.z + d.dz * 0.51 - Math.sin(faceAngle) * along,
+              z: cell.z + Math.sign(d.dz) * (d.dz === 0 ? 0 : 0.51) - Math.sin(faceAngle) * along,
               rot: faceAngle,
               height: (high - low) * (0.34 + veinSeed * 0.24),
               width: 0.034 + veinSeed * 0.018,
