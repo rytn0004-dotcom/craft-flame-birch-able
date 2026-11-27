@@ -2279,7 +2279,7 @@ vWindRibbon = 0.0;
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <common>",
-          "#include <common>\nvarying float vFoliageGust;\nvarying float vFoliageAltitude;\nvarying float vWindRibbon;",
+          "#include <common>\nuniform float uFoliageTime;\nvarying float vFoliageGust;\nvarying float vFoliageAltitude;\nvarying float vWindRibbon;",
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <color_fragment>",
