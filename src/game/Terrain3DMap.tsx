@@ -736,16 +736,27 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
               " * (1.0 - smoothstep(0.72, 1.0, skimAcross));",
             "float outerShear = smoothstep(0.24, 0.9, skimAcross)",
               " * (0.5 + 0.5 * sin(vGroundSkimUv.y * 33.0 - uGroundSkimTime * 7.2 + vGroundSkimUv.x * 8.0));",
+            // 貼地衝擊把細塵向兩側推開，形成短促壓力環與貼地回捲的氣流。
+            "float groundPressureRing = exp(-pow((vGroundSkimUv.y - 0.19) * 31.0, 2.0))",
+              " * smoothstep(0.12, 0.42, skimAcross) * (1.0 - smoothstep(0.78, 1.0, skimAcross));",
+            "float dustFan = pow(max(0.0, sin(vGroundSkimUv.y * 59.0 - uGroundSkimTime * 9.4",
+              " + vGroundSkimUv.x * 23.0 + sin(vGroundSkimUv.x * 12.0) * 1.2)), 8.0)",
+              " * smoothstep(0.18, 0.92, skimAcross);",
+            "float reboundCurl = pow(max(0.0, sin(vGroundSkimUv.y * 18.0 - uGroundSkimTime * 4.1",
+              " + abs(vGroundSkimUv.x - 0.5) * 8.0)), 5.0) * skimEdgeFade;",
             "diffuseColor.rgb *= 0.72 + groundRipple * 0.22 + pressureCrest * 0.06;",
             "diffuseColor.rgb += vec3(0.14, 0.3, 0.27) * (pressureCrest * 0.38 + abrasion * 0.26 + eddyThreads * 0.12);",
             "diffuseColor.rgb += vec3(0.045, 0.12, 0.15) * (twinVortex * 0.23 + pressureHalo * 0.34 + outerShear * 0.12);",
+            "diffuseColor.rgb += vec3(0.18, 0.22, 0.19) * (groundPressureRing * 0.18 + dustFan * 0.12);",
+            "diffuseColor.rgb += vec3(0.035, 0.095, 0.12) * reboundCurl * 0.12;",
             "diffuseColor.a *= skimEdgeFade * skimTailFade",
               " * (0.16 + groundRipple * 0.18 + pressureCrest * 0.3 + abrasion * 0.22 + eddyThreads * 0.1",
-              " + twinVortex * 0.13 + pressureHalo * 0.18 + outerShear * 0.06);",
+              " + twinVortex * 0.13 + pressureHalo * 0.18 + outerShear * 0.06",
+              " + groundPressureRing * 0.16 + dustFan * 0.1 + reboundCurl * 0.08);",
           ].join("\n"),
         );
       };
-      material.customProgramCacheKey = () => "tide-ground-skimming-vortex-pressure-v3";
+      material.customProgramCacheKey = () => "tide-ground-skimming-vortex-pressure-v4-dust-fan";
     };
 
     // 程序化黑霧貼圖：柔邊噪聲雲，不依賴外部圖檔，並以單一 InstancedMesh 控制效能。
