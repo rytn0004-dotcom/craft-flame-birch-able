@@ -758,19 +758,34 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
               " * smoothstep(0.18, 0.92, skimAcross);",
             "float reboundCurl = pow(max(0.0, sin(vGroundSkimUv.y * 18.0 - uGroundSkimTime * 4.1",
               " + abs(vGroundSkimUv.x - 0.5) * 8.0)), 5.0) * skimEdgeFade;",
+            // 低空滑行的壓力前緣呈弓形向兩側張開，尾部留下細小刮擦顆粒與分叉回捲帶。
+            "float skimBowCenter = 0.105 + skimAcross * skimAcross * 0.105",
+              " + 0.012 * sin(vGroundSkimUv.x * 9.0 - uGroundSkimTime * 0.32);",
+            "float skimBowArc = exp(-pow((vGroundSkimUv.y - skimBowCenter) * 38.0, 2.0))",
+              " * smoothstep(0.12, 0.3, skimAcross) * (1.0 - smoothstep(0.82, 1.0, skimAcross));",
+            "float skidGranule = pow(max(0.0, sin(vGroundSkimUv.y * 71.0 - uGroundSkimTime * 10.8",
+              " + vGroundSkimUv.x * 31.0 + sin(vGroundSkimUv.x * 17.0) * 1.6)), 10.0)",
+              " * smoothstep(0.16, 0.46, skimAcross) * skimTailFade;",
+            "float groundWakeFork = pow(max(0.0, sin(vGroundSkimUv.y * 22.0 - uGroundSkimTime * 4.8",
+              " + abs(vGroundSkimUv.x - 0.5) * 14.0 + sin(vGroundSkimUv.y * 13.0) * 0.9)), 6.0)",
+              " * smoothstep(0.22, 0.86, skimAcross) * skimEdgeFade;",
             "diffuseColor.rgb *= 0.72 + groundRipple * 0.22 + pressureCrest * 0.06;",
             "diffuseColor.rgb += vec3(0.14, 0.3, 0.27) * (pressureCrest * 0.38 + abrasion * 0.26 + eddyThreads * 0.12);",
             "diffuseColor.rgb += vec3(0.045, 0.12, 0.15) * (twinVortex * 0.23 + pressureHalo * 0.34 + outerShear * 0.12);",
             "diffuseColor.rgb += vec3(0.18, 0.22, 0.19) * (groundPressureRing * 0.18 + dustFan * 0.12);",
             "diffuseColor.rgb += vec3(0.035, 0.095, 0.12) * reboundCurl * 0.12;",
+            "diffuseColor.rgb += vec3(0.22, 0.29, 0.32) * skimBowArc * 0.24",
+              " + vec3(0.16, 0.19, 0.16) * skidGranule * 0.12",
+              " + vec3(0.04, 0.105, 0.13) * groundWakeFork * 0.16;",
             "diffuseColor.a *= skimEdgeFade * skimTailFade",
-              " * (0.16 + groundRipple * 0.18 + pressureCrest * 0.3 + abrasion * 0.22 + eddyThreads * 0.1",
-              " + twinVortex * 0.13 + pressureHalo * 0.18 + outerShear * 0.06",
-              " + groundPressureRing * 0.16 + dustFan * 0.1 + reboundCurl * 0.08);",
+              " * (0.14 + groundRipple * 0.16 + pressureCrest * 0.27 + abrasion * 0.2 + eddyThreads * 0.09",
+              " + twinVortex * 0.12 + pressureHalo * 0.16 + outerShear * 0.055",
+              " + groundPressureRing * 0.14 + dustFan * 0.09 + reboundCurl * 0.07",
+              " + skimBowArc * 0.16 + skidGranule * 0.08 + groundWakeFork * 0.07);",
           ].join("\n"),
         );
       };
-      material.customProgramCacheKey = () => "tide-ground-skimming-vortex-pressure-v4-dust-fan";
+      material.customProgramCacheKey = () => "tide-ground-skimming-vortex-pressure-v5-bow-skid-fork";
     };
 
     // 程序化黑霧貼圖：柔邊噪聲雲，不依賴外部圖檔，並以單一 InstancedMesh 控制效能。
