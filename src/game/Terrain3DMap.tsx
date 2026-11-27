@@ -1009,8 +1009,9 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
         color: "#1b2944",
         map: blackMistTexture,
         transparent: true,
-        opacity: 0.46,
+        opacity: 0.34,
         depthWrite: false,
+        depthTest: true,
         side: THREE.DoubleSide,
         toneMapped: false,
         fog: false,
@@ -1849,7 +1850,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             + vec3(0.009, 0.019, 0.047) * veilPressureFold * 0.12;`,
         );
       };
-      material.customProgramCacheKey = () => "tide-black-mist-torn-depth-veil-v5-event-horizon-accretion";
+      material.customProgramCacheKey = () => "tide-black-mist-torn-depth-veil-v6-low-shoreline-clear-highlands";
     };
     installSanctuarySigil(shared.sanctuarySigil);
     installRoadFlow(shared.roadGuide);
@@ -3763,6 +3764,8 @@ vWindRibbon = 0.0;
           if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
           mesh.castShadow = h > 0;
           mesh.receiveShadow = true;
+          // 地表保持不透明深度寫入，確保位於海面下的霧場與外移岸霧不會覆蓋已鋪設地形。
+          mesh.renderOrder = 0;
           mesh.computeBoundingSphere();
           mesh.frustumCulled = true;
           // InstancedMesh 的 instanceId 與 list 索引一致，直接保存對應的世界格座標。
@@ -4545,7 +4548,9 @@ vWindRibbon = 0.0;
           terrainRoot.add(blackMistMesh);
         }
 
-        const veilCandidates = coastEdges.filter((edge) => edge.seed > 0.24);
+        // 垂直霧幕只沿低地／海岸出現；Lv.2–3 高地保留完整山脊與崖壁剪影。
+        // 高地仍由地表下方的黑霧場與遠景深淵雲表現侵染，不再用直立霧片蓋住岩壁。
+        const veilCandidates = coastEdges.filter((edge) => edge.seed > 0.24 && edge.h <= 1);
         const veilCount = Math.min(72, veilCandidates.length);
         if (veilCount > 0) {
           blackMistVeilMesh = new THREE.InstancedMesh(
@@ -4558,10 +4563,11 @@ vWindRibbon = 0.0;
           for (let i = 0; i < veilCount; i++) {
             const edge = veilCandidates[Math.min(veilCandidates.length - 1, Math.floor((i + 0.5) * veilCandidates.length / veilCount))];
             const scaleX = 2.35 + edge.seed * 2.15;
-            const scaleY = 1.15 + edge.seed * 1.3;
-            const x = edge.x + edge.dx * 0.46;
-            const z = edge.z + edge.dz * 0.46;
-            const y = 0.64 + edge.seed * 0.52;
+            // 霧幕往地塊外側退，並貼近海面抬起；頂緣不越過相鄰低地的地表高度。
+            const scaleY = 0.62 + edge.seed * 0.42;
+            const x = edge.x + edge.dx * 0.78;
+            const z = edge.z + edge.dz * 0.78;
+            const y = groundTop(edge.h) - scaleY * 0.5 - 0.02;
             const phase = edge.seed * 17.1 + i * 0.37;
             blackMistVeilEntries.push({
               x, z, y, phase, rot: edge.rot, scaleX, scaleY,
