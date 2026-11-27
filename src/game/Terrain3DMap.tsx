@@ -788,6 +788,12 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             "float groundWakeFork = pow(max(0.0, sin(vGroundSkimUv.y * 22.0 - uGroundSkimTime * 4.8",
               " + abs(vGroundSkimUv.x - 0.5) * 14.0 + sin(vGroundSkimUv.y * 13.0) * 0.9)), 6.0)",
               " * smoothstep(0.22, 0.86, skimAcross) * skimEdgeFade;",
+            // 第二道短促壓縮帶會將地表碎屑推成扇狀外翻，隨尾流向後拉長。
+            "float shockSplay = exp(-pow((vGroundSkimUv.y - (0.145 + skimAcross * skimAcross * 0.075)) * 44.0, 2.0))",
+              " * smoothstep(0.18, 0.44, skimAcross) * (1.0 - smoothstep(0.78, 0.98, skimAcross));",
+            "float dustWakeRake = pow(max(0.0, sin(vGroundSkimUv.y * 93.0 - uGroundSkimTime * 13.2",
+              " + vGroundSkimUv.x * 27.0 + sin(vGroundSkimUv.x * 14.0) * 1.3)), 11.0)",
+              " * smoothstep(0.2, 0.82, skimAcross) * skimTailFade;",
             // 掠地衝擊後的橢圓回聲波由核心向外散開，波峰逐漸變薄並淡出。
             "float wakeEchoPhase = fract(uGroundSkimTime * 0.052);",
             "float wakeEchoRadius = 0.105 + wakeEchoPhase * 0.52;",
@@ -809,7 +815,9 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             "diffuseColor.rgb += vec3(0.035, 0.095, 0.12) * reboundCurl * 0.12;",
             "diffuseColor.rgb += vec3(0.22, 0.29, 0.32) * skimBowArc * 0.24",
               " + vec3(0.16, 0.19, 0.16) * skidGranule * 0.12",
-              " + vec3(0.04, 0.105, 0.13) * groundWakeFork * 0.16;",
+              " + vec3(0.04, 0.105, 0.13) * groundWakeFork * 0.16",
+              " + vec3(0.23, 0.31, 0.34) * shockSplay * 0.2",
+              " + vec3(0.17, 0.22, 0.19) * dustWakeRake * 0.09;",
             "diffuseColor.rgb *= 1.0 - wakeEchoShadow * 0.09;",
             "diffuseColor.rgb += vec3(0.055, 0.16, 0.19) * wakeEcho * 0.32",
               " + vec3(0.09, 0.14, 0.15) * skimRefractionEdge * 0.2;",
@@ -818,11 +826,11 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
               " + twinVortex * 0.12 + pressureHalo * 0.16 + outerShear * 0.055",
               " + groundPressureRing * 0.14 + dustFan * 0.09 + reboundCurl * 0.07",
               " + skimBowArc * 0.16 + skidGranule * 0.08 + groundWakeFork * 0.07",
-              " + wakeEcho * 0.12 + skimRefractionEdge * 0.045);",
+              " + shockSplay * 0.1 + dustWakeRake * 0.045 + wakeEcho * 0.12 + skimRefractionEdge * 0.045);",
           ].join("\n"),
         );
       };
-      material.customProgramCacheKey = () => "tide-ground-skimming-vortex-pressure-v6-outward-wake-echo";
+      material.customProgramCacheKey = () => "tide-ground-skimming-vortex-pressure-v7-shock-splay-dust-rake";
     };
 
     // 程序化黑霧貼圖：柔邊噪聲雲，不依賴外部圖檔，並以單一 InstancedMesh 控制效能。
@@ -1361,16 +1369,29 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
         float cloudGravityWell = 1.0 - smoothstep(0.08, 0.58, cloudRadius);
         float cloudUndertow = 0.5 + 0.5 * sin(cloudFlowUv.x * 13.0
           - cloudFlowUv.y * 9.0 - uAbyssCloudTime * 0.17 + vAbyssCloudPhase * 2.3);
+        // 三層不同半徑的潮汐斷層，讓雲團有前景薄霧、內層暗渦與遠端裂縫的深度節奏。
+        float cloudOuterRib = pow(max(0.0, sin(cloudAngle * 8.0
+          - cloudRadius * 24.0 - uAbyssCloudTime * 0.13 + vAbyssCloudPhase)), 10.0)
+          * smoothstep(0.22, 0.34, cloudRadius) * (1.0 - smoothstep(0.44, 0.52, cloudRadius));
+        float cloudBlackPocket = pow(max(0.0, sin(cloudAngle * 4.0
+          + log(cloudRadius + 0.04) * 13.0 - uAbyssCloudTime * 0.1)), 3.0)
+          * (1.0 - smoothstep(0.12, 0.52, cloudRadius));
+        float cloudShearVeil = pow(max(0.0, sin(cloudFlowUv.x * 18.0
+          + sin(cloudFlowUv.y * 8.0 - uAbyssCloudTime * 0.09) * 2.0
+          - uAbyssCloudTime * 0.16 + vAbyssCloudPhase * 1.3)), 8.0);
         diffuseColor.rgb *= mix(vec3(0.36, 0.43, 0.66), vec3(0.78, 0.86, 1.08), cloudEye * 0.42);
-        diffuseColor.rgb *= 1.0 - cloudGravityWell * 0.12;
+        diffuseColor.rgb *= 1.0 - cloudGravityWell * 0.12 - cloudBlackPocket * 0.18;
         diffuseColor.rgb += vec3(0.018, 0.044, 0.11) * cloudRim * 0.38;
         diffuseColor.rgb += vec3(0.026, 0.064, 0.12) * cloudVortexFilament * 0.32;
         diffuseColor.rgb += vec3(0.012, 0.035, 0.068) * cloudUndertow * cloudAnnulus * 0.18;
-        diffuseColor.a *= 0.72 + cloudEye * 0.15 + cloudRim * 0.09
-          + cloudVortexFilament * 0.04 + cloudUndertow * cloudGravityWell * 0.025;`,
+        diffuseColor.rgb += vec3(0.022, 0.052, 0.11) * cloudOuterRib * 0.22
+          + vec3(0.012, 0.034, 0.075) * cloudShearVeil * 0.12;
+        diffuseColor.a *= 0.7 + cloudEye * 0.15 + cloudRim * 0.09
+          + cloudVortexFilament * 0.04 + cloudUndertow * cloudGravityWell * 0.025
+          + cloudOuterRib * 0.035 + cloudShearVeil * 0.02;`,
       );
     };
-    shared.blackMistCloud.customProgramCacheKey = () => "tide-abyss-cloud-maelstrom-v3-gravity-braid";
+    shared.blackMistCloud.customProgramCacheKey = () => "tide-abyss-cloud-maelstrom-v4-depth-ribs-black-pockets";
 
     // 聖地地面符印與道路導光使用材質內動畫；不額外建立逐顆動畫物件。
     const installSanctuarySigil = (material: THREE.MeshBasicMaterial) => {
@@ -2010,7 +2031,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
     const cliffShardGeometry = makeWeatheredRockGeometry(new THREE.IcosahedronGeometry(0.22, 1), 0.095);
     const talusStoneGeometry = makeWeatheredRockGeometry(new THREE.DodecahedronGeometry(0.075, 1), 0.13);
     // 高地石英晶柱使用單一共享幾何，實例化時再做高度與傾角變化。
-    const ridgeCrystalGeometry = makeWeatheredRockGeometry(new THREE.OctahedronGeometry(0.075, 0), 0.12);
+    const ridgeCrystalGeometry = makeWeatheredRockGeometry(new THREE.OctahedronGeometry(0.075, 1), 0.085);
     ridgeCrystalGeometry.scale(0.82, 1.65, 0.82);
     ridgeCrystalGeometry.computeBoundingSphere();
 
@@ -2434,6 +2455,13 @@ vWindRibbon = 0.0;
           vec3 windRibbonTint = mix(vec3(0.038, 0.072, 0.026),
             vec3(0.028, 0.064, 0.092), vFoliageAltitude);
           diffuseColor.rgb += windRibbonTint * windRibbonLight * 0.62;
+          // 風掀起葉面時，細葉緣與中央葉脈會短暫接住冷色天光；不是整片草一起閃白。
+          float leafVeinGleam = pow(max(0.0, sin(uFoliageTime * 2.8
+            + vWindRibbon * 9.0 + vFoliageGust * 3.2)), 9.0) * windLightCatch;
+          float leafEdgePearl = pow(max(0.0, sin(uFoliageTime * 1.7
+            + vWindRibbon * 5.4 + vFoliageAltitude * 2.0)), 13.0) * smoothstep(0.42, 0.96, vFoliageGust);
+          diffuseColor.rgb += vec3(0.035, 0.082, 0.09) * leafVeinGleam * 0.28
+            + vec3(0.08, 0.105, 0.095) * leafEdgePearl * 0.16;
           diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.88, 0.98, 1.08)
             + vec3(0.018, 0.038, 0.052), vFoliageAltitude * 0.34);`,
         );
@@ -5158,17 +5186,19 @@ vWindRibbon = 0.0;
         // slightly rolled edges and a tapered, wind-combed tip. One shared geometry still feeds one instanced batch.
         const bladeGeometry = new THREE.BufferGeometry();
         const bladeRows = [
-          { y: 0.000, width: 0.034, x: 0.000, z: 0.000 },
-          { y: 0.048, width: 0.038, x: 0.004, z: 0.004 },
-          { y: 0.102, width: 0.037, x: 0.012, z: 0.012 },
-          { y: 0.158, width: 0.032, x: 0.022, z: 0.023 },
-          { y: 0.218, width: 0.026, x: 0.030, z: 0.037 },
-          { y: 0.278, width: 0.019, x: 0.031, z: 0.051 },
-          { y: 0.334, width: 0.011, x: 0.022, z: 0.063 },
-          { y: 0.382, width: 0.003, x: 0.007, z: 0.073 },
+          { y: 0.000, width: 0.031, x: 0.000, z: 0.000 },
+          { y: 0.034, width: 0.036, x: 0.003, z: 0.002 },
+          { y: 0.079, width: 0.039, x: 0.007, z: 0.007 },
+          { y: 0.126, width: 0.036, x: 0.014, z: 0.014 },
+          { y: 0.174, width: 0.032, x: 0.021, z: 0.023 },
+          { y: 0.222, width: 0.027, x: 0.028, z: 0.034 },
+          { y: 0.269, width: 0.022, x: 0.032, z: 0.046 },
+          { y: 0.314, width: 0.016, x: 0.029, z: 0.057 },
+          { y: 0.354, width: 0.009, x: 0.019, z: 0.067 },
+          { y: 0.389, width: 0.002, x: 0.006, z: 0.076 },
         ];
-        // 七條橫向葉脈軌道：中央主脈、兩側副脈與捲曲葉緣都成為實際頂點輪廓。
-        const bladeRails = [-1, -0.68, -0.34, 0, 0.34, 0.68, 1];
+        // 九條橫向葉脈軌道：中央主脈、次級脈、細緻捲邊，讓葉片近景有更平順的截面。
+        const bladeRails = [-1, -0.78, -0.5, -0.24, 0, 0.24, 0.5, 0.78, 1];
         const bladePositions: number[] = [];
         const bladeColors: number[] = [];
         const bladeIndices: number[] = [];
@@ -5181,8 +5211,10 @@ vWindRibbon = 0.0;
             const edgeAmount = Math.pow(Math.abs(across), 2.2);
             const cup = (1 - Math.abs(across)) * (0.0125 * (1 - t * 0.32));
             const edgeRoll = edgeAmount * Math.sin(Math.PI * t) * 0.0065;
-            const mainVein = rail === 3 ? 0.0095 * (1 - t * 0.5) : 0;
-            const sideVein = (rail === 1 || rail === 5) ? 0.0032 * (1 - t * 0.56) : 0;
+            const centerRail = Math.abs(across) < 0.001;
+            const sideRail = Math.abs(Math.abs(across) - 0.5) < 0.001;
+            const mainVein = centerRail ? 0.0105 * (1 - t * 0.48) : 0;
+            const sideVein = sideRail ? 0.0036 * (1 - t * 0.54) : 0;
             const edgeSerration = Math.sin(t * 23.0 + rail * 1.7)
               * edgeAmount * Math.sin(Math.PI * t) * 0.0017;
             const edgeWave = Math.sin(t * 10.5 + rail * 1.2) * edgeAmount * 0.0022;
@@ -5194,7 +5226,7 @@ vWindRibbon = 0.0;
             );
             const rootToTip = 0.18 + t * 0.67;
             const centerLight = 1.09 - Math.abs(across) * 0.13;
-            const veinLight = rail === 3 ? 1.08 : rail === 1 || rail === 5 ? 1.025 : 0.985;
+            const veinLight = centerRail ? 1.095 : sideRail ? 1.032 : 0.982;
             const tipWarmth = Math.max(0, (t - 0.72) / 0.28) * (0.5 + Math.abs(across) * 0.25);
             const sideHue = across < -0.1 ? 0.955 : across > 0.1 ? 1.04 : 1.0;
             bladeColors.push(
