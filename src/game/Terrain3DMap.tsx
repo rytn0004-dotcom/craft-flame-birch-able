@@ -1503,15 +1503,26 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             * (1.0 - smoothstep(0.52, 0.96, vMistVeilUv.y));
           float veilDepthFold = 0.5 + 0.5 * sin(vMistVeilUv.x * 9.0
             - vMistVeilUv.y * 5.0 - uMistVeilTime * 0.14 + veilWarp);
+          // 多層細絲以不同頻率交錯，像深淵氣流拉扯霧幕，而不是單片透明布。
+          float veilFilament = pow(max(0.0, sin(vMistVeilUv.x * 61.0
+            + sin(vMistVeilUv.y * 13.0 + uMistVeilTime * 0.11) * 2.8
+            - uMistVeilTime * 0.31)), 10.0);
+          float veilUndertow = 0.5 + 0.5 * sin(vMistVeilUv.x * 5.5
+            + vMistVeilUv.y * 12.0 - uMistVeilTime * 0.2 + veilWarp * 1.8);
+          float veilPressurePulse = 0.5 + 0.5 * sin(vMistVeilUv.x * 3.2
+            - uMistVeilTime * 0.16 + veilDepthFold * 2.4);
           diffuseColor.a *= veilBaseFade * veilTopFade * veilStrand
-            * (0.76 + veilTendril * 0.34);
-          diffuseColor.rgb *= mix(vec3(0.52, 0.62, 0.84), vec3(0.92, 0.98, 1.12),
+            * (0.72 + veilTendril * 0.34 + veilFilament * 0.12)
+            * (0.9 + veilUndertow * 0.1);
+          diffuseColor.rgb *= mix(vec3(0.42, 0.5, 0.72), vec3(0.92, 0.98, 1.12),
             vMistVeilUv.y * 0.72 + veilDepthFold * 0.16);
+          diffuseColor.rgb *= 0.86 + veilPressurePulse * 0.14;
           diffuseColor.rgb += vec3(0.018, 0.042, 0.095) * veilTendril * 0.36
-            + vec3(0.012, 0.025, 0.062) * (1.0 - veilDepthFold) * 0.24;`,
+            + vec3(0.012, 0.025, 0.062) * (1.0 - veilDepthFold) * 0.24
+            + vec3(0.035, 0.07, 0.13) * veilFilament * 0.24;`,
         );
       };
-      material.customProgramCacheKey = () => "tide-black-mist-torn-depth-veil-v2";
+      material.customProgramCacheKey = () => "tide-black-mist-torn-depth-veil-v3-undertow-filaments";
     };
     installSanctuarySigil(shared.sanctuarySigil);
     installRoadFlow(shared.roadGuide);
