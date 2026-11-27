@@ -1799,7 +1799,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           diffuseColor.rgb += vec3(0.008, 0.045, 0.085) * oceanWakeCurrent;`,
         );
       };
-      material.customProgramCacheKey = () => `${cacheKey}-traveling-wind-ribbon-v1`;
+      material.customProgramCacheKey = () => cacheKey;
     };
     installOceanSurface(shared.floor, "tide-ocean-floor-caustics-wake-v2");
     installOceanSurface(shared.seaShelf, "tide-ocean-shelf-caustics-wake-v3", true);
@@ -2315,7 +2315,7 @@ vWindRibbon = 0.0;
             + vec3(0.018, 0.038, 0.052), vFoliageAltitude * 0.34);`,
         );
       };
-      material.customProgramCacheKey = () => cacheKey;
+      material.customProgramCacheKey = () => `${cacheKey}-traveling-wind-ribbon-v1`;
     };
     installFoliageWind(shared.foliageWind, "tide-foliage-wind-v8-pressure-sweep");
     installFoliageWind(shared.treeCanopyWind, "tide-tree-canopy-gust-v4-pressure-sweep", 2.4);
