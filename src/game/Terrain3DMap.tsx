@@ -4932,7 +4932,8 @@ vFoliageAltitude = 0.0;
           { y: 0.334, width: 0.011, x: 0.022, z: 0.063 },
           { y: 0.382, width: 0.003, x: 0.007, z: 0.073 },
         ];
-        const bladeRails = [-1, -0.5, 0, 0.5, 1];
+        // 七條橫向葉脈軌道：中央主脈、兩側副脈與捲曲葉緣都成為實際頂點輪廓。
+        const bladeRails = [-1, -0.68, -0.34, 0, 0.34, 0.68, 1];
         const bladePositions: number[] = [];
         const bladeColors: number[] = [];
         const bladeIndices: number[] = [];
@@ -4942,22 +4943,29 @@ vFoliageAltitude = 0.0;
           for (let rail = 0; rail < bladeRails.length; rail++) {
             const across = bladeRails[rail];
             const lateral = across * section.width;
-            const cup = (1 - Math.abs(across)) * (0.011 * (1 - t * 0.32));
-            const edgeRoll = Math.pow(Math.abs(across), 2.2) * Math.sin(Math.PI * t) * 0.005;
-            const veinLift = rail === 2 ? 0.0085 * (1 - t * 0.48) : 0;
-            const edgeWave = Math.sin(t * 10.5 + rail * 1.2) * Math.pow(Math.abs(across), 2) * 0.002;
+            const edgeAmount = Math.pow(Math.abs(across), 2.2);
+            const cup = (1 - Math.abs(across)) * (0.0125 * (1 - t * 0.32));
+            const edgeRoll = edgeAmount * Math.sin(Math.PI * t) * 0.0065;
+            const mainVein = rail === 3 ? 0.0095 * (1 - t * 0.5) : 0;
+            const sideVein = (rail === 1 || rail === 5) ? 0.0032 * (1 - t * 0.56) : 0;
+            const edgeSerration = Math.sin(t * 23.0 + rail * 1.7)
+              * edgeAmount * Math.sin(Math.PI * t) * 0.0017;
+            const edgeWave = Math.sin(t * 10.5 + rail * 1.2) * edgeAmount * 0.0022;
             bladePositions.push(
               section.x + lateral,
-              section.y + cup + edgeRoll + veinLift + edgeWave,
-              section.z + (rail === 2 ? 0.009 : 0) + Math.sin(t * 7.0 + across * 1.8) * 0.002,
+              section.y + cup + edgeRoll + mainVein + sideVein + edgeWave + edgeSerration,
+              section.z + (rail === 3 ? 0.011 : rail === 1 || rail === 5 ? 0.004 : 0)
+                + Math.sin(t * 7.0 + across * 1.8) * 0.0024,
             );
-            const rootToTip = 0.2 + t * 0.65;
-            const centerLight = 1.08 - Math.abs(across) * 0.12;
-            const sideHue = across < -0.1 ? 0.96 : across > 0.1 ? 1.035 : 1.0;
+            const rootToTip = 0.18 + t * 0.67;
+            const centerLight = 1.09 - Math.abs(across) * 0.13;
+            const veinLight = rail === 3 ? 1.08 : rail === 1 || rail === 5 ? 1.025 : 0.985;
+            const tipWarmth = Math.max(0, (t - 0.72) / 0.28) * (0.5 + Math.abs(across) * 0.25);
+            const sideHue = across < -0.1 ? 0.955 : across > 0.1 ? 1.04 : 1.0;
             bladeColors.push(
-              rootToTip * centerLight * sideHue,
-              (0.29 + t * 0.54) * centerLight * sideHue,
-              (0.2 + t * 0.32) * centerLight * (across > 0.1 ? 1.04 : 1.0),
+              rootToTip * centerLight * veinLight * sideHue + tipWarmth * 0.055,
+              (0.27 + t * 0.56) * centerLight * veinLight * sideHue + tipWarmth * 0.075,
+              (0.19 + t * 0.34) * centerLight * (across > 0.1 ? 1.04 : 1.0) + tipWarmth * 0.035,
             );
           }
         }
