@@ -99,6 +99,11 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
     let disposed = false;
     let altDown = false;
     let lastBuildAt = 0;
+    let terrainBuildVersion = 0;
+    const yieldTerrainBuild = async (version: number) => {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      return !disposed && version === terrainBuildVersion;
+    };
     let lastTerrainKey = "";
     let lastTerrainHeightsRef: number[] | null = null;
     let lastTerrainBlockedRef: Set<string> | null = null;
@@ -3758,7 +3763,8 @@ vSlipWake = 0.0;
       buildingRoot.add(root);
     };
 
-    const rebuildTerrain = (data: Terrain3DSnapshot) => {
+    const rebuildTerrain = async (data: Terrain3DSnapshot) => {
+      const buildVersion = ++terrainBuildVersion;
       refreshBlackMistRevealMask(data.placed, data.mapMode === "expand");
       clearGroup(terrainRoot);
       terrainCellHeights.clear();
@@ -3804,25 +3810,46 @@ vSlipWake = 0.0;
         chunk.byHeight[h].push(cell);
       };
 
+      let cellBatchCount = 0;
       if (data.mapMode === "expand" && data.placed.length) {
         for (const tile of data.placed) {
-          for (let r = 0; r < TILE; r++) for (let c = 0; c < TILE; c++) {
-            addCell(tile.tc * TILE + c, tile.tr * TILE + r);
+          for (let r = 0; r < TILE; r++) {
+            for (let c = 0; c < TILE; c++) {
+              addCell(tile.tc * TILE + c, tile.tr * TILE + r);
+              if (++cellBatchCount >= 8192) {
+                cellBatchCount = 0;
+                if (!(await yieldTerrainBuild(buildVersion))) return;
+              }
+            }
           }
         }
       } else {
-        for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) addCell(c, r);
+        for (let r = 0; r < ROWS; r++) {
+          for (let c = 0; c < COLS; c++) {
+            addCell(c, r);
+            if (++cellBatchCount >= 8192) {
+              cellBatchCount = 0;
+              if (!(await yieldTerrainBuild(buildVersion))) return;
+            }
+          }
+        }
       }
+      if (!(await yieldTerrainBuild(buildVersion))) return;
       // 所有生態細節共用同一份列表，避免 20 多次重複配置大型陣列。
       const tileCellList = Array.from(tileCells.values());
 
       // 依目前真正已鋪設的地塊計算海域中心與尺寸；擴張時海岸同步外推，不把 200×200 空棋盤當成島嶼。
       let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
-      for (const cell of tileCells.values()) {
+      let boundsBatchCount = 0;
+      for (const cell of tileCellList) {
         minX = Math.min(minX, cell.x - 0.5);
         minZ = Math.min(minZ, cell.z - 0.5);
         maxX = Math.max(maxX, cell.x + 0.5);
         maxZ = Math.max(maxZ, cell.z + 0.5);
+        if (++boundsBatchCount >= 8192) {
+          boundsBatchCount = 0;
+          if (!(await yieldTerrainBuild(buildVersion))) return;
+        }
       }
       const mapCenterX = Number.isFinite(minX) ? (minX + maxX) / 2 : COLS / 2;
       const mapCenterZ = Number.isFinite(minZ) ? (minZ + maxZ) / 2 : ROWS / 2;
@@ -3833,7 +3860,8 @@ vSlipWake = 0.0;
       const edgeCellKeys = new Set<string>();
       const coastBandKeys = new Set<string>();
       const biomeDirections = [[0, -1], [1, 0], [0, 1], [-1, 0]];
-      for (const cell of tileCells.values()) {
+      let edgeBatchCount = 0;
+      for (const cell of tileCellList) {
         const gx = Math.floor(cell.x);
         const gy = Math.floor(cell.z);
         const key = gx + "," + gy;
@@ -3841,7 +3869,12 @@ vSlipWake = 0.0;
           edgeCellKeys.add(key);
           coastBandKeys.add(key);
         }
+        if (++edgeBatchCount >= 8192) {
+          edgeBatchCount = 0;
+          if (!(await yieldTerrainBuild(buildVersion))) return;
+        }
       }
+      if (!(await yieldTerrainBuild(buildVersion))) return;
       for (const key of edgeCellKeys) {
         const [gx, gy] = key.split(",").map(Number);
         for (const [dc, dr] of biomeDirections) {
@@ -3982,6 +4015,8 @@ vSlipWake = 0.0;
           terrainRoot.add(mesh);
         }
       }
+
+      if (!(await yieldTerrainBuild(buildVersion))) return;
 
       // 不同高度的相鄰格之間鋪設岩肩斜坡：將垂直階梯轉成可讀的山坡輪廓。
       // 每格最多選一個上坡方向，避免十字交會處的坡面互相穿插；高度判定與選格射線保持原樣。
@@ -4233,6 +4268,8 @@ vSlipWake = 0.0;
         crystals.computeBoundingSphere();
         terrainRoot.add(crystals);
       }
+
+      if (!(await yieldTerrainBuild(buildVersion))) return;
 
       // 生態區交界以少量貼地石縫與植被色階銜接，避免地貌像硬切換色塊。
       const biomeSeamCells: { x: number; z: number; y: number; rot: number; tint: string; scale: number }[] = [];
@@ -4695,6 +4732,8 @@ vSlipWake = 0.0;
         }
       }
 
+      if (!(await yieldTerrainBuild(buildVersion))) return;
+
       // 雙層海面：近岸較淺、外海較深；全部位於地塊底面以下，不介入地形碰撞或道路判定。
       const expandMode = data.mapMode === "expand";
       const seaCenterX = expandMode ? COLS / 2 : mapCenterX;
@@ -4858,6 +4897,8 @@ vSlipWake = 0.0;
       }
 
       terrainRoot.add(deepWater, shelfWater);
+
+      if (!(await yieldTerrainBuild(buildVersion))) return;
 
       // 外露地塊的岸線：沙色石沿收邊，海面再以稀疏泡沫切出水陸交界。
       // 僅處理已放置地塊的非道路格，並避開現有建築 footprint。
@@ -5331,9 +5372,43 @@ vSlipWake = 0.0;
           terrainRoot.add(seaStacks);
         }
 
+      if (!(await yieldTerrainBuild(buildVersion))) return;
+
+      const cellsByHeight: { x: number; z: number; h: number }[][] = [[], [], [], []];
+      const cellsByRegion: Record<string, { x: number; z: number; h: number }[]> = {
+        road: [], coast: [], moss: [], limestone: [], ancient: [], meadow: [],
+      };
+      let ecologyIndexCount = 0;
+      for (const cell of tileCellList) {
+        cellsByHeight[cell.h].push(cell);
+        const region = terrainRegion(cell);
+        (cellsByRegion[region] ?? cellsByRegion.meadow).push(cell);
+        if (++ecologyIndexCount >= 8192) {
+          ecologyIndexCount = 0;
+          if (!(await yieldTerrainBuild(buildVersion))) return;
+        }
+      }
+      const highlandCells = cellsByHeight[1].concat(cellsByHeight[2], cellsByHeight[3]);
+      const upperHighlandCells = cellsByHeight[2].concat(cellsByHeight[3]);
+      const meadowMossCells = cellsByRegion.meadow.concat(cellsByRegion.moss);
+      const lichenCandidateCells = cellsByRegion.moss.concat(cellsByRegion.limestone, cellsByRegion.ancient);
+      const mossAncientCells = cellsByRegion.moss.concat(cellsByRegion.ancient);
+      const midMossCells = cellsByHeight[1].filter((cell) => terrainRegion(cell) === "moss")
+        .concat(cellsByHeight[2].filter((cell) => terrainRegion(cell) === "moss"));
+      const meadowMossMidCells = cellsByHeight[1].filter((cell) => {
+        const region = terrainRegion(cell);
+        return region === "meadow" || region === "moss";
+      }).concat(cellsByHeight[2].filter((cell) => {
+        const region = terrainRegion(cell);
+        return region === "meadow" || region === "moss";
+      }));
+      const limestoneHighlandCells = cellsByRegion.limestone.filter((cell) => cell.h >= 2);
+      const levelOneMossCells = cellsByHeight[1].filter((cell) => terrainRegion(cell) === "moss");
+      const coastCells = cellsByRegion.coast;
+
       // 高地風化石群：以不規則細分岩體取代單一低面數圓石，每簇兩枚大小不同的岩礫。
       // 頂點色由陰濕底色漸層至日照礦面，岩體底部壓平並保留自然破碎輪廓；全場仍只用一個 InstancedMesh。
-      const rockCells = tileCellList.filter((cell) => {
+      const rockCells = highlandCells.filter((cell) => {
         if (cell.h <= 0) return false;
         const region = terrainRegion(cell);
         if (region === "road" || region === "coast") return false;
@@ -5426,7 +5501,7 @@ vSlipWake = 0.0;
 
       // 山脊岩柱：只在 Lv.2–3 的局部高點生成不規則風蝕尖岩，形成遠距可讀的地形剪影。
       // 每個地標由兩枚共用風化岩幾何構成，最多 120 組，並避開建築周圍。
-      const summitSpineCells = tileCellList.filter((cell) => {
+      const summitSpineCells = upperHighlandCells.filter((cell) => {
         if (cell.h < 2 || terrainRegion(cell) === "coast" || terrainRegion(cell) === "road") return false;
         const gx = Math.floor(cell.x);
         const gy = Math.floor(cell.z);
@@ -5489,7 +5564,7 @@ vSlipWake = 0.0;
 
       // 岩面苔衣與地衣斑：有三瓣不規則邊緣、微隆起的中心與柔和的環狀厚度，
       // 像沿著石縫蔓延，而不是一張平面貼圖；以單批 InstancedMesh 控制成本。
-      const lichenCells = tileCellList.filter((cell) => {
+      const lichenCells = lichenCandidateCells.filter((cell) => {
         if (cell.h < 1) return false;
         const region = terrainRegion(cell);
         if (region !== "moss" && region !== "limestone" && region !== "ancient") return false;
@@ -5572,9 +5647,13 @@ vSlipWake = 0.0;
         terrainRoot.add(lichen);
       }
 
+      if (!(await yieldTerrainBuild(buildVersion))) return;
+
+      if (!(await yieldTerrainBuild(buildVersion))) return;
+
       // 草叢沿草甸與苔地的低頻生態帶聚集；海岸、石灰岩與古遺跡保留較裸露的地貌。
       // 低頻場決定草叢斑塊，高頻固定種子決定單格是否長草，避免平均撒滿棋盤。
-      const grassCells = tileCellList.filter((cell) => {
+      const grassCells = meadowMossCells.filter((cell) => {
         if (cell.h <= 0) return false;
         const region = terrainRegion(cell);
         if (region !== "meadow" && region !== "moss") return false;
@@ -5921,7 +6000,7 @@ vSlipWake = 0.0;
       }
 
       // 草甸與苔地加入成簇的海岸林木；樹冠以頂點風場輕晃，不逐棵建立動畫。
-      const groveCandidates = tileCellList.filter((cell) => {
+      const groveCandidates = meadowMossCells.filter((cell) => {
         if (cell.h < 1 || cell.h > 2) return false;
         const region = terrainRegion(cell);
         if (region !== "meadow" && region !== "moss") return false;
@@ -6290,7 +6369,7 @@ vSlipWake = 0.0;
       }
 
       // 林地邊緣的低矮灌木叢：以不同葉形與尺寸打散樹木之間的空白，避免植被只剩單株模型。
-      const shrubCells = tileCellList.filter((cell) => {
+      const shrubCells = meadowMossCells.filter((cell) => {
         if (cell.h < 1 || cell.h > 2) return false;
         const region = terrainRegion(cell);
         if (region !== "meadow" && region !== "moss") return false;
@@ -6341,10 +6420,12 @@ vSlipWake = 0.0;
         terrainRoot.add(shrubs);
       }
 
+      if (!(await yieldTerrainBuild(buildVersion))) return;
+
       // 苔地以羽狀蕨葉填補樹叢下層：單一自訂葉片幾何、多實例批次，風動沿用 GPU 材質。
       // 高地生態帶：石灰岩稜線不再只是裸露方塊，加入成簇的匍匐墊狀植物與短葉叢。
       // 依高度、岩脊斑塊與固定種子分布，避開建築；所有葉片採 InstancedMesh + GPU 風場。
-      const alpineCells = tileCellList.filter((cell) => {
+      const alpineCells = limestoneHighlandCells.filter((cell) => {
         if (cell.h < 2 || terrainRegion(cell) !== "limestone") return false;
         const key = Math.floor(cell.x) + "," + Math.floor(cell.z);
         if (coastBandKeys.has(key)) return false;
@@ -6506,7 +6587,7 @@ vSlipWake = 0.0;
         terrainRoot.add(...alpineMeshes);
       }
 
-      const fernCells = tileCellList.filter((cell) => {
+      const fernCells = midMossCells.filter((cell) => {
         if (cell.h < 1 || cell.h > 2 || terrainRegion(cell) !== "moss") return false;
         const key = Math.floor(cell.x) + "," + Math.floor(cell.z);
         if (coastBandKeys.has(key)) return false;
@@ -6614,7 +6695,7 @@ vSlipWake = 0.0;
 
       // 低矮三葉草填補草叢間的裸露縫隙：每株由三片有厚度起伏的心形葉面組成，
       // 葉脈隆起、葉緣微捲；以單一 InstancedMesh 批次繪製，並繼承 GPU 陣風與彈體掠過反應。
-      const cloverCells = tileCellList.filter((cell) => {
+      const cloverCells = meadowMossMidCells.filter((cell) => {
         if (cell.h < 1 || cell.h > 2) return false;
         const region = terrainRegion(cell);
         if (region !== "meadow" && region !== "moss") return false;
@@ -6770,7 +6851,7 @@ vSlipWake = 0.0;
 
       // 苔地蘑菇改成完整小型菌體：柔弧菌傘、菌褶環、斑點與淡色菌柄。
       // 所有部件按固定種子批次化，數量上限 64 株，不新增逐物件動畫或即時光源。
-      const mushroomCells = tileCellList.filter((cell) => {
+      const mushroomCells = levelOneMossCells.filter((cell) => {
         if (cell.h !== 1 || terrainRegion(cell) !== "moss") return false;
         if (isNearProtectedBuilding(cell.x, cell.z, 0.9)) return false;
         const seed = Math.abs(Math.sin(cell.x * 37.1 + cell.z * 91.7) * 21873.5) % 1;
@@ -6869,7 +6950,7 @@ vSlipWake = 0.0;
       }
 
       // 苔地與古代刻紋附近漂浮少量潮光微粒；單一動態實例批次，模擬林間螢火與遺跡能量。
-      const moteCandidates = tileCellList.filter((cell) => {
+      const moteCandidates = mossAncientCells.filter((cell) => {
         if (cell.h <= 0) return false;
         const region = terrainRegion(cell);
         if (region !== "moss" && region !== "ancient") return false;
@@ -6914,7 +6995,7 @@ vSlipWake = 0.0;
       }
 
       // 風會把花粉與草籽從草甸帶起來；只放在草甸、苔地，並限制數量及避開建築。
-      const pollenCells = tileCellList.filter((cell) => {
+      const pollenCells = meadowMossCells.filter((cell) => {
         if (cell.h <= 0) return false;
         const region = terrainRegion(cell);
         if (region !== "meadow" && region !== "moss") return false;
@@ -6960,7 +7041,7 @@ vSlipWake = 0.0;
       }
 
       // 草甸與苔地改為三朵一簇的野花組合；花莖與花冠都共用 GPU 風場。
-      const flowerCells = tileCellList.filter((cell) => {
+      const flowerCells = meadowMossCells.filter((cell) => {
         if (cell.h <= 0) return false;
         const region = terrainRegion(cell);
         if (region !== "meadow" && region !== "moss") return false;
@@ -7089,7 +7170,7 @@ vSlipWake = 0.0;
       }
 
       // 高台邊緣偶爾露出低矮的海蝕礦晶，密度刻意偏低，避免水元素搶過建築主體。
-      const mineralCells = tileCellList.filter((cell) => {
+      const mineralCells = upperHighlandCells.filter((cell) => {
         if (cell.h < 2 || terrainRegion(cell) === "coast") return false;
         const gx = Math.floor(cell.x);
         const gy = Math.floor(cell.z);
@@ -7143,6 +7224,8 @@ vSlipWake = 0.0;
         terrainRoot.add(minerals);
       }
 
+      if (!(await yieldTerrainBuild(buildVersion))) return;
+
       // 高地頂面依等級加入不同材質語彙：1 級苔痕、2 級岩層線、3 級石板刻線。
       // 細節使用 InstancedMesh，並在既有塔座／聖地周圍留白，不影響建塔判定。
       const detailIsClear = (cell: { x: number; z: number }, margin = 1.25) =>
@@ -7150,7 +7233,7 @@ vSlipWake = 0.0;
 
       // 海岸石台上形成少量天然潮池：淺水鏡面、破碎亮邊與卵石共同打散平坦岸線。
       // 只放在 coast 生態格，與塔座保持距離；三個 InstancedMesh 有明確上限且不參與路徑。
-      const tidePoolCells = tileCellList.filter((cell) => {
+      const tidePoolCells = coastCells.filter((cell) => {
         if (cell.h <= 0 || terrainRegion(cell) !== "coast" || !detailIsClear(cell, 0.72)) return false;
         const seed = Math.abs(Math.sin(cell.x * 43.7 + cell.z * 79.1) * 29317.7) % 1;
         return seed > 0.955;
@@ -7230,7 +7313,7 @@ vSlipWake = 0.0;
         }
       }
 
-      const mossCells = tileCellList.filter((cell) => {
+      const mossCells = levelOneMossCells.filter((cell) => {
         if (cell.h !== 1 || terrainRegion(cell) !== "moss" || !detailIsClear(cell)) return false;
         const seed = Math.abs(Math.sin(cell.x * 29.7 + cell.z * 81.3) * 18431.7) % 1;
         return seed > 0.76;
@@ -7271,7 +7354,7 @@ vSlipWake = 0.0;
       }
 
       // 苔地補少量扇形蕨葉，保持低矮並限制數量，不遮住塔身與角色。
-      const fernFanCells = tileCellList.filter((cell) => {
+      const fernFanCells = levelOneMossCells.filter((cell) => {
         if (cell.h !== 1 || terrainRegion(cell) !== "moss" || !detailIsClear(cell, 1.35)) return false;
         const seed = Math.abs(Math.sin(cell.x * 83.1 + cell.z * 27.9) * 31917.7) % 1;
         return seed > 0.972;
@@ -7309,7 +7392,7 @@ vSlipWake = 0.0;
         terrainRoot.add(ferns);
       }
 
-      const strataCells = tileCellList.filter((cell) => {
+      const strataCells = cellsByHeight[2].filter((cell) => {
         if (cell.h !== 2 || terrainRegion(cell) !== "limestone" || !detailIsClear(cell)) return false;
         const seed = Math.abs(Math.sin(cell.x * 47.1 + cell.z * 19.7) * 29341.3) % 1;
         return seed > 0.73;
@@ -7350,7 +7433,7 @@ vSlipWake = 0.0;
       }
 
       // 石灰岩區補細長白色礦脈，貼近地表且只在高地出現，形成明確的岩脊紋理。
-      const veinCells = tileCellList.filter((cell) => {
+      const veinCells = limestoneHighlandCells.filter((cell) => {
         if (cell.h < 2 || terrainRegion(cell) !== "limestone" || !detailIsClear(cell, 1.4)) return false;
         const seed = Math.abs(Math.sin(cell.x * 57.3 + cell.z * 71.9) * 27391.11) % 1;
         return seed > 0.93;
@@ -7387,7 +7470,7 @@ vSlipWake = 0.0;
       }
 
       // 石灰岩山脊的尖峰露頭：只在高地與石灰岩區出現，保持低於防禦塔輪廓。
-      const peakCells = tileCellList.filter((cell) => {
+      const peakCells = limestoneHighlandCells.filter((cell) => {
         if (cell.h < 2 || terrainRegion(cell) !== "limestone" || !detailIsClear(cell, 1.9)) return false;
         const seed = Math.abs(Math.sin(cell.x * 87.1 + cell.z * 53.9) * 23817.3) % 1;
         return seed > 0.965;
@@ -7440,7 +7523,7 @@ vSlipWake = 0.0;
         terrainRoot.add(peaks, peakBases);
       }
 
-      const engravedCells = tileCellList.filter((cell) => {
+      const engravedCells = cellsByHeight[3].filter((cell) => {
         if (cell.h !== 3 || terrainRegion(cell) !== "limestone" || !detailIsClear(cell, 1.45)) return false;
         const seed = Math.abs(Math.sin(cell.x * 73.9 + cell.z * 37.1) * 31781.9) % 1;
         return seed > 0.72;
@@ -7501,7 +7584,7 @@ vSlipWake = 0.0;
       }
 
       // 古代區的淺刻符文嵌在石面上，幾乎與地表齊平，不阻擋建塔或單位移動。
-      const etchCells = tileCellList.filter((cell) => {
+      const etchCells = upperHighlandCells.filter((cell) => {
         if (cell.h < 2 || terrainRegion(cell) !== "ancient" || !detailIsClear(cell, 1.55)) return false;
         const seed = Math.abs(Math.sin(cell.x * 67.1 + cell.z * 41.7) * 22817.9) % 1;
         return seed > 0.975;
@@ -7531,6 +7614,10 @@ vSlipWake = 0.0;
         etches.receiveShadow = false;
         terrainRoot.add(etches);
       }
+
+      if (!(await yieldTerrainBuild(buildVersion))) return;
+
+      if (!(await yieldTerrainBuild(buildVersion))) return;
 
       // 稀疏古代遺跡：完整地圖只落在障礙格，擴張地圖移至島外淺海，保留所有可建造平台。
       const ruinSites: { x: number; z: number; h: number; seed: number; baseY?: number }[] = [];
@@ -8248,6 +8335,8 @@ vSlipWake = 0.0;
           landmarkLights.push({ light: glow, phase: 20 + i * 2.1, intensity: 0.38 });
         }
       }
+
+      if (!(await yieldTerrainBuild(buildVersion))) return;
 
       // 裸露邊緣的層理岩壁：高度差越大，側面越深、越厚。
       const cliffDirections = [
@@ -9044,6 +9133,8 @@ vSlipWake = 0.0;
         terrainRoot.add(roots);
       }
 
+      if (!(await yieldTerrainBuild(buildVersion))) return;
+
       // 多級坡面連接相鄰平台；跨越 2～3 級高差時也會生成連續斜坡，
       // 讓山脊不是突然斷成垂直方牆。道路高度 0 仍不鋪坡，避免遮住怪物通道。
       const rampDirections = [
@@ -9288,6 +9379,8 @@ vSlipWake = 0.0;
       }
 
       // 海面已由上方深海／淺灘雙層承接，移除舊的單色底板以露出水域。
+      if (!(await yieldTerrainBuild(buildVersion))) return;
+      renderer.shadowMap.needsUpdate = true;
     };
 
     const updateFireflies = (time: number) => {
@@ -10145,8 +10238,10 @@ vSlipWake = 0.0;
           const placedKey = data.placed.map((tile) => [tile.tc, tile.tr, tile.templateId, tile.rot].join(",")).join("|");
           const terrainKey = data.mapMode + "|" + placedKey + "|" + heightHash + "|" + blockedHash;
           if (terrainKey !== lastTerrainKey) {
-            rebuildTerrain(terrainBlocked === data.blocked ? data : { ...data, blocked: terrainBlocked });
-            renderer.shadowMap.needsUpdate = true;
+            void rebuildTerrain(terrainBlocked === data.blocked ? data : { ...data, blocked: terrainBlocked })
+              .catch((error) => {
+                if (!disposed) console.error("3D terrain build failed", error);
+              });
             lastTerrainKey = terrainKey;
           }
           lastTerrainHeightsRef = data.heights;
