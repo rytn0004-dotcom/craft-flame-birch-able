@@ -497,8 +497,8 @@ export function buildHeights(board: TileBoard): number[] {
   const worldSalt = tileRngSeed ?? 0x4e554c;
   // 三層八度 + domain warp + ridged noise：先形成山脈大形，再雕出側脊與風蝕細溝。
   const fbm = (c: number, r: number, _salt: number) => {
-    const warpX = (valueNoise(c + 17, r - 29, worldSalt ^ 0x68bc21eb, 16.0) - 0.5) * 5.2;
-    const warpY = (valueNoise(c - 23, r + 41, worldSalt ^ 0x02e5be93, 16.0) - 0.5) * 5.2;
+    const warpX = (valueNoise(c + 17, r - 29, worldSalt ^ 0x68bc21eb, 16.0) - 0.5) * 6.0;
+    const warpY = (valueNoise(c - 23, r + 41, worldSalt ^ 0x02e5be93, 16.0) - 0.5) * 6.0;
     const wx = c + warpX;
     const wy = r + warpY;
     const broad = valueNoise(wx, wy, worldSalt ^ 0x9e3779b9, 13.5);
@@ -670,7 +670,7 @@ export function buildHeights(board: TileBoard): number[] {
           weight += 0.48;
         }
         const neighborhood = sum / weight;
-        const ridgePreservation = heights[i] >= 3 ? 0.53 : 0.42;
+        const ridgePreservation = heights[i] >= 3 ? 0.49 : 0.37;
         smoothed[i] = Math.max(1, Math.min(3,
           Math.round(heights[i] * ridgePreservation + neighborhood * (1 - ridgePreservation)),
         ));
@@ -699,23 +699,23 @@ export function buildHeights(board: TileBoard): number[] {
       if (!onTileSeam) continue;
       const index = r * COLS + c;
       if (heights[index] === 0) continue;
-      let sum = smoothed[index] * 3.8;
-      let weight = 3.8;
+      let sum = smoothed[index] * 3.6;
+      let weight = 3.6;
       for (const [dc, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
         const nc = c + dc, nr = r + dr;
         if (nc < 0 || nr < 0 || nc >= COLS || nr >= ROWS) continue;
         const neighborIndex = nr * COLS + nc;
         if (heights[neighborIndex] === 0) continue;
-        sum += smoothed[neighborIndex] * 0.84;
-        weight += 0.84;
+        sum += smoothed[neighborIndex] * 0.9;
+        weight += 0.9;
       }
       for (const [dc, dr] of [[1, 1], [1, -1], [-1, 1], [-1, -1]] as const) {
         const nc = c + dc, nr = r + dr;
         if (nc < 0 || nr < 0 || nc >= COLS || nr >= ROWS) continue;
         const neighborIndex = nr * COLS + nc;
         if (heights[neighborIndex] === 0) continue;
-        sum += smoothed[neighborIndex] * 0.4;
-        weight += 0.4;
+        sum += smoothed[neighborIndex] * 0.45;
+        weight += 0.45;
       }
       seamBlend[index] = Math.max(1, Math.min(3, Math.round(sum / weight)));
     }
