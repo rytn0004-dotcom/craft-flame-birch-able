@@ -1444,6 +1444,17 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             - terrainWorld.y * 1.7 + middleGrain * 1.8)), 7.0);
           float alpineFrost = pow(max(0.0, sin(terrainWorld.x * 0.43
             + terrainWorld.y * 0.36 + middleGrain * 1.4)), 12.0);
+          // 風積雪依山脊與背風凹處斷續分佈，避免高地變成單調白色貼片。
+          float frostDrift = smoothstep(0.58, 0.94,
+            sin(terrainWorld.x * 0.19 - terrainWorld.y * 0.27 + ridgeMacro * 1.8) * 0.5 + 0.5)
+            * (0.42 + exposedCrest * 0.58);
+          float alpineLichen = smoothstep(0.62, 0.96,
+            sin(terrainWorld.x * 1.7 + terrainWorld.y * 1.3 + middleGrain * 2.2) * 0.5 + 0.5)
+            * (1.0 - exposedCrest * 0.58);
+          float ridgeQuartzDust = pow(max(0.0, sin(terrainWorld.x * 13.1
+            + terrainWorld.y * 9.7 + ridgeMacro * 4.0)), 13.0);
+          float windPolish = pow(max(0.0, 1.0 - abs(sin(terrainWorld.x * 3.7
+            - terrainWorld.y * 2.9 + ridgeMacro * 2.0))), 8.0) * exposedCrest;
           diffuseColor.rgb *= mix(vec3(0.78, 0.84, 0.92), vec3(1.05, 1.02, 0.94),
             ridgeContour * highlandStrength * 0.24);
           diffuseColor.rgb += vec3(0.045, 0.073, 0.11)
@@ -1455,6 +1466,13 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             diffuseColor.rgb * vec3(0.74, 0.81, 0.82), erodedScree * highlandStrength * 0.13);
           diffuseColor.rgb = mix(diffuseColor.rgb,
             diffuseColor.rgb * vec3(1.16, 1.22, 1.28), alpineFrost * ${height >= 3 ? "0.17" : "0.018"});
+          diffuseColor.rgb = mix(diffuseColor.rgb,
+            diffuseColor.rgb * vec3(0.78, 0.9, 1.16), frostDrift * highlandStrength * 0.2);
+          diffuseColor.rgb = mix(diffuseColor.rgb,
+            diffuseColor.rgb * vec3(0.76, 1.08, 0.82), alpineLichen * highlandStrength * 0.12);
+          diffuseColor.rgb += vec3(0.13, 0.17, 0.19) * ridgeQuartzDust * highlandStrength * 0.12;
+          diffuseColor.rgb = mix(diffuseColor.rgb,
+            diffuseColor.rgb * vec3(1.14, 1.12, 1.06), windPolish * highlandStrength * 0.12);
           // 高層地形的冷色晶脈更明顯，低地則保留柔暖草土色。
           float ridgeGlint = pow(max(0.0,
             sin(terrainWorld.x * 0.29 + terrainWorld.y * 0.21 + middleGrain)
@@ -1475,7 +1493,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             - exposedMineral * 0.045, 0.0, 1.0);`,
         );
       };
-      material.customProgramCacheKey = () => "tide-terrain-ridgeline-scree-alpine-v7-" + height;
+      material.customProgramCacheKey = () => "tide-terrain-ridgeline-scree-alpine-v8-frost-lichen-" + height;
     };
     const installBlackMistVeil = (material: THREE.MeshBasicMaterial) => {
       material.onBeforeCompile = (shader) => {
