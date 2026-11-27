@@ -419,12 +419,14 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       const uvs: number[] = [];
       const colors: number[] = [];
       const indices: number[] = [];
-      const sections = 14;
+      const sections = 16;
       const rails = [-1, -0.66, -0.33, 0, 0.33, 0.66, 1];
       const lanes = [
-        { offset: 0, width: 0.23, tint: [0.82, 0.97, 0.91] },
-        { offset: -1, width: 0.092, tint: [0.5, 0.82, 0.81] },
-        { offset: 1, width: 0.092, tint: [0.58, 0.87, 0.8] },
+        { offset: 0, width: 0.25, tint: [0.86, 0.98, 0.92] },
+        { offset: -1, width: 0.105, tint: [0.5, 0.82, 0.81] },
+        { offset: 1, width: 0.105, tint: [0.58, 0.87, 0.8] },
+        { offset: -1.62, width: 0.035, tint: [0.32, 0.66, 0.82] },
+        { offset: 1.62, width: 0.035, tint: [0.44, 0.75, 0.86] },
       ];
       for (let lane = 0; lane < lanes.length; lane++) {
         const spec = lanes[lane];
@@ -436,7 +438,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           const width = spec.width * open * close + 0.001;
           const drift = spec.offset === 0 ? 0 : spec.offset * (0.035 + 0.11 * t);
           const curl = Math.sin(t * 11.4 + lane * 1.7) * 0.018 * t;
-          const z = 0.07 - t * 2.35;
+          const z = 0.07 - t * 2.65;
           for (let rail = 0; rail < rails.length; rail++) {
             const across = rails[rail];
             const crest = (1 - Math.abs(across)) * (lane === 0 ? 0.011 : 0.006);
@@ -727,7 +729,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
               + wakeSonicCorona * 0.075 + wakeIonFilament * 0.035);`,
         );
       };
-      material.customProgramCacheKey = () => "tide-projectile-wake-flow-v7-sonic-corona-ion-filaments";
+      material.customProgramCacheKey = () => "tide-projectile-wake-flow-v8-extended-ground-pressure";
     };
     const installGroundSkimFlow = (material: THREE.MeshBasicMaterial) => {
       material.onBeforeCompile = (shader) => {
@@ -1039,7 +1041,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       blackMistCloud: new THREE.MeshBasicMaterial({
         color: "#080e1e",
         transparent: true,
-        opacity: 0.22,
+        opacity: 0.245,
         depthWrite: false,
         side: THREE.DoubleSide,
         toneMapped: false,
@@ -1298,7 +1300,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             * smoothstep(0.06, 0.12, abyssRadius) * (1.0 - smoothstep(0.43, 0.49, abyssRadius));
           diffuseColor.rgb = mix(diffuseColor.rgb,
             diffuseColor.rgb * vec3(0.54, 0.66, 0.94), abyssFlow * 0.28);
-          diffuseColor.rgb *= 1.0 - abyssDepth * 0.34;
+          diffuseColor.rgb *= 1.0 - abyssDepth * 0.39;
           diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.003, 0.008, 0.022), abyssPupil * 0.84);
           diffuseColor.rgb += vec3(0.035, 0.095, 0.18) * abyssEyeRim * (0.38 + uMistPower);
           diffuseColor.rgb += vec3(0.012, 0.034, 0.082) * abyssEyeRim * abyssEyeBreath * 0.24;
@@ -1307,13 +1309,13 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           diffuseColor.rgb += vec3(0.022, 0.035, 0.09) * abyssIris * (0.32 + uMistPower);
           diffuseColor.rgb += vec3(0.008, 0.018, 0.052)
             * (abyssFlow * 0.32 + abyssDepth * 0.5 + max(0.0, abyssVortex) * 0.08);
-          diffuseColor.rgb *= 1.0 - abyssGravityWell * 0.065 - abyssEclipse * 0.17;
+          diffuseColor.rgb *= 1.0 - abyssGravityWell * 0.085 - abyssEclipse * 0.21;
           diffuseColor.rgb += vec3(0.018, 0.045, 0.09) * abyssSpiralThread * (0.24 + uMistPower * 0.18);
           diffuseColor.rgb += vec3(0.045, 0.082, 0.12) * abyssShardGlint * (0.2 + abyssEyeBreath * 0.2);
           diffuseColor.rgb += vec3(0.035, 0.082, 0.13) * abyssLidArc * (0.16 + abyssEyeBreath * 0.12);
           diffuseColor.rgb += vec3(0.035, 0.095, 0.15) * abyssRadialRay * 0.28;
           diffuseColor.rgb += vec3(0.07, 0.15, 0.19) * abyssPupilGlint * 0.24;
-          diffuseColor.rgb *= 1.0 - abyssFocusShadow * 0.075;
+          diffuseColor.rgb *= 1.0 - abyssFocusShadow * 0.095;
           diffuseColor.rgb += vec3(0.028, 0.078, 0.135) * abyssFocusWave
             * (0.28 + abyssEyeBreath * 0.16 + uMistPower * 0.12);
           // 開拓邊界的霧幕會伸出細長暗爪，沿實際遮罩邊緣來回牽扯，不擴張或改寫迷霧遮罩。
@@ -1330,7 +1332,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             vMistFieldUv.x * 31.0 + vMistFieldUv.y * 19.0 - uMistTime * 0.16));`,
         );
       };
-      material.customProgramCacheKey = () => "tide-black-mist-abyss-gaze-v10-camera-follow-blink";
+      material.customProgramCacheKey = () => "tide-black-mist-abyss-gaze-v11-event-horizon-pressure";
     };
     installBlackMistFront(shared.blackMistField);
 
@@ -1558,16 +1560,16 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             + terrainWorldPosition.z * 8.1) * cos(terrainWorldPosition.z * 5.7
             - terrainWorldPosition.x * 3.9);
           // 高地山脊脊線與侵蝕凹地直接形成微幅幾何輪廓；只作用於頂面，不改邏輯高度。
-          transformed.y += terrainTopMask * (terrainCrest * 0.0075 + terrainFineLift * 0.0025
-            + terrainFold * ${height >= 2 ? "0.012" : height === 1 ? "0.005" : "0.0015"}
-            + terrainRill * ${height >= 2 ? "0.0035" : "0.001"}
-            + terrainShoulder * ${height >= 2 ? "0.014" : height === 1 ? "0.004" : "0.0005"}
-            + terrainRidgeSplit * ${height >= 2 ? "0.0028" : height === 1 ? "0.0009" : "0.0002"}
-            - terrainErosionPocket * ${height >= 2 ? "0.0038" : "0.0008"}
-            - terrainMicroCove * ${height >= 2 ? "0.0019" : "0.00025"}
-            + terrainEdgeScallop * ${height >= 2 ? "0.0048" : height === 1 ? "0.0022" : "0.00045"}
-            + terrainEdgeFracture * ${height >= 2 ? "0.0017" : height === 1 ? "0.0007" : "0.00012"}
-            - abs(terrainEdgeRoll) * terrainEdgeWeather * ${height >= 2 ? "0.0009" : height === 1 ? "0.00035" : "0.00008"});
+          transformed.y += terrainTopMask * (terrainCrest * 0.010 + terrainFineLift * 0.003
+            + terrainFold * ${height >= 2 ? "0.016" : height === 1 ? "0.006" : "0.0015"}
+            + terrainRill * ${height >= 2 ? "0.0045" : "0.0012"}
+            + terrainShoulder * ${height >= 2 ? "0.019" : height === 1 ? "0.005" : "0.0005"}
+            + terrainRidgeSplit * ${height >= 2 ? "0.0038" : height === 1 ? "0.0012" : "0.0002"}
+            - terrainErosionPocket * ${height >= 2 ? "0.005" : "0.0009"}
+            - terrainMicroCove * ${height >= 2 ? "0.0025" : "0.0003"}
+            + terrainEdgeScallop * ${height >= 2 ? "0.0062" : height === 1 ? "0.0028" : "0.00045"}
+            + terrainEdgeFracture * ${height >= 2 ? "0.0022" : height === 1 ? "0.0009" : "0.00012"}
+            - abs(terrainEdgeRoll) * terrainEdgeWeather * ${height >= 2 ? "0.0012" : height === 1 ? "0.0004" : "0.00008"});
           vTerrainWorldPosition = terrainWorldPosition.xyz;`,
         );
         shader.fragmentShader = shader.fragmentShader.replace(
@@ -2498,15 +2500,15 @@ vWindRibbon = 0.0;
         float slipAlong = dot(slipRelative, uSlipDirection);
         vec2 slipPerpendicular = vec2(-uSlipDirection.y, uSlipDirection.x);
         float slipSide = abs(dot(slipRelative, slipPerpendicular));
-        float slipWake = smoothstep(-10.5, -7.8, slipAlong)
-          * (1.0 - smoothstep(-1.55, 0.2, slipAlong))
-          * (1.0 - smoothstep(1.05, 3.8, slipSide));
+        float slipWake = smoothstep(-12.5, -9.2, slipAlong)
+          * (1.0 - smoothstep(-1.75, 0.2, slipAlong))
+          * (1.0 - smoothstep(1.2, 4.4, slipSide));
         float slipGust = slipWake * uSlipStrength * foliageMask;
         float slipSideSign = sign(dot(slipRelative, slipPerpendicular));
         // A short pressure front reaches the plants just before the trailing wake:
         // nearby blades first part sideways, then the wake combs them down and they spring back.
         float slipFront = exp(-pow(slipAlong * 1.18, 2.0))
-          * (1.0 - smoothstep(2.15, 4.35, slipSide)) * uSlipStrength * foliageMask;
+          * (1.0 - smoothstep(2.35, 4.75, slipSide)) * uSlipStrength * foliageMask;
         vec2 slipFrontPush = slipPerpendicular * slipSideSign * slipFront * ${(0.048 * slipResponse).toFixed(3)}
           - uSlipDirection * slipFront * ${(0.022 * slipResponse).toFixed(3)};
         vec2 slipBend = -uSlipDirection * ${(0.16 * slipResponse).toFixed(3)}
@@ -2705,7 +2707,7 @@ vWindRibbon = 0.0;
       // 每個地塊使用共享倒角岩台：頂面邊緣微圓、側壁略帶收分，
       // 不改變格子中心、邏輯高度或可放置範圍，避免方塊拼接感。
       const halfY = groundTop(height) * 0.5;
-      const bevel = 0.034;
+      const bevel = 0.043;
       // 共享頂面與側壁同時提高細分；四套高度幾何仍被所有地塊共用。
       const geometry = new THREE.BoxGeometry(0.98, groundTop(height), 0.98, 20, 5, 20);
       const positions = geometry.getAttribute("position");
@@ -2727,8 +2729,8 @@ vWindRibbon = 0.0;
         }
         const erosion = Math.sin(x * 19.0 + z * 13.0 + height * 0.7)
           * Math.cos(z * 17.0 - x * 8.0);
-        x += erosion * 0.0014;
-        z -= erosion * 0.0012;
+        x += erosion * 0.0019;
+        z -= erosion * 0.0017;
         positions.setXYZ(i, x, y, z);
       }
       positions.needsUpdate = true;
@@ -4434,7 +4436,7 @@ vWindRibbon = 0.0;
         terrainRoot.add(blackMistField);
 
         // 低成本 3D 深淵雲團：沿整個世界與外圍海域疏散分布，置於地表下方，不遮住已解鎖地塊。
-        const cloudPositions = 10;
+        const cloudPositions = 11;
         const cloudMargin = 72;
         for (let row = 0; row < cloudPositions; row++) {
           for (let col = 0; col < cloudPositions; col++) {
@@ -6064,11 +6066,11 @@ vWindRibbon = 0.0;
           + Math.cos(cell.z * 0.19 - cell.x * 0.07);
         if (ridgePatch < -0.18) return false;
         const seed = Math.abs(Math.sin(cell.x * 91.7 + cell.z * 57.3) * 24731.9) % 1;
-        if (seed < 0.79) return false;
+        if (seed < 0.755) return false;
         return !protectedBuildings.some((building) =>
           Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 0.62,
         );
-      }).slice(0, 120);
+      }).slice(0, 156);
       if (alpineCells.length) {
         const cushionGeometry = new THREE.SphereGeometry(1, 12, 8);
         const cushions = new THREE.InstancedMesh(cushionGeometry, shared.alpineCushion, alpineCells.length);
@@ -6167,8 +6169,8 @@ vWindRibbon = 0.0;
         // 稀疏霜花沿墊狀植物間隙出現，花瓣採圓潤立體形，不形成大量重複貼片。
         const frostBloomCells = alpineCells.filter((cell) => {
           const seed = Math.abs(Math.sin(cell.x * 47.3 + cell.z * 81.9) * 21871.3) % 1;
-          return seed > 0.82;
-        }).slice(0, 28);
+          return seed > 0.79;
+        }).slice(0, 36);
         const alpineMeshes: THREE.Object3D[] = [cushions, alpineGrass];
         if (frostBloomCells.length) {
           const stemGeometry = new THREE.CylinderGeometry(0.0045, 0.007, 0.11, 7);
