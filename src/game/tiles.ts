@@ -516,9 +516,30 @@ export function buildHeights(board: TileBoard): number[] {
     const spineRidge = 1.0 - Math.abs(spineSource * 2.0 - 1.0);
     // 更寬的盆地場只佔少量權重，替相鄰台地提供共同的高低趨勢。
     const basin = valueNoise(wx - 53, wy + 71, worldSalt ^ 0x165667b1, 19.0);
+    // 交錯次級山脊改用旋轉後的世界座標取樣，避免高地只沿單一方向排成條紋。
+    const crossSource = valueNoise(
+      wx * 0.51 + wy * 0.37 + 83,
+      wy * 0.91 - wx * 0.24 - 59,
+      worldSalt ^ 0x165667b1,
+      8.1,
+    );
+    const crossRidge = 1.0 - Math.abs(crossSource * 2.0 - 1.0);
+    // 大尺度地勢控制山群聚落；高頻風切形成斷續沖蝕槽與自然鞍部。
+    const continental = valueNoise(wx - 97, wy + 61, worldSalt ^ 0x27d4eb2f, 25.0);
+    const windCutSource = valueNoise(
+      wx * 1.13 + 17,
+      wy * 1.13 - 23,
+      worldSalt ^ 0x85ebca6b,
+      5.1,
+    );
+    const windCut = Math.pow(Math.max(0, 1.0 - Math.abs(windCutSource * 2.0 - 1.0)), 3.2);
+    // 高值區略擴成平緩台地，低值區保留侵蝕通道；道路與模板高度仍由後續硬約束保護。
+    const plateauSource = broad * 0.64 + middle * 0.36;
+    const plateau = Math.pow(Math.max(0, (plateauSource - 0.52) * 2.0), 1.35);
     return Math.max(0, Math.min(1,
-      broad * 0.35 + middle * 0.28 + fine * 0.11
-        + ridged * 0.17 + spineRidge * 0.07 + basin * 0.02,
+      broad * 0.27 + middle * 0.24 + fine * 0.08
+        + ridged * 0.15 + spineRidge * 0.09 + crossRidge * 0.07
+        + basin * 0.05 + continental * 0.05 + plateau * 0.05 - windCut * 0.05,
     ));
   };
 
