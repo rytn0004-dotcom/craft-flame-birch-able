@@ -668,13 +668,23 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           float shockFront = exp(-pow((wakeT - 0.11) * 17.0, 2.0));
           float vortexThread = pow(max(0.0, sin(wakeT * 29.0 - uProjectileWakeTime * 7.2
             + wakeAcross * 4.4)), 5.0);
-          float wakeEnergy = wakePulse * (0.84 + wakeShear * 0.16);
+          // 尾流雙渦與外側剪切層：中央高速核心、兩翼旋渦、外圈稀薄氣流分層。
+          float wakeTwinVortex = pow(max(0.0, sin(wakeT * 21.0
+            - uProjectileWakeTime * 5.7 + abs(wakeAcross - 0.5) * 13.0
+            + sin(wakeT * 17.0) * 0.8)), 7.0);
+          float wakeMachShear = smoothstep(0.2, 0.92, abs(wakeAcross - 0.5) * 2.0)
+            * (0.5 + 0.5 * sin(wakeT * 39.0 - uProjectileWakeTime * 9.2 + wakeAcross * 8.0));
+          float wakeCore = 1.0 - smoothstep(0.08, 0.42, abs(wakeAcross - 0.5));
+          float wakeEnergy = wakePulse * (0.82 + wakeShear * 0.18);
           diffuseColor.rgb *= wakeEnergy;
           diffuseColor.rgb += vec3(0.28, 0.44, 0.58) * (shockFront * 0.42 + vortexThread * 0.12);
-          diffuseColor.a *= wakeEdge * wakeTail * (0.68 + wakeShear * 0.2 + shockFront * 0.22);`,
+          diffuseColor.rgb += vec3(0.13, 0.25, 0.34) * (wakeTwinVortex * 0.2 + wakeMachShear * 0.11);
+          diffuseColor.rgb += vec3(0.08, 0.16, 0.2) * wakeCore * shockFront * 0.16;
+          diffuseColor.a *= wakeEdge * wakeTail
+            * (0.62 + wakeShear * 0.18 + shockFront * 0.2 + wakeTwinVortex * 0.12 + wakeMachShear * 0.08);`,
         );
       };
-      material.customProgramCacheKey = () => "tide-projectile-wake-flow-v3";
+      material.customProgramCacheKey = () => "tide-projectile-wake-flow-v4-twin-vortex";
     };
     const installGroundSkimFlow = (material: THREE.MeshBasicMaterial) => {
       material.onBeforeCompile = (shader) => {
