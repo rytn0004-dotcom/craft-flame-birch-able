@@ -1667,6 +1667,18 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           float windCarve = pow(max(0.0, sin(terrainWorld.x * 0.91
             + sin(terrainWorld.y * 0.53) * 1.6) * 0.5 + 0.5), 4.0);
           float highlandStrength = ${height >= 2 ? "1.0" : height === 1 ? "0.34" : "0.06"};
+          // 高地側壁加上不等距沉積層與斷續亮脊，讓 Lv.2／Lv.3 在黑霧邊界仍能讀出輪廓。
+          float highlandSideBand = pow(max(0.0,
+            1.0 - abs(sin(terrainWorld.y * 8.7 + terrainWorld.x * 0.21
+              + sin(terrainWorld.y * 0.8) * 1.1))), 16.0)
+            * vTerrainSideFacing * highlandStrength;
+          float highlandSideShadow = pow(max(0.0,
+            1.0 - abs(sin(terrainWorld.y * 8.7 + terrainWorld.x * 0.21
+              + sin(terrainWorld.y * 0.8) * 1.1 + 0.16))), 11.0)
+            * vTerrainSideFacing * highlandStrength;
+          float highlandLipCatch = pow(max(0.0, 1.0 - abs(edgeChipNoise)), 7.0)
+            * tileEdgeWear * highlandStrength;
+          float highlandTopPigment = ${height === 3 ? "0.16" : height === 2 ? "0.105" : height === 1 ? "0.035" : "0.0"};
           float ridgeSpineField = sin(terrainWorld.x * 0.57
             + sin(terrainWorld.y * 0.34) * 1.9)
             * cos(terrainWorld.y * 0.46 - terrainWorld.x * 0.22);
@@ -1708,8 +1720,13 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             * frostDrift * highlandStrength;
           diffuseColor.rgb *= mix(vec3(0.78, 0.84, 0.92), vec3(1.05, 1.02, 0.94),
             ridgeContour * highlandStrength * 0.24);
+          diffuseColor.rgb *= mix(vec3(1.0), vec3(1.08, 1.055, 0.97),
+            vTerrainTopFacing * highlandTopPigment);
+          diffuseColor.rgb *= 1.0 - highlandSideShadow * 0.14;
           diffuseColor.rgb += vec3(0.045, 0.073, 0.11)
-            * ridgeContour * highlandStrength * 0.12;
+            * ridgeContour * highlandStrength * 0.12
+            + vec3(0.11, 0.15, 0.16) * highlandSideBand * 0.18
+            + vec3(0.16, 0.19, 0.17) * highlandLipCatch * 0.22;
           diffuseColor.rgb *= 1.0 - windCarve * highlandStrength * 0.055;
           diffuseColor.rgb = mix(diffuseColor.rgb,
             diffuseColor.rgb * vec3(1.13, 1.08, 0.96), exposedCrest * highlandStrength * 0.11);
@@ -1756,10 +1773,11 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             + terrainMicroStrata * 0.035 + terrainRootThread * 0.026
             + sideFractureDust * vTerrainSideFacing * 0.055
             + sideRunoffStain * vTerrainSideFacing * 0.035
+            + highlandSideBand * 0.028
             - terrainDewFilm * 0.018 - exposedMineral * 0.045 - frostGranule * 0.018, 0.0, 1.0);`,
         );
       };
-      material.customProgramCacheKey = () => "tide-terrain-ridgeline-scree-alpine-v13-side-runoff-strata-high-tessellation-" + height;
+      material.customProgramCacheKey = () => "tide-terrain-ridgeline-scree-alpine-v14-highland-tier-edge-readability-" + height;
     };
     const installBlackMistVeil = (material: THREE.MeshBasicMaterial) => {
       material.onBeforeCompile = (shader) => {
