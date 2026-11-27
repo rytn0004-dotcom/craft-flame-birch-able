@@ -506,8 +506,19 @@ export function buildHeights(board: TileBoard): number[] {
     const fine = valueNoise(c + 47, r - 13, worldSalt ^ 0x85ebca6b, 2.9);
     const ridgeSource = valueNoise(wx * 0.82 - 7, wy * 0.82 + 11, worldSalt ^ 0xc2b2ae35, 9.2);
     const ridged = 1.0 - Math.abs(ridgeSource * 2.0 - 1.0);
+    // 斜向脊線場把高地核心沿地形主軸拉長，避免山頂只形成零碎棋盤塊。
+    const spineSource = valueNoise(
+      wx * 0.72 + wy * 0.18 + 67,
+      wy * 0.96 - wx * 0.22 - 37,
+      worldSalt ^ 0x27d4eb2f,
+      8.7,
+    );
+    const spineRidge = 1.0 - Math.abs(spineSource * 2.0 - 1.0);
+    // 更寬的盆地場只佔少量權重，替相鄰台地提供共同的高低趨勢。
+    const basin = valueNoise(wx - 53, wy + 71, worldSalt ^ 0x165667b1, 19.0);
     return Math.max(0, Math.min(1,
-      broad * 0.39 + middle * 0.31 + fine * 0.12 + ridged * 0.18,
+      broad * 0.35 + middle * 0.28 + fine * 0.11
+        + ridged * 0.17 + spineRidge * 0.07 + basin * 0.02,
     ));
   };
 
