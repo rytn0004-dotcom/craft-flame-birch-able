@@ -1224,6 +1224,12 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           float abyssPupilGlint = exp(-pow((abyssUv.x - abyssPupilX - 0.014) * 112.0, 2.0))
             * (1.0 - smoothstep(0.025, 0.19, abs(abyssUv.y)))
             * (0.55 + abyssEyeBreath * 0.45);
+          // 深淵聚焦波環從瞳孔深處緩慢向外推進，外緣留下短暫的暗色折射陰影。
+          float abyssFocusTravel = 0.105 + fract(uMistTime * 0.045) * 0.36;
+          float abyssFocusWave = exp(-pow((abyssRadius - abyssFocusTravel) * 52.0, 2.0))
+            * smoothstep(0.06, 0.12, abyssRadius) * (1.0 - smoothstep(0.43, 0.49, abyssRadius));
+          float abyssFocusShadow = exp(-pow((abyssRadius - abyssFocusTravel + 0.018) * 28.0, 2.0))
+            * smoothstep(0.06, 0.12, abyssRadius) * (1.0 - smoothstep(0.43, 0.49, abyssRadius));
           diffuseColor.rgb = mix(diffuseColor.rgb,
             diffuseColor.rgb * vec3(0.54, 0.66, 0.94), abyssFlow * 0.28);
           diffuseColor.rgb *= 1.0 - abyssDepth * 0.34;
@@ -1241,6 +1247,9 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           diffuseColor.rgb += vec3(0.035, 0.082, 0.13) * abyssLidArc * (0.16 + abyssEyeBreath * 0.12);
           diffuseColor.rgb += vec3(0.035, 0.095, 0.15) * abyssRadialRay * 0.28;
           diffuseColor.rgb += vec3(0.07, 0.15, 0.19) * abyssPupilGlint * 0.24;
+          diffuseColor.rgb *= 1.0 - abyssFocusShadow * 0.075;
+          diffuseColor.rgb += vec3(0.028, 0.078, 0.135) * abyssFocusWave
+            * (0.28 + abyssEyeBreath * 0.16 + uMistPower * 0.12);
           // 開拓邊界的霧幕會伸出細長暗爪，沿實際遮罩邊緣來回牽扯，不擴張或改寫迷霧遮罩。
           float mistClawFlow = sin(vMistFieldUv.x * 47.0
             + sin(vMistFieldUv.y * 21.0 - uMistTime * 0.18) * 2.6 - uMistTime * 0.14);
@@ -1255,7 +1264,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             vMistFieldUv.x * 31.0 + vMistFieldUv.y * 19.0 - uMistTime * 0.16));`,
         );
       };
-      material.customProgramCacheKey = () => "tide-black-mist-abyss-gaze-v8-breathing-claw-edge";
+      material.customProgramCacheKey = () => "tide-black-mist-abyss-gaze-v9-outward-focus-wave";
     };
     installBlackMistFront(shared.blackMistField);
 
