@@ -675,16 +675,30 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           float wakeMachShear = smoothstep(0.2, 0.92, abs(wakeAcross - 0.5) * 2.0)
             * (0.5 + 0.5 * sin(wakeT * 39.0 - uProjectileWakeTime * 9.2 + wakeAcross * 8.0));
           float wakeCore = 1.0 - smoothstep(0.08, 0.42, abs(wakeAcross - 0.5));
+          // 前端壓縮弧在中央略向前、兩翼向後彎，形成可辨識的馬赫錐輪廓。
+          float coneAcross = abs(wakeAcross - 0.5) * 2.0;
+          float coneCenter = 0.095 + coneAcross * 0.19 + coneAcross * coneAcross * 0.035;
+          float wakeMachCone = exp(-pow((wakeT - coneCenter) * 46.0, 2.0))
+            * smoothstep(0.12, 0.35, coneAcross) * (1.0 - smoothstep(0.88, 1.0, coneAcross));
+          float wakeCompressionArc = exp(-pow((wakeT - (0.12 + 0.022 * sin(wakeAcross * 6.283))) * 54.0, 2.0))
+            * (1.0 - smoothstep(0.34, 0.62, coneAcross));
+          float wakeCavitation = pow(max(0.0, sin(wakeT * 37.0 - uProjectileWakeTime * 11.0
+            + coneAcross * 12.0)), 8.0) * wakeMachShear * wakeTail;
           float wakeEnergy = wakePulse * (0.82 + wakeShear * 0.18);
           diffuseColor.rgb *= wakeEnergy;
           diffuseColor.rgb += vec3(0.28, 0.44, 0.58) * (shockFront * 0.42 + vortexThread * 0.12);
           diffuseColor.rgb += vec3(0.13, 0.25, 0.34) * (wakeTwinVortex * 0.2 + wakeMachShear * 0.11);
           diffuseColor.rgb += vec3(0.08, 0.16, 0.2) * wakeCore * shockFront * 0.16;
+          diffuseColor.rgb += vec3(0.19, 0.32, 0.42) * wakeMachCone * 0.24
+            + vec3(0.24, 0.36, 0.43) * wakeCompressionArc * 0.2;
+          diffuseColor.rgb += vec3(0.075, 0.15, 0.19) * wakeCavitation * 0.18;
           diffuseColor.a *= wakeEdge * wakeTail
-            * (0.62 + wakeShear * 0.18 + shockFront * 0.2 + wakeTwinVortex * 0.12 + wakeMachShear * 0.08);`,
+            * (0.58 + wakeShear * 0.16 + shockFront * 0.18 + wakeTwinVortex * 0.11
+              + wakeMachShear * 0.07 + wakeMachCone * 0.12
+              + wakeCompressionArc * 0.14 + wakeCavitation * 0.06);`,
         );
       };
-      material.customProgramCacheKey = () => "tide-projectile-wake-flow-v4-twin-vortex";
+      material.customProgramCacheKey = () => "tide-projectile-wake-flow-v5-mach-compression-arc";
     };
     const installGroundSkimFlow = (material: THREE.MeshBasicMaterial) => {
       material.onBeforeCompile = (shader) => {
