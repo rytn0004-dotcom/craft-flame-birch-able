@@ -581,8 +581,8 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
         diffuseColor.a *= vRockDebrisFade;`,
       );
     };
-    rockDebrisMaterial.customProgramCacheKey = () => "tide-cliff-slip-debris-v1";
-    const rockDebrisCount = 14;
+    rockDebrisMaterial.customProgramCacheKey = () => "tide-cliff-slip-debris-v2-four-layer-shards";
+    const rockDebrisCount = 18;
     const rockDebrisGeometry = new THREE.DodecahedronGeometry(0.062, 1);
     const rockDebrisPositions = rockDebrisGeometry.getAttribute("position");
     const rockDebrisVertex = new THREE.Vector3();
@@ -1716,18 +1716,39 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             + vMistVeilUv.y * 12.0 - uMistVeilTime * 0.2 + veilWarp * 1.8);
           float veilPressurePulse = 0.5 + 0.5 * sin(vMistVeilUv.x * 3.2
             - uMistVeilTime * 0.16 + veilDepthFold * 2.4);
+          // 深層重力渦不直接畫成圖案，而是把霧絲拉成不規則的向心暗褶。
+          vec2 veilEyeUv = vec2((vMistVeilUv.x - 0.5) * 1.55, (vMistVeilUv.y - 0.36) * 1.18);
+          float veilEyeRadius = length(veilEyeUv);
+          float veilEyeAngle = atan(veilEyeUv.y, veilEyeUv.x);
+          float veilGravitySpiral = pow(max(0.0, sin(veilEyeAngle * 5.0
+            - log(veilEyeRadius + 0.035) * 12.0 - uMistVeilTime * 0.19
+            + veilWarp * 1.4)), 8.0)
+            * (1.0 - smoothstep(0.28, 0.72, veilEyeRadius));
+          float veilPressureFold = pow(max(0.0, sin(vMistVeilUv.x * 8.5
+            + sin(vMistVeilUv.y * 6.2 - uMistVeilTime * 0.13) * 2.1
+            - uMistVeilTime * 0.09)), 5.0);
+          float veilTearRib = pow(max(0.0, sin(vMistVeilUv.x * 43.0
+            + sin(vMistVeilUv.y * 10.0 + uMistVeilTime * 0.12) * 2.6
+            - uMistVeilTime * 0.23)), 11.0);
+          float veilDepthPocket = (1.0 - smoothstep(0.12, 0.9, vMistVeilUv.y))
+            * (0.45 + 0.55 * veilGravitySpiral);
           diffuseColor.a *= veilBaseFade * veilTopFade * veilStrand
-            * (0.72 + veilTendril * 0.34 + veilFilament * 0.12)
+            * (0.72 + veilTendril * 0.34 + veilFilament * 0.12
+              + veilTearRib * 0.075 + veilGravitySpiral * 0.055)
             * (0.9 + veilUndertow * 0.1);
           diffuseColor.rgb *= mix(vec3(0.42, 0.5, 0.72), vec3(0.92, 0.98, 1.12),
             vMistVeilUv.y * 0.72 + veilDepthFold * 0.16);
           diffuseColor.rgb *= 0.86 + veilPressurePulse * 0.14;
+          diffuseColor.rgb *= 1.0 - veilDepthPocket * 0.19 - veilPressureFold * 0.075;
           diffuseColor.rgb += vec3(0.018, 0.042, 0.095) * veilTendril * 0.36
             + vec3(0.012, 0.025, 0.062) * (1.0 - veilDepthFold) * 0.24
-            + vec3(0.035, 0.07, 0.13) * veilFilament * 0.24;`,
+            + vec3(0.035, 0.07, 0.13) * veilFilament * 0.24
+            + vec3(0.014, 0.038, 0.082) * veilGravitySpiral * 0.32
+            + vec3(0.026, 0.056, 0.091) * veilTearRib * 0.22
+            + vec3(0.009, 0.019, 0.047) * veilPressureFold * 0.12;`,
         );
       };
-      material.customProgramCacheKey = () => "tide-black-mist-torn-depth-veil-v3-undertow-filaments";
+      material.customProgramCacheKey = () => "tide-black-mist-torn-depth-veil-v4-gravity-folds";
     };
     installSanctuarySigil(shared.sanctuarySigil);
     installRoadFlow(shared.roadGuide);
@@ -1998,6 +2019,12 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             "float runoffPath = sin(cliffWorldXZ.x * 4.7 + sin(vCliffWorldPosition.y * 2.1) * 1.4);",
             "float runoffStreak = pow(max(0.0, 1.0 - abs(runoffPath)), 12.0) * (0.35 + dampLichen * 0.65);",
             "float screeDeposit = smoothstep(0.52, 0.94, sin(cliffWorldXZ.x * 2.3 + cliffWorldXZ.y * 1.9 + cliffFlow * 2.6) * 0.5 + 0.5) * (1.0 - smoothstep(0.12, 0.88, vCliffWorldPosition.y - floor(vCliffWorldPosition.y)));",
+            // 沉積層之間有更細的斷層陰影、礦物粉塵與鹽晶斑，不讓整面岩壁變成等距條紋。
+            "float terraceFault = pow(max(0.0, 1.0 - abs(sin(vCliffWorldPosition.y * 14.7 + cliffFlow * 2.3 + sin(cliffWorldXZ.y * 0.53) * 1.1))), 18.0);",
+            "float faultUndercut = terraceFault * (0.35 + 0.65 * smoothstep(0.16, 0.88, cliffSediment));",
+            "float ironBloomCloud = smoothstep(0.58, 0.94, sin(cliffWorldXZ.x * 0.47 - cliffWorldXZ.y * 0.39 + cliffFlow * 1.9) * 0.5 + 0.5) * (1.0 - dampLichen * 0.52);",
+            "float frostSaltDust = pow(max(0.0, sin(cliffWorldXZ.x * 17.1 + cliffWorldXZ.y * 13.7 + cleavageWarp * 2.1)), 12.0) * (0.3 + saltBloom * 0.7);",
+            "float talusShadowBand = pow(max(0.0, sin(vCliffWorldPosition.y * 5.8 + cliffFlow * 1.6)), 10.0) * screeDeposit;",
             "diffuseColor.rgb *= 0.94 + strataLine * strataBreak * 0.09;",
             "diffuseColor.rgb *= 1.0 - fractureMask * 0.28;",
             "diffuseColor.rgb += vec3(0.11, 0.14, 0.16) * fractureMask * 0.12;",
@@ -2015,6 +2042,10 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             "diffuseColor.rgb += vec3(0.24, 0.29, 0.3) * cleavageLine * 0.038;",
             "diffuseColor.rgb += vec3(0.12, 0.105, 0.082) * cliffPitting * 0.035;",
             "diffuseColor.rgb += vec3(0.12, 0.2, 0.19) * quartzBranch * mineralVein * 0.22;",
+            "diffuseColor.rgb *= 1.0 - faultUndercut * 0.17 - talusShadowBand * 0.09;",
+            "diffuseColor.rgb += vec3(0.16, 0.12, 0.075) * ironBloomCloud * 0.13;",
+            "diffuseColor.rgb += vec3(0.18, 0.22, 0.24) * frostSaltDust * 0.12;",
+            "diffuseColor.rgb += vec3(0.14, 0.16, 0.15) * terraceFault * 0.045;",
           ].join("\n"),
         );
         shader.fragmentShader = shader.fragmentShader.replace(
@@ -2022,11 +2053,11 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           [
             "#include <roughnessmap_fragment>",
             "float cliffGrain = sin(vCliffWorldPosition.x * 7.3 + vCliffWorldPosition.z * 5.7) * cos(vCliffWorldPosition.z * 8.1 - vCliffWorldPosition.x * 3.2);",
-            "roughnessFactor = clamp(roughnessFactor + cliffGrain * 0.035 + fractureMask * 0.11 - mineralVein * 0.08 - dampLichen * 0.035 + weatheredPocket * 0.06 - cleavageLine * 0.025 + cliffPitting * 0.09 + runoffStreak * 0.035, 0.0, 1.0);",
+            "roughnessFactor = clamp(roughnessFactor + cliffGrain * 0.035 + fractureMask * 0.11 - mineralVein * 0.08 - dampLichen * 0.035 + weatheredPocket * 0.06 - cleavageLine * 0.025 + cliffPitting * 0.09 + runoffStreak * 0.035 + faultUndercut * 0.075 + talusShadowBand * 0.04 - frostSaltDust * 0.018, 0.0, 1.0);",
           ].join("\\n"),
         );
       };
-      material.customProgramCacheKey = () => "tide-cliff-strata-world-weathering-v5-runoff-pitting";
+      material.customProgramCacheKey = () => "tide-cliff-strata-world-weathering-v6-fault-undercut-salt";
     };
     installCliffStrata(shared.cliff);
 
@@ -2242,21 +2273,29 @@ vWindRibbon = 0.0;
         float crossCoordinate = dot(instanceMatrix[3].xz, windCrossAxis);
         float broadGust = sin(uFoliageTime * 0.42 + dot(instanceMatrix[3].xz, vec2(0.031, 0.019)));
         float travelingGust = sin(windTravel * 0.115 - uFoliageTime * 1.08);
+        // 兩個不同尺度的亂流脈衝交錯，打散整片草地過於規律的同頻擺動。
+        float gustCell = sin(windTravel * 0.047 - uFoliageTime * 0.31
+          + sin(crossCoordinate * 0.061 + uFoliageTime * 0.12) * 2.3);
+        float gustLobe = pow(smoothstep(-0.42, 0.92, gustCell), 1.7);
+        float ridgeUpdraft = smoothstep(0.2, 0.92,
+          0.5 + 0.5 * sin(windTravel * 0.073 + sin(crossCoordinate * 0.09) * 1.7
+            - uFoliageTime * 0.52)) * vFoliageAltitude;
         // 斜向主風場與側向渦流疊合成有方向的風帶，前緣依座標推進，不讓全場同時擺動。
         float crossTravel = sin(crossCoordinate * 0.083 - uFoliageTime * 0.74);
         float crossFront = smoothstep(-0.62, 0.9, crossTravel);
         float shearBand = sin(windTravel * 0.168 - uFoliageTime * 1.34
           + sin(crossCoordinate * 0.12 - uFoliageTime * 0.46) * 0.72);
         float shearFront = smoothstep(-0.58, 0.88, shearBand);
-        float gustStrength = min(1.28, (0.34 + 0.27 * smoothstep(-0.65, 0.88, broadGust)
-          + 0.2 * smoothstep(-0.56, 0.78, travelingGust)
-          + 0.13 * crossFront + 0.18 * shearFront) * ridgeExposure);
+        float gustStrength = min(1.34, (0.3 + 0.23 * smoothstep(-0.65, 0.88, broadGust)
+          + 0.18 * smoothstep(-0.56, 0.78, travelingGust)
+          + 0.12 * crossFront + 0.16 * shearFront
+          + 0.1 * gustLobe + 0.12 * ridgeUpdraft) * ridgeExposure);
         vFoliageGust = max(gustStrength * smoothstep(-0.5, 0.72, travelingGust),
           max(crossFront * 0.2, shearFront * 0.28));
         // 一道細窄的亮風脊沿世界座標斜向推進，讓整片草地呈現連續傳遞的風浪。
         float windRibbonPhase = windTravel * 0.32 - uFoliageTime * 2.35
           + sin(crossCoordinate * 0.12 - uFoliageTime * 0.55) * 0.9
-          + position.y * 1.25;
+          + gustCell * 0.42 + position.y * 1.25;
         vWindRibbon = pow(max(0.0, 0.5 + 0.5 * sin(windRibbonPhase)), 9.0)
           * (0.34 + gustStrength * 0.66);
         float bladeGrainPhase = sin(position.x * 18.0 + position.z * 23.0 + foliagePhase * 2.1);
@@ -2271,7 +2310,8 @@ vWindRibbon = 0.0;
           + bladeGrainPhase) * 0.16;
         float shearFlutter = sin(shearBand * 3.2 + foliagePhase * 1.6 + position.y * 7.4
           + bladeEdgeFlutter * 2.0) * 0.2;
-        float foliageSway = (foliageWave + foliageFlutter + leafRipple + shearFlutter) * gustStrength;
+        float foliageSway = (foliageWave + foliageFlutter + leafRipple + shearFlutter
+          + (gustLobe - 0.42) * 0.34 + ridgeUpdraft * 0.28) * gustStrength;
         float gustLean = smoothstep(-0.18, 0.78, travelingGust) * foliageMask;
         float shearLean = (shearFront - 0.32) * foliageMask;
         transformed.x += (foliageSway * 0.098 + gustLean * 0.032
@@ -2341,7 +2381,7 @@ vWindRibbon = 0.0;
             + vec3(0.018, 0.038, 0.052), vFoliageAltitude * 0.34);`,
         );
       };
-      material.customProgramCacheKey = () => `${cacheKey}-traveling-wind-ribbon-v1`;
+      material.customProgramCacheKey = () => `${cacheKey}-traveling-wind-ribbon-v2-turbulent-updraft`;
     };
     installFoliageWind(shared.foliageWind, "tide-foliage-wind-v8-pressure-sweep");
     installFoliageWind(shared.treeCanopyWind, "tide-tree-canopy-gust-v4-pressure-sweep", 2.4);
@@ -7698,7 +7738,7 @@ vWindRibbon = 0.0;
           // 岩沿的苔帶只在少數背陰面出現，打破石頭與草地硬切的接縫。
           const mossSeed = Math.abs(Math.sin(cell.x * 73.1 + cell.z * 29.7 + d.dc * 17.3 + d.dr * 31.9) * 29871.7) % 1;
           if (
-            cell.h >= 1 && mossSeed > 0.79 && cliffMosses.length < 480 &&
+            cell.h >= 1 && mossSeed > 0.765 && cliffMosses.length < 560 &&
             !protectedBuildings.some((building) =>
               Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 1.05,
             )
@@ -7723,7 +7763,7 @@ vWindRibbon = 0.0;
           const rootHeight = Math.min(rootVertical * 0.86, 0.92 + rootSeed * 0.22);
           if (
             cell.h >= 2 && neighbor && neighbor.h > 0 && rootVertical >= 0.78 &&
-            rootSeed > 0.79 && cliffRootCurtains.length < 190 && rootHeight > 0.48 &&
+            rootSeed > 0.775 && cliffRootCurtains.length < 220 && rootHeight > 0.48 &&
             !protectedBuildings.some((building) =>
               Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 1.18,
             )
