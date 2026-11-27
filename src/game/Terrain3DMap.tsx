@@ -1493,6 +1493,10 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
     };
     const installTerrainSurface = (material: THREE.MeshStandardMaterial, height: number) => {
       material.onBeforeCompile = (shader) => {
+        shader.uniforms.uTerrainSlipPosition = slipWindUniforms.position;
+        shader.uniforms.uTerrainSlipDirection = slipWindUniforms.direction;
+        shader.uniforms.uTerrainSlipStrength = slipWindUniforms.strength;
+        shader.uniforms.uTerrainSlipTime = projectileWakeUniforms.time;
         shader.vertexShader = shader.vertexShader.replace(
           "#include <common>",
           "#include <common>\nvarying vec3 vTerrainWorldPosition;\nvarying vec3 vTerrainLocalPosition;\nvarying float vTerrainTopFacing;\nvarying float vTerrainSideFacing;",
@@ -1574,7 +1578,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <common>",
-          "#include <common>\nvarying vec3 vTerrainWorldPosition;\nvarying vec3 vTerrainLocalPosition;\nvarying float vTerrainSideFacing;\nvarying float vTerrainTopFacing;",
+          "#include <common>\nuniform vec2 uTerrainSlipPosition;\nuniform vec2 uTerrainSlipDirection;\nuniform float uTerrainSlipStrength;\nuniform float uTerrainSlipTime;\nvarying vec3 vTerrainWorldPosition;\nvarying vec3 vTerrainLocalPosition;\nvarying float vTerrainSideFacing;\nvarying float vTerrainTopFacing;",
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <color_fragment>",
@@ -1808,7 +1812,32 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           diffuseColor.rgb = mix(diffuseColor.rgb,
             diffuseColor.rgb * vec3(1.12, 1.08, 0.96),
             alpineSunWash * 0.16);
-          diffuseColor.rgb += vec3(0.13, 0.18, 0.21) * quartzEdgeSpark * 0.12;`,
+          diffuseColor.rgb += vec3(0.13, 0.18, 0.21) * quartzEdgeSpark * 0.12;
+          // 高速彈體的壓力尾流會短暫掃過真正地表：草地被壓暗、岩面接住冷光，離開後自然淡去。
+          // 與草葉使用同一個方向／位置／強度 uniform，不建立額外 mesh，也不逐格更新 CPU 狀態。
+          vec2 terrainSlipRelative = terrainWorld - uTerrainSlipPosition;
+          vec2 terrainSlipPerpendicular = vec2(-uTerrainSlipDirection.y, uTerrainSlipDirection.x);
+          float terrainSlipAlong = dot(terrainSlipRelative, uTerrainSlipDirection);
+          float terrainSlipSide = abs(dot(terrainSlipRelative, terrainSlipPerpendicular));
+          float terrainSlipBody = smoothstep(-13.2, -9.1, terrainSlipAlong)
+            * (1.0 - smoothstep(-2.3, -0.05, terrainSlipAlong))
+            * (1.0 - smoothstep(0.45, 4.25, terrainSlipSide))
+            * uTerrainSlipStrength * vTerrainTopFacing;
+          float terrainSlipShear = pow(max(0.0, sin(terrainSlipAlong * 4.2
+            - uTerrainSlipTime * 8.6 + terrainSlipSide * 2.4)), 8.0) * terrainSlipBody;
+          float terrainSlipPressure = exp(-pow((terrainSlipAlong
+            + 2.8 + sin(terrainSlipSide * 2.1 - uTerrainSlipTime * 2.4) * 0.16) * 3.4, 2.0))
+            * (1.0 - smoothstep(2.7, 4.4, terrainSlipSide))
+            * uTerrainSlipStrength * vTerrainTopFacing;
+          float terrainSlipDustFan = pow(max(0.0, sin(terrainSlipAlong * 2.8
+            - uTerrainSlipTime * 5.3 + terrainSlipSide * 5.7)), 7.0)
+            * smoothstep(0.55, 2.5, terrainSlipSide)
+            * (1.0 - smoothstep(3.6, 4.5, terrainSlipSide))
+            * terrainSlipBody;
+          diffuseColor.rgb *= 1.0 - terrainSlipBody * ${height >= 2 ? "0.062" : "0.038"};
+          diffuseColor.rgb += vec3(0.025, 0.085, 0.105) * terrainSlipShear * 0.18
+            + vec3(0.085, 0.13, 0.14) * terrainSlipPressure * 0.24
+            + vec3(0.055, 0.075, 0.068) * terrainSlipDustFan * 0.11;`,
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <roughnessmap_fragment>",
@@ -1822,10 +1851,11 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             + sideFractureDust * vTerrainSideFacing * 0.055
             + sideRunoffStain * vTerrainSideFacing * 0.035
             + highlandSideBand * 0.028
-            - terrainDewFilm * 0.018 - exposedMineral * 0.045 - frostGranule * 0.018, 0.0, 1.0);`,
+            - terrainDewFilm * 0.018 - exposedMineral * 0.045 - frostGranule * 0.018
+            + terrainSlipBody * 0.075 - terrainSlipPressure * 0.055, 0.0, 1.0);`,
         );
       };
-      material.customProgramCacheKey = () => "tide-terrain-ridgeline-scree-alpine-v14-highland-tier-edge-readability-" + height;
+      material.customProgramCacheKey = () => "tide-terrain-ridgeline-scree-alpine-v15-surface-slip-pressure-" + height;
     };
     const installBlackMistVeil = (material: THREE.MeshBasicMaterial) => {
       material.onBeforeCompile = (shader) => {
@@ -2056,13 +2086,13 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
     // and rounded/chipped edges instead of the hard cube silhouette of stretched BoxGeometry.
     const cliffBlockGeometry = (() => {
       // 共用崖壁幾何增加適度細分，讓每個岩層切面能承接細碎風化，而非平滑長方盒。
-      const geometry = new THREE.BoxGeometry(1, 1, 1, 12, 12, 8);
+      const geometry = new THREE.BoxGeometry(1, 1, 1, 14, 14, 10);
       const positions = geometry.getAttribute("position");
       for (let vertex = 0; vertex < positions.count; vertex++) {
         let x = positions.getX(vertex);
         let y = positions.getY(vertex);
         let z = positions.getZ(vertex);
-        const bevelCore = 0.43;
+        const bevelCore = 0.42;
         const cx = THREE.MathUtils.clamp(x, -bevelCore, bevelCore);
         const cy = THREE.MathUtils.clamp(y, -bevelCore, bevelCore);
         const cz = THREE.MathUtils.clamp(z, -bevelCore, bevelCore);
@@ -2071,9 +2101,9 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
         const dz = z - cz;
         const distance = Math.hypot(dx, dy, dz);
         if (distance > 1e-5) {
-          x = cx + (dx / distance) * 0.07;
-          y = cy + (dy / distance) * 0.07;
-          z = cz + (dz / distance) * 0.07;
+          x = cx + (dx / distance) * 0.078;
+          y = cy + (dy / distance) * 0.078;
+          z = cz + (dz / distance) * 0.078;
         }
         const erosion = Math.sin(y * 17.3 + z * 11.7) * Math.cos(x * 13.1 - z * 8.9);
         const strata = Math.sin(y * 23.5 + Math.sin(z * 8.2 + x * 5.1) * 1.8);
@@ -2709,7 +2739,7 @@ vWindRibbon = 0.0;
       const halfY = groundTop(height) * 0.5;
       const bevel = 0.043;
       // 共享頂面與側壁同時提高細分；四套高度幾何仍被所有地塊共用。
-      const geometry = new THREE.BoxGeometry(0.98, groundTop(height), 0.98, 20, 5, 20);
+      const geometry = new THREE.BoxGeometry(0.98, groundTop(height), 0.98, 24, 6, 24);
       const positions = geometry.getAttribute("position");
       for (let i = 0; i < positions.count; i++) {
         let x = positions.getX(i);
@@ -5291,7 +5321,7 @@ vWindRibbon = 0.0;
         // Grass density follows the large meadow patch field: lush pockets gather naturally,
         // while wind-scoured gaps and exposed limestone remain open.
         const patchDensity = THREE.MathUtils.clamp((patchField + 0.28) * 0.31, 0, 1);
-        const densityThreshold = 0.923 - patchDensity * 0.145;
+        const densityThreshold = 0.916 - patchDensity * 0.158;
         if (seed < densityThreshold) return false;
         return !data.towers.some((tower) => {
           const tx = tower.x / CELL;
@@ -5301,7 +5331,7 @@ vWindRibbon = 0.0;
         }) && !protectedBuildings.some((building) =>
           Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 0.38,
         );
-      }).slice(0, 2100);
+      }).slice(0, 2250);
       if (grassCells.length) {
         // 彎曲漸尖的葉片取代圓錐草刺；四片葉組成一簇，並共用樹冠風場材質。
         // Nine-rail, ten-section grass blades have a cupped cross-section, raised midrib,
