@@ -1373,6 +1373,12 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             * cos(terrainWorldPosition.z * 0.68 - terrainWorldPosition.x * 0.31);
           float terrainRill = sin(terrainWorldPosition.x * 2.7 + terrainWorldPosition.z * 1.9)
             * cos(terrainWorldPosition.z * 2.3 - terrainWorldPosition.x * 1.4);
+          // 次級岩脊與細窪以更高頻率雕刻頂面；加密網格讓輪廓在近景不再呈現折線。
+          float terrainRidgeSplit = sin(terrainWorldPosition.x * 8.7
+            + sin(terrainWorldPosition.z * 6.1) * 1.5)
+            * cos(terrainWorldPosition.z * 7.9 - terrainWorldPosition.x * 4.8);
+          float terrainMicroCove = pow(max(0.0, sin(terrainWorldPosition.x * 11.2
+            + terrainWorldPosition.z * 9.3 + terrainFineLift * 1.3)), 6.0);
           float terrainSpineWave = sin(terrainWorldPosition.x * 0.57
             + sin(terrainWorldPosition.z * 0.34) * 1.9)
             * cos(terrainWorldPosition.z * 0.46 - terrainWorldPosition.x * 0.22);
@@ -1385,7 +1391,9 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             + terrainFold * ${height >= 2 ? "0.012" : height === 1 ? "0.005" : "0.0015"}
             + terrainRill * ${height >= 2 ? "0.0035" : "0.001"}
             + terrainShoulder * ${height >= 2 ? "0.014" : height === 1 ? "0.004" : "0.0005"}
-            - terrainErosionPocket * ${height >= 2 ? "0.0038" : "0.0008"});
+            + terrainRidgeSplit * ${height >= 2 ? "0.0028" : height === 1 ? "0.0009" : "0.0002"}
+            - terrainErosionPocket * ${height >= 2 ? "0.0038" : "0.0008"}
+            - terrainMicroCove * ${height >= 2 ? "0.0019" : "0.00025"});
           vTerrainWorldPosition = terrainWorldPosition.xyz;`,
         );
         shader.fragmentShader = shader.fragmentShader.replace(
@@ -1532,7 +1540,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             - exposedMineral * 0.045 - frostGranule * 0.018, 0.0, 1.0);`,
         );
       };
-      material.customProgramCacheKey = () => "tide-terrain-ridgeline-scree-alpine-v9-cleavage-edge-roots-" + height;
+      material.customProgramCacheKey = () => "tide-terrain-ridgeline-scree-alpine-v10-dense-microrelief-" + height;
     };
     const installBlackMistVeil = (material: THREE.MeshBasicMaterial) => {
       material.onBeforeCompile = (shader) => {
@@ -2298,7 +2306,9 @@ vFoliageAltitude = 0.0;
       // 不改變格子中心、邏輯高度或可放置範圍，避免方塊拼接感。
       const halfY = groundTop(height) * 0.5;
       const bevel = 0.022;
-      const geometry = new THREE.BoxGeometry(0.98, groundTop(height), 0.98, 8, 2, 8);
+      // 高地使用更密的共享頂面網格，讓山脊、侵蝕槽與頂面起伏能形成連續輪廓，
+      // 仍然只建立四套高度幾何，不按地塊重複分配頂點。
+      const geometry = new THREE.BoxGeometry(0.98, groundTop(height), 0.98, 16, 3, 16);
       const positions = geometry.getAttribute("position");
       for (let i = 0; i < positions.count; i++) {
         let x = positions.getX(i);
