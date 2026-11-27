@@ -3859,15 +3859,27 @@ vSlipWake = 0.0;
         } else {
           const nx = (cell.x - mapCenterX) / mapWidth;
           const nz = (cell.z - mapCenterZ) / mapDepth;
+          // 低頻域扭曲打散正弦場的規則波紋，讓森林、裸岩與古遺跡斑塊更像自然侵蝕形成。
+          // 使用地圖正規化座標與固定數學場，不依賴畫面時間，重建時生態分布完全一致。
+          const biomeWarpX = (
+            Math.sin(nx * 6.8 + nz * 4.1) +
+            Math.cos(nz * 9.3 - nx * 3.2)
+          ) * 0.018;
+          const biomeWarpZ = (
+            Math.cos(nz * 7.1 + nx * 5.6) +
+            Math.sin(nx * 8.4 - nz * 2.7)
+          ) * 0.018;
+          const biomeX = nx + biomeWarpX;
+          const biomeZ = nz + biomeWarpZ;
           const mossField =
-            Math.sin(nx * 13.1 + nz * 5.3 + 0.7) * 0.5 +
-            Math.cos(nz * 12.4 - nx * 4.8) * 0.5;
+            Math.sin(biomeX * 13.1 + biomeZ * 5.3 + 0.7) * 0.5 +
+            Math.cos(biomeZ * 12.4 - biomeX * 4.8) * 0.5;
           const ridgeField =
-            Math.sin(nx * 8.2 - nz * 12.6 + 1.2) * 0.5 +
-            Math.cos((nx + nz) * 10.5) * 0.5;
+            Math.sin(biomeX * 8.2 - biomeZ * 12.6 + 1.2) * 0.5 +
+            Math.cos((biomeX + biomeZ) * 10.5) * 0.5;
           const relicField =
-            Math.sin(nx * 10.6 + nz * 9.4 + 2.2) * 0.5 +
-            Math.cos(nx * 7.1 - nz * 13.7) * 0.5;
+            Math.sin(biomeX * 10.6 + biomeZ * 9.4 + 2.2) * 0.5 +
+            Math.cos(biomeX * 7.1 - biomeZ * 13.7) * 0.5;
           if (cell.h >= 2 && relicField > 0.48) region = "ancient";
           else if (cell.h >= 2 && ridgeField > -0.05) region = "limestone";
           else if (cell.h >= 1 && mossField > -0.2) region = "moss";
