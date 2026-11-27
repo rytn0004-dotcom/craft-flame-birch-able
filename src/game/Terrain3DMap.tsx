@@ -4580,7 +4580,7 @@ vWindRibbon = 0.0;
           const veilTint = new THREE.Color();
           for (let i = 0; i < veilCount; i++) {
             const edge = veilCandidates[Math.min(veilCandidates.length - 1, Math.floor((i + 0.5) * veilCandidates.length / veilCount))];
-            const scaleX = 2.35 + edge.seed * 2.15;
+            const scaleX = 1.45 + edge.seed * 0.58;
             // 霧幕往地塊外側退，並貼近海面抬起；頂緣不越過相鄰低地的地表高度。
             const scaleY = 0.62 + edge.seed * 0.42;
             const x = edge.x + edge.dx * 0.78;
