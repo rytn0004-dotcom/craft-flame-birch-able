@@ -7373,6 +7373,7 @@ vFoliageAltitude = 0.0;
         { dc: -1, dr: 0, dx: -0.46, dz: 0, sx: 0.08, sz: 0.94 },
       ];
       const cliffFaces: { x: number; y: number; z: number; sx: number; sy: number; sz: number; bandY: number; upperBandY: number }[] = [];
+      const cliffMineralVeins: { x: number; y: number; z: number; rot: number; height: number; width: number; tint: string }[] = [];
       const rockCracks: { x: number; y: number; z: number; nx: number; nz: number; height: number; width: number; seed: number }[] = [];
       const caveEntrances: { x: number; y: number; z: number; rot: number; scale: number }[] = [];
       const cliffRibs: { x: number; y: number; z: number; rot: number; height: number; tint: string }[] = [];
@@ -7407,6 +7408,27 @@ vFoliageAltitude = 0.0;
             bandY: low + (high - low) * 0.28,
             upperBandY: low + (high - low) * 0.68,
           });
+
+          // 岩壁偶爾露出彎曲的石英／青銅礦脈，作為真正凸起的細節而非單靠貼圖。
+          const veinSeed = Math.abs(Math.sin(cell.x * 101.3 + cell.z * 47.9
+            + d.dc * 31.7 + d.dr * 17.3) * 31871.73) % 1;
+          const veinClear = !protectedBuildings.some((building) =>
+            Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 0.54,
+          );
+          if (cell.h >= 2 && veinSeed > 0.88 && cliffMineralVeins.length < 240 && veinClear) {
+            const faceAngle = Math.atan2(d.dx, d.dz);
+            const along = (veinSeed - 0.5) * 0.42;
+            const isAncient = terrainRegion(cell) === "ancient";
+            cliffMineralVeins.push({
+              x: cell.x + d.dx * 0.51 + Math.cos(faceAngle) * along,
+              y: low + (high - low) * (0.48 + (veinSeed - 0.5) * 0.16),
+              z: cell.z + d.dz * 0.51 - Math.sin(faceAngle) * along,
+              rot: faceAngle,
+              height: (high - low) * (0.34 + veinSeed * 0.24),
+              width: 0.034 + veinSeed * 0.018,
+              tint: isAncient ? "#79c9c0" : veinSeed > 0.95 ? "#d9d0b9" : "#a9b9b0",
+            });
+          }
 
           // 依高度做出 1／2／3 層不同的岩台外沿：層數就是高度等級，岩沿逐層向外挑出。
           const rimRot = d.dc === 0 ? 0 : Math.PI / 2;
@@ -7639,6 +7661,66 @@ vFoliageAltitude = 0.0;
         capMesh.receiveShadow = true;
         terrainRoot.add(cliffMesh, bandMesh, upperBandMesh, capMesh);
       }
+      if (cliffMineralVeins.length) {
+        // 彎曲礦脈以 11 段 × 3 條頂點帶建模，細端自然收尖並稍微離開岩面。
+        const veinPositions: number[] = [];
+        const veinColors: number[] = [];
+        const veinIndices: number[] = [];
+        const veinRows = 11;
+        const veinRails = [-1, 0, 1];
+        for (let row = 0; row < veinRows; row++) {
+          const t = row / (veinRows - 1);
+          const taper = Math.pow(Math.sin(Math.PI * t), 0.42);
+          for (let rail = 0; rail < veinRails.length; rail++) {
+            const across = veinRails[rail];
+            const center = Math.sin(t * 5.7 + 0.4) * 0.16 + Math.sin(t * 11.3) * 0.055;
+            const halfWidth = (0.24 + Math.sin(t * 8.0 + 0.8) * 0.055) * taper;
+            veinPositions.push(
+              center + across * halfWidth,
+              t - 0.5,
+              0.004 + (1 - Math.abs(across)) * (0.012 + taper * 0.006),
+            );
+            const highlight = 0.82 + (1 - Math.abs(across)) * 0.22 + taper * 0.08;
+            veinColors.push(highlight * 0.82, highlight * 0.91, highlight);
+          }
+        }
+        for (let row = 0; row < veinRows - 1; row++) {
+          for (let rail = 0; rail < veinRails.length - 1; rail++) {
+            const a = row * veinRails.length + rail;
+            const b = a + veinRails.length;
+            veinIndices.push(a, a + 1, b, a + 1, b + 1, b);
+          }
+        }
+        const veinGeometry = new THREE.BufferGeometry();
+        veinGeometry.setAttribute("position", new THREE.Float32BufferAttribute(veinPositions, 3));
+        veinGeometry.setAttribute("color", new THREE.Float32BufferAttribute(veinColors, 3));
+        veinGeometry.setIndex(veinIndices);
+        veinGeometry.computeVertexNormals();
+        veinGeometry.computeBoundingSphere();
+        const veins = new THREE.InstancedMesh(
+          veinGeometry,
+          shared.limestoneVein,
+          cliffMineralVeins.length,
+        );
+        const veinDummy = new THREE.Object3D();
+        const veinTint = new THREE.Color();
+        for (let i = 0; i < cliffMineralVeins.length; i++) {
+          const vein = cliffMineralVeins[i];
+          veinDummy.position.set(vein.x, vein.y, vein.z);
+          veinDummy.rotation.set(0, vein.rot, 0);
+          veinDummy.scale.set(vein.width, vein.height, 1);
+          veinDummy.updateMatrix();
+          veins.setMatrixAt(i, veinDummy.matrix);
+          veinTint.set(vein.tint);
+          veins.setColorAt(i, veinTint);
+        }
+        veins.instanceMatrix.needsUpdate = true;
+        if (veins.instanceColor) veins.instanceColor.needsUpdate = true;
+        veins.castShadow = false;
+        veins.receiveShadow = false;
+        terrainRoot.add(veins);
+      }
+
       if (rockCracks.length) {
         const crackMesh = new THREE.InstancedMesh(
           new THREE.BoxGeometry(1, 1, 1),
