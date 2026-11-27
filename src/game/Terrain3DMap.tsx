@@ -1554,6 +1554,19 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             + terrainWorld.y * 1.7 + middleGrain * 2.4))), 20.0) * highlandStrength;
           float frostGranule = pow(max(0.0, sin(terrainWorld.x * 22.7
             + terrainWorld.y * 18.3 + ridgeMacro * 5.0)), 14.0) * frostDrift * highlandStrength;
+          // 花崗片麻岩的細層理、鐵質氧化暈與冰晶微閃，讓高地近景不只靠大塊色差辨識。
+          float graniteLayer = pow(max(0.0,
+            1.0 - abs(sin(terrainWorld.x * 1.14 + terrainWorld.y * 0.72 + ridgeMacro * 1.9))), 25.0)
+            * highlandStrength;
+          float roseIronWash = smoothstep(0.68, 0.94,
+            sin(terrainWorld.x * 0.31 + terrainWorld.y * 0.23 + middleGrain * 1.1) * 0.5 + 0.5)
+            * highlandStrength * (1.0 - frostDrift * 0.7);
+          float micaFlake = pow(max(0.0,
+            sin(terrainWorld.x * 27.3 + middleGrain * 2.1)
+            * cos(terrainWorld.y * 24.7 - middleGrain * 1.6)), 18.0) * highlandStrength;
+          float glacialMicroRill = pow(max(0.0,
+            1.0 - abs(sin(terrainWorld.x * 4.9 - terrainWorld.y * 3.6 + ridgeMacro * 3.2))), 22.0)
+            * frostDrift * highlandStrength;
           diffuseColor.rgb *= mix(vec3(0.78, 0.84, 0.92), vec3(1.05, 1.02, 0.94),
             ridgeContour * highlandStrength * 0.24);
           diffuseColor.rgb += vec3(0.045, 0.073, 0.11)
@@ -1577,6 +1590,12 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           diffuseColor.rgb *= 1.0 - graniteCleavage * 0.19;
           diffuseColor.rgb += vec3(0.15, 0.19, 0.22) * frostGranule * 0.16;
           diffuseColor.rgb += vec3(0.045, 0.052, 0.058) * graniteCleavage * 0.12;
+          diffuseColor.rgb *= mix(vec3(1.035, 0.99, 0.94), vec3(0.91, 0.84, 0.78),
+            roseIronWash * 0.16);
+          diffuseColor.rgb *= 1.0 - graniteLayer * 0.11;
+          diffuseColor.rgb += vec3(0.11, 0.14, 0.17) * graniteLayer * 0.18;
+          diffuseColor.rgb += vec3(0.17, 0.19, 0.2) * micaFlake * 0.2;
+          diffuseColor.rgb += vec3(0.13, 0.19, 0.24) * glacialMicroRill * 0.14;
           // 高層地形的冷色晶脈更明顯，低地則保留柔暖草土色。
           float ridgeGlint = pow(max(0.0,
             sin(terrainWorld.x * 0.29 + terrainWorld.y * 0.21 + middleGrain)
