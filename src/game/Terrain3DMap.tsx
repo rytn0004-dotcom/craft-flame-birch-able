@@ -1482,7 +1482,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
       material.onBeforeCompile = (shader) => {
         shader.vertexShader = shader.vertexShader.replace(
           "#include <common>",
-          "#include <common>\nvarying vec3 vTerrainWorldPosition;\nvarying vec3 vTerrainLocalPosition;\nvarying float vTerrainTopFacing;",
+          "#include <common>\nvarying vec3 vTerrainWorldPosition;\nvarying vec3 vTerrainLocalPosition;\nvarying float vTerrainTopFacing;\nvarying float vTerrainSideFacing;",
         );
         shader.vertexShader = shader.vertexShader.replace(
           "#include <begin_vertex>",
@@ -1497,7 +1497,19 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           // and the actual logical tile height stay untouched; the subdivided shared mesh
           // lets the silhouette catch light without creating CPU-side per-tile animation.
           float terrainTopMask = smoothstep(0.86, 0.98, normal.y);
+          float terrainSideMask = 1.0 - smoothstep(0.12, 0.82, abs(normal.y));
           vTerrainTopFacing = terrainTopMask;
+          vTerrainSideFacing = terrainSideMask;
+          // 側壁以世界座標刻出垂直雨蝕槽與斷裂孔；只有視覺頂點微移，不改格子高度與碰撞。
+          float sideRunoff = sin(terrainWorldPosition.y * 15.7
+            + sin(terrainWorldPosition.x * 4.9 + terrainWorldPosition.z * 3.7) * 1.8)
+            * cos(terrainWorldPosition.y * 9.3 - terrainWorldPosition.x * 2.1
+              + terrainWorldPosition.z * 2.7);
+          float sidePitting = pow(max(0.0, sin(terrainWorldPosition.x * 17.1
+            + terrainWorldPosition.z * 13.7 + terrainWorldPosition.y * 23.3)), 8.0);
+          float sideRelief = sideRunoff * 0.0018 - sidePitting * 0.00125;
+          transformed.x += normal.x * sideRelief * terrainSideMask;
+          transformed.z += normal.z * sideRelief * terrainSideMask;
           float terrainCrest = sin(terrainWorldPosition.x * 1.72
             + sin(terrainWorldPosition.z * 1.13) * 1.2)
             * cos(terrainWorldPosition.z * 1.48 - terrainWorldPosition.x * 0.64);
@@ -1549,7 +1561,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <common>",
-          "#include <common>\nvarying vec3 vTerrainWorldPosition;",
+          "#include <common>\nvarying vec3 vTerrainWorldPosition;\nvarying float vTerrainSideFacing;",
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <color_fragment>",
@@ -1589,7 +1601,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             1.0 - abs(sin(terrainWorld.x * 2.9 + terrainWorld.y * 2.1 + broadMottle * 2.5))), 16.0);
           float terrainRootThread = pow(max(0.0, sin(terrainWorld.x * 20.1
             - terrainWorld.y * 16.7 + middleGrain * 3.1)), 12.0)
-            * (1.0 - sunlitMeadow * 0.42);
+            * (0.9 + broadMottle * 0.05);
           float mineralSpeck = pow(max(0.0, sin(terrainWorld.x * 0.73 + terrainWorld.y * 0.51 + ${height.toFixed(1)})
             * cos(terrainWorld.y * 0.67 - terrainWorld.x * 0.39)), 10.0);
           float terrainColorNoise = broadMottle * 0.5 + 0.5 + middleGrain * 0.08;
@@ -1626,11 +1638,26 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           float quartzSeam = pow(max(0.0,
             sin(terrainWorld.x * 0.41 + cos(terrainWorld.y * 0.29) * 2.0)
             * cos(terrainWorld.y * 0.37 - terrainWorld.x * 0.18)), 10.0);
+          // 垂直岩壁有獨立於頂面的沉積色帶、雨痕與崩解孔，讓側面不再只是暗色方塊。
+          float sideSediment = smoothstep(0.58, 0.92,
+            sin(terrainWorld.x * 0.27 + terrainWorld.y * 0.19
+              + sin(terrainWorld.x * 0.11) * 1.7) * 0.5 + 0.5);
+          float sideRunoffStain = pow(max(0.0, 1.0 - abs(sin(
+            terrainWorld.x * 3.1 + sin(terrainWorld.y * 1.6) * 1.9))), 9.0);
+          float sideFractureDust = pow(max(0.0, sin(terrainWorld.x * 23.7
+            + terrainWorld.y * 19.1 + middleGrain * 2.4)), 12.0);
+          float sideWeathering = vTerrainSideFacing * (0.35 + sideSediment * 0.65);
           diffuseColor.rgb = mix(diffuseColor.rgb,
             diffuseColor.rgb * vec3(1.12, 1.025, 0.88), meadowPigment * 0.085);
           diffuseColor.rgb = mix(diffuseColor.rgb,
             diffuseColor.rgb * vec3(0.87, 1.055, 1.105), dewPigment * 0.09);
           diffuseColor.rgb += vec3(0.075, 0.105, 0.13) * quartzSeam * 0.28;
+          diffuseColor.rgb = mix(diffuseColor.rgb,
+            diffuseColor.rgb * vec3(0.84, 0.91, 0.88), sideWeathering * 0.18);
+          diffuseColor.rgb = mix(diffuseColor.rgb,
+            diffuseColor.rgb * vec3(0.69, 0.78, 0.76), sideRunoffStain * vTerrainSideFacing * 0.14);
+          diffuseColor.rgb += vec3(0.12, 0.15, 0.16)
+            * sideFractureDust * vTerrainSideFacing * 0.1;
           // 高地生成專屬的風蝕等高紋與裸岩脊線；由世界座標取樣，跨地塊連續且每局穩定。
           float ridgeMacro = sin(terrainWorld.x * 0.38 + sin(terrainWorld.y * 0.27) * 2.1 + ${height.toFixed(1)})
             * cos(terrainWorld.y * 0.34 - terrainWorld.x * 0.16);
@@ -1726,10 +1753,12 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             + microEtch * 0.012 + gritPore * 0.028 + tileEdgeWear * 0.075
             + edgeRootStain * 0.055 + graniteCleavage * 0.085
             + terrainMicroStrata * 0.035 + terrainRootThread * 0.026
+            + sideFractureDust * vTerrainSideFacing * 0.055
+            + sideRunoffStain * vTerrainSideFacing * 0.035
             - terrainDewFilm * 0.018 - exposedMineral * 0.045 - frostGranule * 0.018, 0.0, 1.0);`,
         );
       };
-      material.customProgramCacheKey = () => "tide-terrain-ridgeline-scree-alpine-v12-moraine-wet-seams-edge-fracture-" + height;
+      material.customProgramCacheKey = () => "tide-terrain-ridgeline-scree-alpine-v13-side-runoff-strata-high-tessellation-" + height;
     };
     const installBlackMistVeil = (material: THREE.MeshBasicMaterial) => {
       material.onBeforeCompile = (shader) => {
@@ -1960,7 +1989,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
     // and rounded/chipped edges instead of the hard cube silhouette of stretched BoxGeometry.
     const cliffBlockGeometry = (() => {
       // 共用崖壁幾何增加適度細分，讓每個岩層切面能承接細碎風化，而非平滑長方盒。
-      const geometry = new THREE.BoxGeometry(1, 1, 1, 10, 10, 6);
+      const geometry = new THREE.BoxGeometry(1, 1, 1, 12, 12, 8);
       const positions = geometry.getAttribute("position");
       for (let vertex = 0; vertex < positions.count; vertex++) {
         let x = positions.getX(vertex);
@@ -1989,13 +2018,15 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
         const sideMask = Math.max(xFace, zFace)
           * (1.0 - THREE.MathUtils.smoothstep(Math.abs(y), 0.43, 0.5));
         const bedRelief = Math.sin(y * 31.0
-          + Math.sin(x * 12.7 + z * 9.3) * 1.4 + strata * 0.7) * 0.0018 * sideMask;
+          + Math.sin(x * 12.7 + z * 9.3) * 1.4 + strata * 0.7) * 0.0021 * sideMask;
         const faultNotch = Math.pow(Math.max(0, Math.sin(y * 48.0
           + x * 17.0 - z * 19.0 + erosion * 2.0)), 9.0) * sideMask;
+        const dripGroove = Math.pow(Math.max(0, 1.0 - Math.abs(Math.sin(
+          y * 39.0 + Math.sin(x * 15.0 + z * 11.0) * 1.7 + strata))), 7.0) * sideMask;
         const chippedLip = Math.pow(Math.max(0, Math.sin(x * 37.0
           + z * 31.0 + strata * 2.2)), 10.0) * edgeWear;
-        if (xFace > 0) x += Math.sign(x) * (bedRelief - faultNotch * 0.0022);
-        if (zFace > 0) z += Math.sign(z) * (bedRelief - faultNotch * 0.0022);
+        if (xFace > 0) x += Math.sign(x) * (bedRelief - faultNotch * 0.0024 - dripGroove * 0.0013);
+        if (zFace > 0) z += Math.sign(z) * (bedRelief - faultNotch * 0.0024 - dripGroove * 0.0013);
         x += erosion * 0.0038 + strata * edgeWear * 0.0018;
         y += grain * 0.0031 + Math.sin(strata * 1.7) * 0.0012 - chippedLip * 0.0024;
         z += erosion * 0.0041 - strata * edgeWear * 0.0016;
@@ -2129,7 +2160,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
           ].join("\\n"),
         );
       };
-      material.customProgramCacheKey = () => "tide-cliff-strata-world-weathering-v6-fault-undercut-salt";
+      material.customProgramCacheKey = () => "tide-cliff-strata-world-weathering-v7-drip-grooves-side-relief";
     };
     installCliffStrata(shared.cliff);
 
@@ -2589,10 +2620,9 @@ vWindRibbon = 0.0;
       // 每個地塊使用共享倒角岩台：頂面邊緣微圓、側壁略帶收分，
       // 不改變格子中心、邏輯高度或可放置範圍，避免方塊拼接感。
       const halfY = groundTop(height) * 0.5;
-      const bevel = 0.03;
-      // 高地使用更密的共享頂面網格，讓山脊、侵蝕槽與頂面起伏能形成連續輪廓，
-      // 仍然只建立四套高度幾何，不按地塊重複分配頂點。
-      const geometry = new THREE.BoxGeometry(0.98, groundTop(height), 0.98, 16, 3, 16);
+      const bevel = 0.034;
+      // 共享頂面與側壁同時提高細分；四套高度幾何仍被所有地塊共用。
+      const geometry = new THREE.BoxGeometry(0.98, groundTop(height), 0.98, 20, 5, 20);
       const positions = geometry.getAttribute("position");
       for (let i = 0; i < positions.count; i++) {
         let x = positions.getX(i);
@@ -5529,12 +5559,12 @@ vWindRibbon = 0.0;
         : [];
       if (groveCells.length) {
         const trunks = new THREE.InstancedMesh(
-          new THREE.CylinderGeometry(0.075, 0.13, 0.88, 16, 5),
+          new THREE.CylinderGeometry(0.075, 0.13, 0.88, 20, 7),
           shared.treeBark,
           groveCells.length,
         );
         const rootFlare = new THREE.InstancedMesh(
-          new THREE.CylinderGeometry(0.025, 0.072, 0.42, 12, 3),
+          new THREE.CylinderGeometry(0.025, 0.072, 0.42, 16, 4),
           shared.treeBark,
           groveCells.length * 3,
         );
@@ -5543,7 +5573,7 @@ vWindRibbon = 0.0;
         const branchGeometry = (() => {
           const positions: number[] = [];
           const indices: number[] = [];
-          const radialSegments = 7;
+          const radialSegments = 9;
           const appendBranch = (
             angle: number,
             startRadius: number,
@@ -5555,7 +5585,7 @@ vWindRibbon = 0.0;
             sway: number,
           ) => {
             const base = positions.length / 3;
-            const rows = 6;
+            const rows = 8;
             const sideX = -Math.sin(angle);
             const sideZ = Math.cos(angle);
             const axisX = Math.cos(angle) * reach;
