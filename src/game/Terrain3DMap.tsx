@@ -1770,7 +1770,43 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             diffuseColor.rgb * vec3(0.82, 1.015, 1.18),
             ridgeGlint * ${height >= 2 ? "0.16" : "0.025"});
           diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.88, 1.06, 1.12),
-            lichenField * ${height >= 1 ? "0.068" : "0.02"});`,
+            lichenField * ${height >= 1 ? "0.068" : "0.02"});
+          // 高地新增「風蝕岩層＋礦物色脈」：用世界座標連續取樣，跨格不重複、不形成貼圖接縫。
+          // 頂面保留草土色，側壁則依高度顯示不同沉積層，讓 Lv.1–Lv.3 有清楚的地質身份。
+          float strataFlow = terrainWorld.y * 5.6
+            + terrainWorld.x * 0.34
+            + sin(terrainWorld.x * 0.73 + terrainWorld.y * 0.41) * 1.25
+            + middleGrain * 1.1;
+          float strataBand = pow(max(0.0, 1.0 - abs(sin(strataFlow))), 13.0);
+          float strataWeather = smoothstep(0.28, 0.86,
+            sin(terrainWorld.x * 0.21 - terrainWorld.y * 0.17 + broadMottle) * 0.5 + 0.5);
+          float exposedRockFace = vTerrainSideFacing * highlandStrength;
+          float softTopTransition = vTerrainTopFacing * highlandStrength
+            * (1.0 - smoothstep(0.12, 0.42, tileEdgeDistance));
+          float ironOxideVein = pow(max(0.0,
+            sin(terrainWorld.x * 0.91 + terrainWorld.y * 0.37 + middleGrain * 1.7)
+            * cos(terrainWorld.y * 0.68 - terrainWorld.x * 0.29)), 9.0);
+          float alpineSunWash = smoothstep(0.34, 0.92,
+            sin(terrainWorld.x * 0.16 + terrainWorld.y * 0.11 + ridgeMacro) * 0.5 + 0.5)
+            * exposedCrest * highlandStrength;
+          float quartzEdgeSpark = pow(max(0.0,
+            sin(terrainWorld.x * 19.7 + terrainWorld.y * 14.3 + ridgeMacro * 3.0)), 18.0)
+            * (highlandStrength * 0.7 + softTopTransition * 0.3);
+          diffuseColor.rgb = mix(diffuseColor.rgb,
+            diffuseColor.rgb * vec3(0.78, 0.86, 0.9),
+            strataBand * exposedRockFace * 0.19);
+          diffuseColor.rgb += vec3(0.12, 0.075, 0.045)
+            * strataBand * exposedRockFace * 0.12;
+          diffuseColor.rgb = mix(diffuseColor.rgb,
+            diffuseColor.rgb * vec3(1.13, 0.91, 0.76),
+            ironOxideVein * exposedRockFace * 0.11);
+          diffuseColor.rgb = mix(diffuseColor.rgb,
+            diffuseColor.rgb * vec3(0.9, 1.08, 0.92),
+            strataWeather * softTopTransition * 0.13);
+          diffuseColor.rgb = mix(diffuseColor.rgb,
+            diffuseColor.rgb * vec3(1.12, 1.08, 0.96),
+            alpineSunWash * 0.16);
+          diffuseColor.rgb += vec3(0.13, 0.18, 0.21) * quartzEdgeSpark * 0.12;`,
         );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <roughnessmap_fragment>",
@@ -1878,7 +1914,7 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
             + vec3(0.009, 0.019, 0.047) * veilPressureFold * 0.12;`,
         );
       };
-      material.customProgramCacheKey = () => "tide-black-mist-torn-depth-veil-v6-low-shoreline-clear-highlands";
+      material.customProgramCacheKey = () => "tide-black-mist-torn-depth-veil-v7-geologic-highland-contrast";
     };
     installSanctuarySigil(shared.sanctuarySigil);
     installRoadFlow(shared.roadGuide);
@@ -2447,17 +2483,17 @@ vWindRibbon = 0.0;
           + bladeGrainPhase) * 0.16;
         float shearFlutter = sin(shearBand * 3.2 + foliagePhase * 1.6 + position.y * 7.4
           + bladeEdgeFlutter * 2.0) * 0.2;
-        float foliageSway = (foliageWave + foliageFlutter + leafRipple + shearFlutter
-          + (gustLobe - 0.42) * 0.34 + ridgeUpdraft * 0.28
-          + (gustWhorl - 0.3) * 0.19) * gustStrength;
+        float foliageSway = (foliageWave + foliageFlutter * 1.12 + leafRipple * 1.14 + shearFlutter * 1.12
+          + (gustLobe - 0.42) * 0.39 + ridgeUpdraft * 0.32
+          + (gustWhorl - 0.3) * 0.23) * gustStrength;
         float gustLean = smoothstep(-0.18, 0.78, travelingGust) * foliageMask;
         float shearLean = (shearFront - 0.32) * foliageMask;
-        transformed.x += (foliageSway * 0.098 + gustLean * 0.032
-          + crossFront * 0.014 + shearLean * 0.012
-          + bladeTipFlicker * 0.009 * smoothstep(0.12, 0.9, position.y)) * foliageMask;
+        transformed.x += (foliageSway * 0.112 + gustLean * 0.038
+          + crossFront * 0.017 + shearLean * 0.015
+          + bladeTipFlicker * 0.011 * smoothstep(0.12, 0.9, position.y)) * foliageMask;
         transformed.z += (cos(uFoliageTime * 0.91 + foliagePhase * 1.27 + position.y * 1.8)
-          + foliageFlutter * 0.45 + gustLean * 0.34 + crossFront * 0.1
-          + shearFlutter * 0.18 + bladeEdgeFlutter) * 0.054 * foliageMask;
+          + foliageFlutter * 0.52 + gustLean * 0.39 + crossFront * 0.12
+          + shearFlutter * 0.22 + bladeEdgeFlutter * 1.12) * 0.06 * foliageMask;
         vec2 slipRelative = instanceMatrix[3].xz - uSlipPosition;
         float slipAlong = dot(slipRelative, uSlipDirection);
         vec2 slipPerpendicular = vec2(-uSlipDirection.y, uSlipDirection.x);
@@ -2538,8 +2574,8 @@ vWindRibbon = 0.0;
     };
     installFoliageWind(shared.foliageWind, "tide-foliage-wind-v8-pressure-sweep");
     installFoliageWind(shared.treeCanopyWind, "tide-tree-canopy-gust-v4-pressure-sweep", 2.4);
-    installFoliageWind(shared.grass, "tide-grass-stem-wind-v7-pressure-sweep", 1.45, 0.34);
-    installFoliageWind(shared.grassBlade, "tide-grass-blade-wind-v10-pressure-sweep", 2.35, 0.88);
+    installFoliageWind(shared.grass, "tide-grass-stem-wind-v8-ridge-gust", 1.45, 0.34);
+    installFoliageWind(shared.grassBlade, "tide-grass-blade-wind-v11-ridge-gust", 2.35, 0.88);
     // 高地矮生草具有較硬的根部與較短的葉身：受高速尾流時側偏較小，但仍會有可見的壓低與回彈。
     installFoliageWind(shared.alpineBlade, "tide-alpine-rosette-wind-v2-pressure-sweep", 0.82, 0.48);
     installFoliageWind(shared.alpineBloom, "tide-alpine-frost-bloom-wind-v2-pressure-sweep", 1.12, 0.12);
