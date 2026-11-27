@@ -7568,6 +7568,7 @@ vFoliageAltitude = 0.0;
       const cliffLedges: { x: number; y: number; z: number; rot: number }[] = [];
       const cliffShelves: { x: number; y: number; z: number; rot: number; width: number; depth: number; height: number; tint: string }[] = [];
       const cliffMosses: { x: number; y: number; z: number; rot: number; width: number; depth: number; tint: string }[] = [];
+      const cliffRootCurtains: { x: number; y: number; z: number; rot: number; height: number; tint: string }[] = [];
       const heightRims: { x: number; y: number; z: number; rot: number; width: number; depth: number; tint: string }[] = [];
       const cliffFragments: {
         x: number; y: number; z: number;
@@ -7655,6 +7656,29 @@ vFoliageAltitude = 0.0;
               width: 0.13 + mossSeed * 0.2,
               depth: 0.075 + mossSeed * 0.045,
               tint: mossSeed > 0.93 ? "#a4b66f" : "#637f5b",
+            });
+          }
+
+          // 崖緣垂根：沿高低差側壁生長細長根鬚，將草土平台與裸岩斷面連成自然過渡。
+          // 根鬚是一個共享彎曲帶狀幾何的實例批次，沿用 GPU 微風，不逐根建立動畫 Mesh。
+          const rootSeed = Math.abs(Math.sin(cell.x * 89.3 + cell.z * 53.7
+            + d.dc * 27.1 + d.dr * 41.9) * 27491.73) % 1;
+          const rootHeight = Math.min(ridgeVertical * 0.86, 0.92 + rootSeed * 0.22);
+          if (
+            cell.h >= 2 && neighbor && neighbor.h > 0 && ridgeVertical >= 0.78 &&
+            rootSeed > 0.79 && cliffRootCurtains.length < 190 && rootHeight > 0.48 &&
+            !protectedBuildings.some((building) =>
+              Math.hypot(cell.x - building.x, cell.z - building.z) < building.radius + 1.18,
+            )
+          ) {
+            const along = (rootSeed - 0.5) * 0.62;
+            cliffRootCurtains.push({
+              x: cell.x + d.dx * 0.512 + (d.dc === 0 ? along : 0),
+              y: high - rootHeight + 0.018,
+              z: cell.z + d.dz * 0.512 + (d.dr === 0 ? along : 0),
+              rot: Math.atan2(d.dx, d.dz),
+              height: rootHeight,
+              tint: rootSeed > 0.94 ? "#a1a16e" : rootSeed > 0.87 ? "#728a60" : "#506f59",
             });
           }
 
@@ -8264,6 +8288,72 @@ vFoliageAltitude = 0.0;
         moss.castShadow = false;
         moss.receiveShadow = true;
         terrainRoot.add(moss);
+      }
+
+      if (cliffRootCurtains.length) {
+        const rootPositions: number[] = [];
+        const rootIndices: number[] = [];
+        const rootRows = 15;
+        const rootRails = [-1, 0, 1];
+        // Four twisting root strands share one curved ribbon mesh; varying lengths, offsets and curl prevent a fringe-like repeated edge.
+        for (let strand = 0; strand < 4; strand++) {
+          const base = rootPositions.length / 3;
+          const phase = strand * 1.73 + 0.41;
+          for (let row = 0; row < rootRows; row++) {
+            const t = row / (rootRows - 1);
+            const tipTaper = 0.18 + Math.sin(Math.PI * t) * 0.82;
+            const width = (0.0048 + (strand % 2) * 0.0018) * tipTaper;
+            const offset = (strand - 1.5) * 0.064;
+            const centerX = offset + Math.sin(t * 5.2 + phase) * 0.018 * t
+              + Math.sin(t * 11.0 + phase * 0.7) * 0.005 * t;
+            const centerZ = Math.cos(t * 4.4 + phase) * 0.012 * t;
+            for (let rail = 0; rail < rootRails.length; rail++) {
+              const across = rootRails[rail];
+              rootPositions.push(
+                centerX + across * width,
+                t,
+                centerZ + across * width * 0.36,
+              );
+            }
+          }
+          for (let row = 0; row < rootRows - 1; row++) {
+            const a = base + row * rootRails.length;
+            const b = a + rootRails.length;
+            rootIndices.push(
+              a, b, a + 1, a + 1, b, b + 1,
+              a + 1, b + 1, a + 2, a + 2, b + 1, b + 2,
+            );
+          }
+        }
+        const rootGeometry = new THREE.BufferGeometry();
+        rootGeometry.setAttribute("position", new THREE.Float32BufferAttribute(rootPositions, 3));
+        rootGeometry.setIndex(rootIndices);
+        rootGeometry.computeVertexNormals();
+        rootGeometry.computeBoundingSphere();
+        const roots = new THREE.InstancedMesh(
+          rootGeometry,
+          shared.foliageWind,
+          cliffRootCurtains.length,
+        );
+        const rootDummy = new THREE.Object3D();
+        const rootTint = new THREE.Color();
+        for (let i = 0; i < cliffRootCurtains.length; i++) {
+          const root = cliffRootCurtains[i];
+          rootDummy.position.set(root.x, root.y, root.z);
+          rootDummy.rotation.set(0, root.rot, 0);
+          rootDummy.scale.set(1, root.height, 1);
+          rootDummy.updateMatrix();
+          roots.setMatrixAt(i, rootDummy.matrix);
+          rootTint.set(root.tint);
+          rootTint.offsetHSL((i % 3 - 1) * 0.008, 0.018, (i % 4 - 1.5) * 0.012);
+          roots.setColorAt(i, rootTint);
+        }
+        roots.instanceMatrix.needsUpdate = true;
+        if (roots.instanceColor) roots.instanceColor.needsUpdate = true;
+        roots.computeBoundingSphere();
+        roots.castShadow = false;
+        roots.receiveShadow = false;
+        terrainRoot.add(roots);
       }
 
       // 多級坡面連接相鄰平台；跨越 2～3 級高差時也會生成連續斜坡，
