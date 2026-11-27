@@ -5182,7 +5182,7 @@ vWindRibbon = 0.0;
       }).slice(0, 2100);
       if (grassCells.length) {
         // 彎曲漸尖的葉片取代圓錐草刺；四片葉組成一簇，並共用樹冠風場材質。
-        // Five-rail, eight-section grass blades have a cupped cross-section, raised midrib,
+        // Nine-rail, ten-section grass blades have a cupped cross-section, raised midrib,
         // slightly rolled edges and a tapered, wind-combed tip. One shared geometry still feeds one instanced batch.
         const bladeGeometry = new THREE.BufferGeometry();
         const bladeRows = [
@@ -5221,7 +5221,7 @@ vWindRibbon = 0.0;
             bladePositions.push(
               section.x + lateral,
               section.y + cup + edgeRoll + mainVein + sideVein + edgeWave + edgeSerration,
-              section.z + (rail === 3 ? 0.011 : rail === 1 || rail === 5 ? 0.004 : 0)
+              section.z + (centerRail ? 0.011 : sideRail ? 0.004 : 0)
                 + Math.sin(t * 7.0 + across * 1.8) * 0.0024,
             );
             const rootToTip = 0.18 + t * 0.67;
