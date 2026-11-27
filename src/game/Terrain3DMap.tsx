@@ -8132,6 +8132,42 @@ vFoliageAltitude = 0.0;
           return seed > 0.58;
         }).slice(0, 180);
         if (detailedRamps.length) {
+          // 坡面兩側補上順坡延伸的倒角護岩，不侵入中間通道；以批次實例呈現石材厚度。
+          const rampShoulders = new THREE.InstancedMesh(
+            cliffBlockGeometry,
+            shared.rampStep,
+            detailedRamps.length * 2,
+          );
+          rampShoulders.userData.sharedGeometry = true;
+          const shoulderDummy = new THREE.Object3D();
+          const shoulderTint = new THREE.Color();
+          for (let i = 0; i < detailedRamps.length; i++) {
+            const ramp = detailedRamps[i];
+            const slopeAngle = Math.atan(ramp.rise / 0.92);
+            const seed = Math.abs(Math.sin(ramp.x * 61.3 + ramp.z * 29.7) * 18371.9) % 1;
+            for (let sideIndex = 0; sideIndex < 2; sideIndex++) {
+              const side = sideIndex === 0 ? -1 : 1;
+              shoulderDummy.position.set(
+                ramp.x + Math.cos(ramp.rot) * side * 0.414,
+                ramp.y + ramp.rise * 0.5 + 0.026,
+                ramp.z - Math.sin(ramp.rot) * side * 0.414,
+              );
+              shoulderDummy.rotation.set(slopeAngle, ramp.rot, 0);
+              shoulderDummy.scale.set(0.082, 0.038, 0.94);
+              shoulderDummy.updateMatrix();
+              const index = i * 2 + sideIndex;
+              rampShoulders.setMatrixAt(index, shoulderDummy.matrix);
+              shoulderTint.set(seed > 0.52 ? "#c8bea2" : "#899487");
+              shoulderTint.offsetHSL((sideIndex - 0.5) * 0.012, 0.025, (seed - 0.5) * 0.06);
+              rampShoulders.setColorAt(index, shoulderTint);
+            }
+          }
+          rampShoulders.instanceMatrix.needsUpdate = true;
+          if (rampShoulders.instanceColor) rampShoulders.instanceColor.needsUpdate = true;
+          rampShoulders.castShadow = false;
+          rampShoulders.receiveShadow = true;
+          terrainRoot.add(rampShoulders);
+
           const rampPosts = new THREE.InstancedMesh(
             new THREE.BoxGeometry(0.085, 0.15, 0.09),
             shared.cliffLip,
