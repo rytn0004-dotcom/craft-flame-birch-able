@@ -1794,6 +1794,10 @@ export const Terrain3DMap = memo(function Terrain3DMap({ snapshotRef, apiRef }: 
     };
     const cliffShardGeometry = makeWeatheredRockGeometry(new THREE.IcosahedronGeometry(0.22, 1), 0.095);
     const talusStoneGeometry = makeWeatheredRockGeometry(new THREE.DodecahedronGeometry(0.075, 1), 0.13);
+    // 高地石英晶柱使用單一共享幾何，實例化時再做高度與傾角變化。
+    const ridgeCrystalGeometry = makeWeatheredRockGeometry(new THREE.OctahedronGeometry(0.075, 0), 0.12);
+    ridgeCrystalGeometry.scale(0.82, 1.65, 0.82);
+    ridgeCrystalGeometry.computeBoundingSphere();
 
     const installCliffStrata = (material: THREE.MeshStandardMaterial) => {
       material.onBeforeCompile = (shader) => {
@@ -3460,6 +3464,73 @@ vFoliageAltitude = 0.0;
           terrainPickMeshes.push(mesh);
           terrainRoot.add(mesh);
         }
+      }
+
+      // 高地稀疏長出風蝕石英晶柱，按世界格座標固定抽樣；不遮擋塔位且整批只用一個 InstancedMesh。
+      const ridgeCrystalSites: { x: number; z: number; y: number; seed: number; tint: string }[] = [];
+      for (const cell of tileCells.values()) {
+        if (cell.h < 2 || ridgeCrystalSites.length >= 112) continue;
+        const gx = Math.floor(cell.x);
+        const gy = Math.floor(cell.z);
+        const seed = Math.abs(Math.sin((gx + 19.1) * 127.1
+          + (gy - 7.7) * 311.7 + cell.h * 83.3) * 43758.5453) % 1;
+        if (seed < 0.925) continue;
+        const angle = Math.abs(Math.sin(gx * 39.7 + gy * 83.1) * 19371.7) % tau;
+        const radius = 0.2 + (seed * 7.13 % 1) * 0.17;
+        const x = cell.x + Math.cos(angle) * radius;
+        const z = cell.z + Math.sin(angle) * radius;
+        if (protectedBuildings.some((building) =>
+          Math.hypot(x - building.x, z - building.z) < building.radius + 0.22,
+        )) continue;
+        const region = terrainRegion(cell);
+        const tint = region === "ancient" ? "#83d9d2"
+          : region === "limestone" ? "#d9e4e8"
+            : region === "moss" ? "#b0d09b" : "#b9c9df";
+        ridgeCrystalSites.push({
+          x, z, y: groundTop(cell.h), seed, tint,
+        });
+      }
+      if (ridgeCrystalSites.length) {
+        const crystals = new THREE.InstancedMesh(
+          ridgeCrystalGeometry,
+          shared.ridgePeak,
+          ridgeCrystalSites.length * 2,
+        );
+        crystals.userData.sharedGeometry = true;
+        const crystalDummy = new THREE.Object3D();
+        const crystalTint = new THREE.Color();
+        for (let i = 0; i < ridgeCrystalSites.length; i++) {
+          const site = ridgeCrystalSites[i];
+          const angle = site.seed * tau;
+          for (let piece = 0; piece < 2; piece++) {
+            const pieceAngle = angle + piece * 2.35;
+            const pieceScale = piece === 0 ? 0.86 + site.seed * 0.42 : 0.38 + site.seed * 0.24;
+            const offset = piece === 0 ? 0 : 0.105;
+            crystalDummy.position.set(
+              site.x + Math.cos(pieceAngle) * offset,
+              site.y + (piece === 0 ? 0.125 : 0.06),
+              site.z + Math.sin(pieceAngle) * offset,
+            );
+            crystalDummy.rotation.set(
+              (site.seed - 0.5) * 0.36 + piece * 0.12,
+              pieceAngle,
+              (0.5 - site.seed) * 0.28 - piece * 0.16,
+            );
+            crystalDummy.scale.set(pieceScale * 0.82, pieceScale, pieceScale * 0.76);
+            crystalDummy.updateMatrix();
+            const index = i * 2 + piece;
+            crystals.setMatrixAt(index, crystalDummy.matrix);
+            crystalTint.set(site.tint);
+            crystalTint.offsetHSL(piece * 0.025, 0.035, piece === 0 ? 0.015 : -0.035);
+            crystals.setColorAt(index, crystalTint);
+          }
+        }
+        crystals.instanceMatrix.needsUpdate = true;
+        if (crystals.instanceColor) crystals.instanceColor.needsUpdate = true;
+        crystals.castShadow = false;
+        crystals.receiveShadow = true;
+        crystals.computeBoundingSphere();
+        terrainRoot.add(crystals);
       }
 
       // 生態區交界以少量貼地石縫與植被色階銜接，避免地貌像硬切換色塊。
